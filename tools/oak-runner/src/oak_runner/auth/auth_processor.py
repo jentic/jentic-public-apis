@@ -60,23 +60,6 @@ class AuthProcessor:
     def process_api_auth(
         self,
         openapi_specs: Dict[str, Dict[str, Any]],
-        arazzo_specs: List[Dict[str, Any]] | None = None,
-    ) -> dict[str, Any]:
-        """
-        Process API authentication requirements and generate auth configuration.
-        
-        Args:
-            openapi_specs: Dictionary mapping source_description_ids to OpenAPI specifications
-            arazzo_specs: List of Arazzo workflow specifications (optional)
-            
-        Returns:
-            Processed auth configuration with environment variable mappings
-        """
-        return self.process(openapi_specs, arazzo_specs)
-    
-    def process(
-        self,
-        openapi_specs: Dict[str, Dict[str, Any]],
         arazzo_specs: Optional[List[Dict[str, Any]]] = None,
     ) -> Dict[str, Any]:
         """

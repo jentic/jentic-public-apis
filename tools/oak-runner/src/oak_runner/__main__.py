@@ -169,12 +169,7 @@ async def handle_show_env_mappings(runner: OAKRunner | None, args: argparse.Name
             logger.error("Cannot fetch environment mappings: No Arazzo or OpenAPI path specified.")
             sys.exit(1)
 
-        # Ensure runner got initialized successfully
-        if not runner:
-             logger.error("Runner initialization failed.")
-             sys.exit(1)
-
-        mappings = runner.get_env_mappings()
+        mappings = OAKRunner.generate_env_mappings(runner.arazzo_doc, runner.source_descriptions)
         print(json.dumps(mappings, indent=2))
         sys.exit(0)
     except Exception as e:

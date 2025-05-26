@@ -124,8 +124,6 @@ class ServerProcessor:
             if not isinstance(server_data, dict):
                 logger.warning(f"Server entry at index {i} is not a dictionary. Skipping this entry.")
                 continue
-            logger.info('server_data:')
-            logger.info(server_data)
             try:
                 config_data = server_data.copy()
                 config_data['api_title_prefix'] = api_title_prefix
@@ -135,11 +133,11 @@ class ServerProcessor:
             except Exception as e:
                 logger.error(f"Failed to parse server entry at index {i} (URL: {server_data.get('url', 'N/A')}): {e}", exc_info=True)
         if not server_configs and raw_server_list:
-            logger.info("Found server entries in spec, but none could be parsed into ServerConfiguration objects.")
+            logger.debug("Found server entries in spec, but none could be parsed into ServerConfiguration objects.")
         elif not raw_server_list:
-            logger.info("No 'servers' defined in the OpenAPI specification.")
+            logger.debug("No 'servers' defined in the OpenAPI specification.")
         else:
-            logger.info(f"Successfully extracted {len(server_configs)} server configuration(s).")
+            logger.debug(f"Successfully extracted {len(server_configs)} server configuration(s).")
         return server_configs
 
     @staticmethod

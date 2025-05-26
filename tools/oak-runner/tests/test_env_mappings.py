@@ -13,8 +13,8 @@ from oak_runner.runner import OAKRunner
 class TestEnvMappings(unittest.TestCase):
     """Test case for environment variable mappings"""
 
-    def test_get_env_mappings_includes_server_variables(self):
-        """Test that get_env_mappings includes server variables when they exist"""
+    def test_generate_env_mappings_includes_server_variables(self):
+        """Test that generate_env_mappings includes server variables when they exist"""
         # Create mock OpenAPI specs with server variables
         mock_openapi_specs = {
             "test_api": {
@@ -51,37 +51,32 @@ class TestEnvMappings(unittest.TestCase):
             }
         }
 
-        # Create OAKRunner with mocked dependencies
-        with patch('oak_runner.http.HTTPExecutor') as mock_http_executor:
-            runner = OAKRunner(
-                arazzo_doc={},
-                source_descriptions=mock_openapi_specs,
-                auth_provider=mock_auth_provider
-            )
-
-            # Get environment mappings
-            env_mappings = runner.get_env_mappings()
+        # Patch AuthProcessor.process_api_auth to return deterministic auth mappings
+        from unittest.mock import patch
+        with patch("oak_runner.runner.AuthProcessor.process_api_auth") as mock_auth:
+            mock_auth.return_value = {"env_mappings": mock_auth_provider.env_mappings}
+            env_mappings = OAKRunner.generate_env_mappings(arazzo_doc=None, source_descriptions=mock_openapi_specs)
 
             # Verify auth mappings are included
             self.assertIn("auth", env_mappings)
             self.assertEqual(env_mappings["auth"], mock_auth_provider.env_mappings)
 
-            # Verify server mappings are included
-            self.assertIn("servers", env_mappings)
-            self.assertIn("test_api", env_mappings["servers"])
-            
-            # Verify the server URL mapping
-            server_url = "https://{environment}.api.example.com/v{version}"
-            self.assertIn(server_url, env_mappings["servers"]["test_api"])
-            
-            # Verify the variable mappings
-            server_vars = env_mappings["servers"]["test_api"][server_url]
-            self.assertIn("environment", server_vars)
-            self.assertIn("version", server_vars)
-            
-            # Verify the environment variable names
-            self.assertEqual(server_vars["environment"], "TEST_OAK_SERVER_ENVIRONMENT")
-            self.assertEqual(server_vars["version"], "TEST_OAK_SERVER_VERSION")
+        # Verify server mappings are included
+        self.assertIn("servers", env_mappings)
+        self.assertIn("test_api", env_mappings["servers"])
+        
+        # Verify the server URL mapping
+        server_url = "https://{environment}.api.example.com/v{version}"
+        self.assertIn(server_url, env_mappings["servers"]["test_api"])
+        
+        # Verify the variable mappings
+        server_vars = env_mappings["servers"]["test_api"][server_url]
+        self.assertIn("environment", server_vars)
+        self.assertIn("version", server_vars)
+        
+        # Verify the environment variable names
+        self.assertEqual(server_vars["environment"], "TEST_OAK_SERVER_ENVIRONMENT")
+        self.assertEqual(server_vars["version"], "TEST_OAK_SERVER_VERSION")
 
 
     def test_get_env_mappings_omits_servers_key_when_no_variables(self):
@@ -200,16 +195,14 @@ class TestEnvMappings(unittest.TestCase):
             ]
         }
 
-        # Create OAKRunner with mocked dependencies
-        with patch('oak_runner.http.HTTPExecutor') as mock_http_executor:
-            runner = OAKRunner(
+        # Patch AuthProcessor.process_api_auth to return deterministic auth mappings
+        from unittest.mock import patch
+        with patch("oak_runner.runner.AuthProcessor.process_api_auth") as mock_auth:
+            mock_auth.return_value = {"env_mappings": mock_auth_provider.env_mappings}
+            env_mappings = OAKRunner.generate_env_mappings(
                 arazzo_doc=mock_arazzo_doc,
-                source_descriptions=mock_openapi_specs,
-                auth_provider=mock_auth_provider
+                source_descriptions=mock_openapi_specs
             )
-
-            # Get environment mappings
-            env_mappings = runner.get_env_mappings()
 
             # Verify auth mappings are included
             self.assertIn("auth", env_mappings)
