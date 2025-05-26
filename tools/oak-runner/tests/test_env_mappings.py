@@ -55,7 +55,7 @@ class TestEnvMappings(unittest.TestCase):
         from unittest.mock import patch
         with patch("oak_runner.runner.AuthProcessor.process_api_auth") as mock_auth:
             mock_auth.return_value = {"env_mappings": mock_auth_provider.env_mappings}
-            env_mappings = OAKRunner.generate_env_mappings(arazzo_doc=None, source_descriptions=mock_openapi_specs)
+            env_mappings = OAKRunner.generate_env_mappings(arazzo_docs=[], source_descriptions=mock_openapi_specs)
 
             # Verify auth mappings are included
             self.assertIn("auth", env_mappings)
@@ -200,7 +200,7 @@ class TestEnvMappings(unittest.TestCase):
         with patch("oak_runner.runner.AuthProcessor.process_api_auth") as mock_auth:
             mock_auth.return_value = {"env_mappings": mock_auth_provider.env_mappings}
             env_mappings = OAKRunner.generate_env_mappings(
-                arazzo_doc=mock_arazzo_doc,
+                arazzo_docs=[mock_arazzo_doc],
                 source_descriptions=mock_openapi_specs
             )
 

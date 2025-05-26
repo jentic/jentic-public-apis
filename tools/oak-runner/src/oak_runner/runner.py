@@ -662,15 +662,14 @@ class OAKRunner:
 
     @staticmethod
     def generate_env_mappings(
-        arazzo_doc: Optional["ArazzoDoc"] = None,
+        arazzo_docs: Optional[list["ArazzoDoc"]] = None,
         source_descriptions: dict[str, "OpenAPIDoc"] = None,
     ) -> dict:
         """
         Static method to return the environment variable mappings for both authentication and server variables.
-        Does not require an OAKRunner instance.
 
         Args:
-            arazzo_doc: Parsed Arazzo document (optional)
+            arazzo_docs: List of parsed Arazzo documents (optional)
             source_descriptions: Dictionary of source names to OpenAPI spec dicts.
 
         Returns:
@@ -678,15 +677,13 @@ class OAKRunner:
             - 'auth': Environment variable mappings for authentication
             - 'servers': Environment variable mappings for server URLs (only included if server variables exist)
         """
-        # Create authentication environment mappings as in __init__
         auth_processor = AuthProcessor()
         auth_config = auth_processor.process_api_auth(
             openapi_specs=source_descriptions,
-            arazzo_specs=[arazzo_doc] if arazzo_doc else [],
+            arazzo_specs=arazzo_docs or [],
         )
         auth_env_mappings = auth_config.get("env_mappings", {})
 
-        # Get server variable environment mappings using ServerProcessor
         server_processor = ServerProcessor(source_descriptions or {})
         server_env_mappings = server_processor.get_env_mappings()
         result = {"auth": auth_env_mappings}
