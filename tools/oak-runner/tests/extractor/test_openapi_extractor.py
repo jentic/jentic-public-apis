@@ -6,10 +6,12 @@ Tests for the OpenAPI Extractor module.
 import pytest
 import logging
 import sys
+import json
 
 from oak_runner.extractor.openapi_extractor import (
     extract_operation_io,
-    _limit_dict_depth 
+    _limit_dict_depth,
+    _resolve_schema_refs
 )
 
 # Configure specific logger for the extractor module for debug output
@@ -331,7 +333,6 @@ def test_extracts_explicit_url_param():
     # Check the type matches the spec
     assert props["gadget_id"] == {"type": "integer"}
 
-
 def test_extract_operation_io_depth_limits():
     """
     extract_operation_io should respect input_max_depth and output_max_depth for truncating schema depth.
@@ -435,3 +436,62 @@ def test_no_params_or_body():
     result = extract_operation_io(spec, "/widgets", "get")
     assert "inputs" in result
     assert result["inputs"] == {"type": "object", "properties": {}, "required": []}
+
+
+def test_resolve_schema_refs_circular_dependency():
+    """Tests that _resolve_schema_refs handles circular dependencies gracefully."""
+    circular_spec = {
+        "components": {
+            "schemas": {
+                "SelfReferential": {
+                    "type": "object",
+                    "properties": {
+                        "name": {"type": "string"},
+                        "child": {
+                            "$ref": "#/components/schemas/SelfReferential"
+                        }
+                    }
+                },
+                "IndirectA": {
+                    "type": "object",
+                    "properties": {
+                        "link_to_b": {"$ref": "#/components/schemas/IndirectB"}
+                    }
+                },
+                "IndirectB": {
+                    "type": "object",
+                    "properties": {
+                        "link_to_a": {"$ref": "#/components/schemas/IndirectA"}
+                    }
+                }
+            }
+        }
+    }
+
+    schema_to_resolve_direct = {"$ref": "#/components/schemas/SelfReferential"}
+    schema_to_resolve_indirect = {"$ref": "#/components/schemas/IndirectA"}
+
+    # Test direct circular reference
+    resolved_direct = _resolve_schema_refs(schema_to_resolve_direct, circular_spec)
+    # Expect the recursion to stop and return the $ref at the point of circularity.
+    # The 'SelfReferential' schema's 'child' property should still be a $ref to itself.
+    assert isinstance(resolved_direct, dict), "Resolved direct schema should be a dict"
+    assert resolved_direct.get("type") == "object"
+    assert "properties" in resolved_direct
+    child_prop = resolved_direct.get("properties", {}).get("child")
+    assert isinstance(child_prop, dict), "Child property should be a dict"
+    assert child_prop.get("$ref") == "#/components/schemas/SelfReferential", \
+        "Direct circular $ref was not preserved as expected"
+
+    resolved_indirect = _resolve_schema_refs(schema_to_resolve_indirect, circular_spec)
+    # Expect the recursion to stop when IndirectB tries to resolve IndirectA again.
+    # So, IndirectA -> IndirectB -> $ref to IndirectA
+    assert isinstance(resolved_indirect, dict), "Resolved indirect schema (IndirectA) should be a dict"
+    assert resolved_indirect.get("type") == "object"
+    link_to_b_prop = resolved_indirect.get("properties", {}).get("link_to_b")
+    assert isinstance(link_to_b_prop, dict), "link_to_b property (IndirectB) should be a dict"
+    assert link_to_b_prop.get("type") == "object"
+    link_to_a_prop = link_to_b_prop.get("properties", {}).get("link_to_a")
+    assert isinstance(link_to_a_prop, dict), "link_to_a property should be a dict"
+    assert link_to_a_prop.get("$ref") == "#/components/schemas/IndirectA", \
+        "Indirect circular $ref was not preserved as expected"

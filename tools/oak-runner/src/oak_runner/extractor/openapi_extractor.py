@@ -7,7 +7,7 @@ from an OpenAPI specification for a given API operation.
 """
 
 import logging
-from typing import Any, Dict, Optional, List, Union
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 import jsonpointer
 import copy
@@ -101,45 +101,48 @@ def _resolve_ref(spec: Dict[str, Any], ref: str) -> Dict[str, Any]:
         raise
 
 
-# --- New Recursive Resolver ---
-def _resolve_schema_refs(schema_part: Any, full_spec: Dict[str, Any]) -> Any:
-    """Recursively resolves all $ref pointers within a schema fragment."""
-    logger.debug(f"Entering _resolve_schema_refs with part type: {type(schema_part)}")  # Avoid logging potentially large schemas
-    # Make a deep copy first to avoid modifying original spec or intermediate dicts/lists
+def _resolve_schema_refs(schema_part: Any, full_spec: Dict[str, Any], visited_refs: Optional[Set[str]] = None) -> Any:
+    """Recursively resolves all $ref pointers within a schema fragment, handling circular references."""
+    # Initialize visited_refs for the current resolution path if it's the first call in a chain
+    current_visited_refs = visited_refs if visited_refs is not None else set()
+
+    # Make a deep copy to avoid modifying original spec or intermediate dicts/lists during this call's scope
     current_part = copy.deepcopy(schema_part)
 
     if isinstance(current_part, dict):
-        if '$ref' in current_part:  # Check original ref before potential modification
+        if '$ref' in current_part:
+            ref_path = current_part['$ref']
+            if ref_path in current_visited_refs:
+                logger.debug(f"Circular reference detected for '{ref_path}'. Returning original $ref dict.")
+                # Return the original reference dict to break the cycle
+                return current_part 
+
             try:
-                ref_path = current_part['$ref']
-                # Resolve the ref from the ORIGINAL full_spec
-                resolved_content = _resolve_ref(full_spec, ref_path)
-                # Recursively resolve within the newly resolved content
-                # The deepcopy ensures this result is independent
-                result = _resolve_schema_refs(resolved_content, full_spec)
-                logger.debug(f"Exiting _resolve_schema_refs (from $ref path), returning type: {type(result)}")
+                # Add current ref_path to a new set for the next level of recursion to avoid cross-branch pollution
+                next_level_visited_refs = current_visited_refs.copy()
+                next_level_visited_refs.add(ref_path)
+                
+                resolved_content = _resolve_ref(full_spec, ref_path) # Resolve from ORIGINAL full_spec
+                # Recursively resolve within the newly resolved content, passing the updated visited set
+                result = _resolve_schema_refs(resolved_content, full_spec, next_level_visited_refs)
                 return result
             except (jsonpointer.JsonPointerException, ValueError, KeyError) as e:
                 logger.warning(f"Could not resolve nested $ref '{ref_path}': {e}")
-                logger.debug(f"Exiting _resolve_schema_refs (from $ref error), returning original ref dict type: {type(current_part)}")
                 return current_part  # Return the copied dict with the unresolved $ref on error
         else:
             # Process dictionary items recursively on the copied dict
-            for k, v in current_part.items():
-                # Modify the copy in place
-                current_part[k] = _resolve_schema_refs(v, full_spec)
-            logger.debug(f"Exiting _resolve_schema_refs (from dict walk), returning type: {type(current_part)}")
+            # Pass the current_visited_refs, as these are part of the same parent schema's resolution path
+            for k, v in list(current_part.items()): # Iterate over a copy of items if modifying dict during iteration
+                current_part[k] = _resolve_schema_refs(v, full_spec, current_visited_refs)
             return current_part  # Return the modified copy
     elif isinstance(current_part, list):
         # Process list items recursively on the copied list
-        for i, item in enumerate(current_part):
-            # Modify the copy in place
-            current_part[i] = _resolve_schema_refs(item, full_spec)
-        logger.debug(f"Exiting _resolve_schema_refs (from list walk), returning type: {type(current_part)}")
+        # Pass the current_visited_refs for the same reason as above
+        for i, item in enumerate(list(current_part)): # Iterate over a copy of items
+            current_part[i] = _resolve_schema_refs(item, full_spec, current_visited_refs)
         return current_part  # Return the modified copy
     else:
-        # Return the copy of non-dict/list items
-        logger.debug(f"Exiting _resolve_schema_refs (from base case), returning type: {type(current_part)}")
+        # Return the copy of non-dict/list items (base case)
         return current_part
 
 
