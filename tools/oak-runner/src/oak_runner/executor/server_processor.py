@@ -22,7 +22,7 @@ class ServerProcessor:
         self.source_descriptions = source_descriptions
 
     @staticmethod
-    def resolve_server_base_url(server_config: ServerConfiguration, server_runtime_params: Optional[Dict[str, str]] = {}) -> str:
+    def resolve_server_base_url(server_config: ServerConfiguration, server_runtime_params: Optional[Dict[str, str]] = None) -> str:
         """
         Resolves the templated server URL using provided parameters, environment variables,
         or default values for a given ServerConfiguration.
