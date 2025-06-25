@@ -29,6 +29,30 @@ class HTTPExecutor:
         self.http_client = http_client or requests.Session()
         self.auth_provider: Optional[DefaultCredentialProvider] = auth_provider
 
+    def _get_content_type_category(self, content_type: str | None) -> str:
+        """
+        Categorize the content type to determine how to handle the request body.
+        
+        Args:
+            content_type: The content type string from the request body
+            
+        Returns:
+            One of: 'multipart', 'json', 'form', 'raw', or 'unknown'
+        """
+        if not content_type:
+            return 'unknown'
+            
+        content_type_lower = content_type.lower()
+        
+        if "multipart/form-data" in content_type_lower:
+            return 'multipart'
+        elif "json" in content_type_lower:
+            return 'json'
+        elif "form" in content_type_lower or "x-www-form-urlencoded" in content_type_lower:
+            return 'form'
+        else:
+            return 'raw'
+
     def execute_request(
         self, method: str, url: str, parameters: dict[str, Any], request_body: dict | None, security_options: list[SecurityOption] | None = None, source_name: str | None = None
     ) -> dict:
@@ -72,31 +96,81 @@ class HTTPExecutor:
         # Prepare request body
         data = None
         json_data = None
+        files = None
 
         if request_body:
             content_type = request_body.get("contentType")
             payload = request_body.get("payload")
+            content_category = self._get_content_type_category(content_type)
 
-            if content_type:
+            # Handle explicit None payload
+            if payload is None:
+                if content_type:
+                    # Content type specified but no payload - set header but no body
+                    headers["Content-Type"] = content_type
+                    logger.debug(f"Content type '{content_type}' specified but payload is None - sending empty body with header")
+                # If no content_type either, just send empty body (no header needed)
+                
+            elif content_category == 'multipart':
+                # Path 1: Multipart form data with file uploads
+                files = {}
+                data = {}
+                for key, value in payload.items():
+                    # A field is treated as a file upload if its value is an object
+                    # containing 'content' and 'filename' keys.
+                    if isinstance(value, dict) and "content" in value and "filename" in value:
+                        # requests expects a tuple: (filename, file_data, content_type)
+                        file_content = value["content"]
+                        file_name = value["filename"] if value.get("filename") else "attachment"
+                        file_type = value.get("contentType", "application/octet-stream")
+                        files[key] = (file_name, file_content, file_type)
+                        logger.debug(f"Preparing file '{file_name}' for upload.")
+                    elif isinstance(value, (bytes, bytearray)):
+                        # Fallback: treat raw bytes as a file with a generic name
+                        files[key] = ("attachment", value, "application/octet-stream")
+                        logger.debug(f"Preparing raw-bytes payload as file for key '{key}'.")
+                    else:
+                        data[key] = value
+                # Do NOT set Content-Type header here; `requests` will do it with the correct boundary
+
+            elif content_category == 'json':
+                # Path 2: JSON content
                 headers["Content-Type"] = content_type
-
-            if content_type and "json" in content_type.lower():
                 json_data = payload
-            elif content_type and ("form" in content_type.lower() or "x-www-form-urlencoded" in content_type.lower()):
-                # Handle form data
+
+            elif content_category == 'form':
+                # Path 3: Form-encoded content
+                headers["Content-Type"] = content_type
                 if isinstance(payload, dict):
                     data = payload
                 else:
                     logger.warning(f"Form content type specified, but payload is not a dictionary: {type(payload)}. Sending as raw data.")
                     data = payload
-            elif payload is not None:
-                # Raw data - ensure it's bytes or string for the 'data' parameter
+
+            elif content_category == 'raw':
+                # Path 4: Other explicit content types (raw data)
+                headers["Content-Type"] = content_type
                 if isinstance(payload, (str, bytes)):
                     data = payload
                 else:
                     # Attempt to serialize other types? Or raise error? Let's log and convert to string for now.
                     logger.warning(f"Payload type {type(payload)} not directly supported for raw data. Converting to string.")
                     data = str(payload)
+
+            elif content_category == 'unknown' and payload is not None:
+                # Path 5: No content type specified but payload exists - try to infer
+                if isinstance(payload, dict):
+                    headers["Content-Type"] = "application/json"
+                    json_data = payload
+                    logger.debug("No content type specified, inferring application/json for dict payload")
+                elif isinstance(payload, (bytes, bytearray)):
+                    data = payload
+                    logger.debug("No content type specified, sending raw bytes")
+                elif isinstance(payload, str):
+                    data = payload
+                    logger.debug("No content type specified, sending raw string")
+                else:
+                    logger.warning(f"Payload provided but contentType is missing and type {type(payload)} cannot be inferred; body not sent.")
 
         # Log request details for debugging
         logger.debug(f"Making {method} request to {url}")
@@ -115,18 +189,31 @@ class HTTPExecutor:
             cookies=cookies,
             data=data,
             json=json_data,
+            files=files,
         )
 
         # Process the response
         try:
             response_json = response.json()
-        except:
+        except Exception as e:
+            logger.debug(f"No JSON in response (or broken JSON): {e}")
             response_json = None
+
+        # Decide final body representation (binary vs text)
+        if response_json is not None:
+            body_value = response_json
+        else:
+            ct = response.headers.get("Content-Type", "").lower()
+            if any(x in ct for x in ["audio/", "video/", "image/", "application/octet-stream"]):
+                body_value = response.content  # keep raw bytes
+                logger.debug(f"Preserving binary response ({len(response.content)} bytes) for content-type {ct}")
+            else:
+                body_value = response.text
 
         return {
             "status_code": response.status_code,
             "headers": dict(response.headers),
-            "body": response_json if response_json is not None else response.text,
+            "body": body_value,
         }
 
     def _apply_auth_to_request(
