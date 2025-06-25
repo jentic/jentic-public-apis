@@ -192,8 +192,30 @@ class ParameterProcessor:
         content_type = request_body.get("contentType")
         payload = request_body.get("payload")
 
-        # Handle different payload types
-        if isinstance(payload, str):
+        # First, evaluate the entire payload object to resolve any expressions
+        if isinstance(payload, dict):
+            payload = ExpressionEvaluator.process_object_expressions(
+                payload, state, self.source_descriptions
+            )
+
+        # Handle multipart/form-data specifically for file uploads
+        if content_type and "multipart/form-data" in content_type.lower():
+            processed_payload = {}
+            for key, value in payload.items():
+                if isinstance(value, bytes):
+                    # This is likely a file. Wrap it in the expected structure.
+                    logger.debug(f"Wrapping binary data in field '{key}' for multipart upload.")
+                    processed_payload[key] = {
+                        "content": value,
+                        "filename": "attachment",  # Using a generic filename
+                        "contentType": "application/octet-stream"
+                    }
+                else:
+                    processed_payload[key] = value
+            payload = processed_payload
+
+        # Handle other payload types
+        elif isinstance(payload, str):
             # String payload with possible template expressions
             try:
                 # First handle any template expressions in the string regardless of format
