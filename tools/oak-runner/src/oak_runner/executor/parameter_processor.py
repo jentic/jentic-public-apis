@@ -178,6 +178,29 @@ class ParameterProcessor:
 
         return parameters
 
+    def _process_multipart_payload(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """
+        Wraps binary data in a payload dictionary for multipart/form-data upload.
+
+        Args:
+            payload: The dictionary payload to process.
+
+        Returns:
+            A new dictionary with byte values wrapped in the file structure.
+        """
+        processed_payload: dict[str, Any] = {}
+        for key, value in payload.items():
+            if isinstance(value, (bytes, bytearray)):
+                logger.debug(f"Wrapping binary data in field '{key}' for multipart upload.")
+                processed_payload[key] = {
+                    "content": value,
+                    "filename": "attachment",  # Using a generic filename
+                    "contentType": "application/octet-stream",
+                }
+            else:
+                processed_payload[key] = value
+        return processed_payload
+
     def prepare_request_body(self, request_body: dict, state: ExecutionState) -> dict:
         """
         Prepare request body for an operation execution
@@ -200,19 +223,9 @@ class ParameterProcessor:
 
         # Handle multipart/form-data specifically for file uploads
         if content_type and "multipart/form-data" in content_type.lower():
-            processed_payload = {}
-            for key, value in payload.items():
-                if isinstance(value, bytes):
-                    # This is likely a file. Wrap it in the expected structure.
-                    logger.debug(f"Wrapping binary data in field '{key}' for multipart upload.")
-                    processed_payload[key] = {
-                        "content": value,
-                        "filename": "attachment",  # Using a generic filename
-                        "contentType": "application/octet-stream"
-                    }
-                else:
-                    processed_payload[key] = value
-            payload = processed_payload
+            processed_payload = self._process_multipart_payload(payload)
+            # Return a new request body object with the processed payload
+            return {"contentType": content_type, "payload": processed_payload}
 
         # Handle other payload types
         elif isinstance(payload, str):
@@ -544,10 +557,21 @@ class ParameterProcessor:
                 else:
                     logger.warning("requestBody definition found, but 'content' map is missing or invalid.")
 
+                # If multipart/form-data, wrap bytes payloads for file uploads
+                if (
+                    determined_content_type
+                    and isinstance(determined_content_type, str)
+                    and "multipart/form-data" in determined_content_type.lower()
+                    and isinstance(payload_dict, dict)
+                ):
+                    payload_to_store = self._process_multipart_payload(payload_dict)
+                else:
+                    payload_to_store = payload_dict
+
                 # Store payload and content type (only if payload was identified)
                 prepared_params["body"] = {
-                    "payload": payload_dict,
-                    "contentType": determined_content_type
+                    "payload": payload_to_store,
+                    "contentType": determined_content_type,
                 }
             # Check requirement if spec defines a body but no payload was found
             elif body_required:
