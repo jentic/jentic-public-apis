@@ -134,6 +134,32 @@ MOCK_OP_DETAILS_BODY_MULTI_CONTENT_NO_JSON = {
     }
 }
 
+# Mock for multipart/form-data
+MOCK_OP_DETAILS_BODY_MULTIPART = {
+    "source": "testApi",
+    "path": "/upload",
+    "method": "post",
+    "url": "https://api.test.com/upload",
+    "operation": {
+        "summary": "Upload file",
+        "operationId": "uploadFile",
+    },
+    "requestBody": {
+        "required": True,
+        "content": {
+            "multipart/form-data": {
+                "schema": {
+                    "type": "object",
+                    "properties": {
+                        "file": {"type": "string", "format": "binary"},
+                        "description": {"type": "string"}
+                    }
+                }
+            }
+        }
+    }
+}
+
 # Mock for Operation with no requestBody spec
 MOCK_OP_DETAILS_NO_BODY_SPEC = {
     "source": "testApi",
@@ -351,6 +377,96 @@ class TestParameterProcessorOperation(unittest.TestCase):
         # Should fail when widget_id is missing
         with self.assertRaisesRegex(ValueError, r"Required parameter 'widget_id' \(in: path\) is missing."):
             self.processor.prepare_operation_parameters(MOCK_OP_DETAILS_PATH_ONLY, {})
+
+    def test_prepare_multipart_form_body(self):
+        """Test preparing a multipart/form-data request body with a file."""
+        inputs = {"file": b"file content", "description": "this is a file"}
+        
+        result = self.processor.prepare_operation_parameters(MOCK_OP_DETAILS_BODY_MULTIPART, inputs)
+        
+        expected_body = {
+            "contentType": "multipart/form-data",
+            "payload": {
+                "file": {
+                    "content": b"file content",
+                    "filename": "attachment",
+                    "contentType": "application/octet-stream"
+                },
+                "description": "this is a file"
+            }
+        }
+
+        self.assertEqual(result["body"], expected_body)
+
+    def test_prepare_multipart_form_body_with_bytearray(self):
+        """Test preparing multipart/form-data with a bytearray."""
+        inputs = {"file": bytearray(b"file content"), "description": "a bytearray file"}
+        
+        result = self.processor.prepare_operation_parameters(MOCK_OP_DETAILS_BODY_MULTIPART, inputs)
+        
+        expected_body = {
+            "contentType": "multipart/form-data",
+            "payload": {
+                "file": {
+                    "content": bytearray(b"file content"),
+                    "filename": "attachment",
+                    "contentType": "application/octet-stream"
+                },
+                "description": "a bytearray file"
+            }
+        }
+
+        self.assertEqual(result["body"], expected_body)
+
+    def test_prepare_multipart_form_body_with_mixed_types(self):
+        """Test multipart/form-data with mixed raw bytes, bytearray, and regular data."""
+        inputs = {
+            "file_bytes": b"this is bytes",
+            "file_bytearray": bytearray(b"this is bytearray"),
+            "description": "mixed payload"
+        }
+        
+        # We need a mock spec that defines all these fields
+        mock_spec = {
+            "source": "testApi",
+            "path": "/upload_mixed",
+            "method": "post",
+            "url": "https://api.test.com/upload_mixed",
+            "requestBody": {
+                "required": True,
+                "content": {
+                    "multipart/form-data": {
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "file_bytes": {"type": "string", "format": "binary"},
+                                "file_bytearray": {"type": "string", "format": "binary"},
+                                "description": {"type": "string"}
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        result = self.processor.prepare_operation_parameters(mock_spec, inputs)
+
+        expected_payload = {
+            "file_bytes": {
+                "content": b"this is bytes",
+                "filename": "attachment",
+                "contentType": "application/octet-stream"
+            },
+            "file_bytearray": {
+                "content": bytearray(b"this is bytearray"),
+                "filename": "attachment",
+                "contentType": "application/octet-stream"
+            },
+            "description": "mixed payload"
+        }
+
+        self.assertEqual(result["body"]["contentType"], "multipart/form-data")
+        self.assertEqual(result["body"]["payload"], expected_payload)
 
 
 if __name__ == '__main__':
