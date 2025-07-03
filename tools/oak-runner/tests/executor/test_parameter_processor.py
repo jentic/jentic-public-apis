@@ -223,7 +223,7 @@ class TestParameterProcessorOperation(unittest.TestCase):
 
     def setUp(self):
         """Set up the test case with ParameterProcessor instance."""
-        self.processor = ParameterProcessor(source_descriptions={})
+        self.processor = ParameterProcessor(source_descriptions={}, blob_store=None)
 
     def test_prepare_params_success(self):
         """Test preparing path, query, header params successfully."""

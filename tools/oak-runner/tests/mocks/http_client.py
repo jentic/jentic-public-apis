@@ -25,6 +25,7 @@ class MockResponse:
     json_data: dict[str, Any] | None = None
     text: str | None = None
     headers: dict[str, str] | None = None
+    content: bytes | None = None  # Allow custom binary content
 
     def __post_init__(self):
         """Initialize default values"""
@@ -32,6 +33,18 @@ class MockResponse:
             self.text = json.dumps(self.json_data) if self.json_data is not None else ""
         if self.headers is None:
             self.headers = {}
+        
+        # Generate content attribute like real requests.Response
+        if self.content is None:  # Only generate if not explicitly provided
+            if self.json_data is not None:
+                # JSON content gets encoded as UTF-8 bytes
+                self.content = json.dumps(self.json_data).encode('utf-8')
+            elif self.text:
+                # Text content gets encoded as UTF-8 bytes
+                self.content = self.text.encode('utf-8')
+            else:
+                # Default to empty bytes
+                self.content = b""
 
     def json(self) -> dict[str, Any]:
         """Return JSON data"""

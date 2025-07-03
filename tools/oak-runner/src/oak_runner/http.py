@@ -36,7 +36,7 @@ class HTTPExecutor:
         self.http_client = http_client or requests.Session()
         self.auth_provider: Optional[DefaultCredentialProvider] = auth_provider
         self.blob_store = blob_store or get_default_blob_store()
-        self.blob_threshold = blob_threshold or int(os.getenv("BLOB_THRESHOLD_BYTES", "8"))
+        self.blob_threshold = blob_threshold or int(os.getenv("BLOB_THRESHOLD_BYTES", "5120")) # 5KB
 
     def _get_content_type_category(self, content_type: str | None) -> str:
         """

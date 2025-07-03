@@ -10,6 +10,7 @@ fixture-based testing framework.
 import os
 import tempfile
 import unittest
+import json
 
 import yaml
 
@@ -42,11 +43,25 @@ class MockHTTPExecutor:
 class MockResponse:
     """Mock HTTP response for testing"""
 
-    def __init__(self, status_code, json_data=None, text=None, headers=None):
+    def __init__(self, status_code, json_data=None, text=None, headers=None, content=None):
         self.status_code = status_code
         self._json_data = json_data
         self.text = text or ""
         self.headers = headers or {}
+        
+        # Generate content attribute like real requests.Response
+        if content is not None:
+            # Use explicitly provided content
+            self.content = content
+        elif self._json_data is not None:
+            # JSON content gets encoded as UTF-8 bytes
+            self.content = json.dumps(self._json_data).encode('utf-8')
+        elif self.text:
+            # Text content gets encoded as UTF-8 bytes
+            self.content = self.text.encode('utf-8')
+        else:
+            # Default to empty bytes
+            self.content = b""
 
     def json(self):
         if self._json_data is None:

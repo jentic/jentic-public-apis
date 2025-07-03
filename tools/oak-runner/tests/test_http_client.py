@@ -11,6 +11,7 @@ import requests
 from unittest.mock import patch, MagicMock
 from oak_runner.auth.models import SecurityOption, SecurityRequirement, RequestAuthValue, AuthLocation
 from oak_runner.http import HTTPExecutor
+from oak_runner.blob_store import InMemoryBlobStore
 
 
 class MockAuthProvider:
@@ -81,7 +82,9 @@ class TestHTTPExecutor(unittest.TestCase):
 
     def setUp(self):
         """Set up test fixtures"""
-        self.http_client = HTTPExecutor()
+        # Use in-memory blob store for testing so we can inspect stored blobs
+        self.blob_store = InMemoryBlobStore()
+        self.http_client = HTTPExecutor(blob_store=self.blob_store)
 
     def test_init(self):
         """Test that the HTTP client initializes correctly"""
@@ -621,7 +624,18 @@ class TestHTTPExecutor(unittest.TestCase):
             source_name=None
         )
 
-        self.assertEqual(response['body'], b'imagedata')
+        # Binary content should now be stored as a blob reference
+        self.assertIsInstance(response['body'], dict)
+        self.assertIn('blob_ref', response['body'])
+        self.assertIn('content_type', response['body'])
+        self.assertIn('size', response['body'])
+        self.assertEqual(response['body']['content_type'], 'image/png')
+        self.assertEqual(response['body']['size'], 9)  # len(b'imagedata')
+        
+        # Verify the actual blob content matches what we expect
+        blob_id = response['body']['blob_ref']
+        stored_bytes = self.blob_store.load(blob_id)
+        self.assertEqual(stored_bytes, b'imagedata')
 
     @patch('requests.Session.request')
     def test_execute_request_text_response(self, mock_request):
@@ -674,6 +688,8 @@ class TestHTTPExecutor(unittest.TestCase):
         """Test that a dict payload with no content type is sent as JSON."""
         mock_response = MagicMock()
         mock_response.status_code = 200
+        mock_response.headers = {'Content-Type': 'application/json'}
+        mock_response.content = b'{"status": "ok"}'
         mock_response.json.return_value = {'status': 'ok'}
         mock_request.return_value = mock_response
 
@@ -696,6 +712,10 @@ class TestHTTPExecutor(unittest.TestCase):
         """Test that a bytes payload with no content type is sent as raw data."""
         mock_response = MagicMock()
         mock_response.status_code = 204
+        mock_response.headers = {}
+        mock_response.content = b''
+        mock_response.text = ''
+        mock_response.json.side_effect = ValueError("No JSON data")
         mock_request.return_value = mock_response
 
         self.http_client.execute_request(
@@ -717,6 +737,8 @@ class TestHTTPExecutor(unittest.TestCase):
         """Test multipart upload where one field is raw bytes."""
         mock_response = MagicMock()
         mock_response.status_code = 200
+        mock_response.headers = {'Content-Type': 'application/json'}
+        mock_response.content = b'{"status": "ok"}'
         mock_response.json.return_value = {'status': 'ok'}
         mock_request.return_value = mock_response
 
@@ -870,6 +892,10 @@ class TestHTTPExecutor(unittest.TestCase):
         """Test sending a non-string/bytes payload with a 'raw' content type."""
         mock_response = MagicMock()
         mock_response.status_code = 204
+        mock_response.headers = {}
+        mock_response.content = b''
+        mock_response.text = ''
+        mock_response.json.side_effect = ValueError("No JSON data")
         mock_request.return_value = mock_response
 
         payload = {"this": "is a dict"}
@@ -892,6 +918,8 @@ class TestHTTPExecutor(unittest.TestCase):
         """Test multipart processing with a file dict missing 'content': should treat it as regular field."""
         mock_response = MagicMock()
         mock_response.status_code = 200
+        mock_response.headers = {'Content-Type': 'application/json'}
+        mock_response.content = b'{"status": "ok"}'
         mock_response.json.return_value = {"status": "ok"}
         mock_request.return_value = mock_response
 
@@ -924,6 +952,41 @@ class TestHTTPExecutor(unittest.TestCase):
         self.assertIn('data', kwargs)
         self.assertEqual(kwargs['data']['malformed_file'], {"filename": "test.txt"})
         self.assertEqual(kwargs['data']['description'], "testing")
+
+    @patch('requests.Session.request')
+    def test_execute_request_large_binary_response(self, mock_request):
+        """Test handling of a larger binary response to ensure it still gets stored as blob."""
+        # Create a larger binary payload (e.g., a fake PNG header + data)
+        large_binary_data = b'\x89PNG\r\n\x1a\n' + b'x' * 1000  # 1008 bytes
+        
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.headers = {'Content-Type': 'image/png'}
+        mock_response.content = large_binary_data
+        mock_response.json.side_effect = ValueError
+        mock_request.return_value = mock_response
+
+        response = self.http_client.execute_request(
+            method="GET",
+            url="http://test.com/large-image.png",
+            parameters={},
+            request_body=None,
+            security_options=None,
+            source_name=None
+        )
+
+        # Large binary content should also be stored as a blob reference
+        self.assertIsInstance(response['body'], dict)
+        self.assertIn('blob_ref', response['body'])
+        self.assertIn('content_type', response['body'])
+        self.assertIn('size', response['body'])
+        self.assertEqual(response['body']['content_type'], 'image/png')
+        self.assertEqual(response['body']['size'], 1008)  # len(large_binary_data)
+        
+        # Verify the actual blob content matches what we expect
+        blob_id = response['body']['blob_ref']
+        stored_bytes = self.blob_store.load(blob_id)
+        self.assertEqual(stored_bytes, large_binary_data)
 
 
 if __name__ == "__main__":
