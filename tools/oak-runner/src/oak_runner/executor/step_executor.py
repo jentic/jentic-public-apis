@@ -43,9 +43,12 @@ class StepExecutor:
         self.source_descriptions = source_descriptions
         self.testing_mode = testing_mode
 
+        # Pass blob_store from http_client to parameter_processor for rehydration
+        blob_store = getattr(http_client, 'blob_store', None)
+
         # Initialize components
         self.operation_finder = OperationFinder(source_descriptions)
-        self.parameter_processor = ParameterProcessor(source_descriptions)
+        self.parameter_processor = ParameterProcessor(source_descriptions, blob_store)
         self.output_extractor = OutputExtractor(source_descriptions)
         self.success_checker = SuccessCriteriaChecker(source_descriptions)
         self.action_handler = ActionHandler(source_descriptions)

@@ -6,10 +6,12 @@ This module provides HTTP request handling for the OAK Runner.
 """
 
 import logging
+import os
 from typing import Any
 from typing import Optional
 from oak_runner.auth.models import SecurityOption, RequestAuthValue, AuthLocation
 from oak_runner.auth.default_credential_provider import DefaultCredentialProvider
+from oak_runner.blob_store import BlobStore, get_default_blob_store
 import requests
 
 # Configure logging
@@ -19,15 +21,22 @@ logger = logging.getLogger("arazzo-runner.http")
 class HTTPExecutor:
     """HTTP client for executing API requests in Arazzo workflows"""
 
-    def __init__(self, http_client=None, auth_provider: Optional[DefaultCredentialProvider] = None):
+    def __init__(self, http_client=None, auth_provider: Optional[DefaultCredentialProvider] = None, *,
+                 blob_store: Optional[BlobStore] = None,
+                 blob_threshold: Optional[int] = None):
         """
         Initialize the HTTP client
 
         Args:
             http_client: Optional HTTP client (defaults to requests.Session)
+            auth_provider: Optional authentication provider
+            blob_store: Optional blob store for binary data (defaults to get_default_blob_store())
+            blob_threshold: Size threshold in bytes for storing as blob (defaults to env BLOB_THRESHOLD_BYTES or 32768)
         """
         self.http_client = http_client or requests.Session()
         self.auth_provider: Optional[DefaultCredentialProvider] = auth_provider
+        self.blob_store = blob_store or get_default_blob_store()
+        self.blob_threshold = blob_threshold or int(os.getenv("BLOB_THRESHOLD_BYTES", "8"))
 
     def _get_content_type_category(self, content_type: str | None) -> str:
         """
@@ -52,6 +61,80 @@ class HTTPExecutor:
             return 'form'
         else:
             return 'raw'
+
+    def _should_store_as_blob(self, content_type: str, size: int) -> bool:
+        """
+        Determine if response content should be stored as a blob.
+
+        Args:
+            content_type: The response Content-Type header
+            size: Size of the response content in bytes
+
+        Returns:
+            True if content should be stored as blob, False otherwise
+        """
+        if not content_type:
+            return size > self.blob_threshold
+
+        content_type_lower = content_type.lower()
+
+        # Always store certain binary content types as blobs regardless of size
+        binary_content_types = [
+            "application/octet-stream",
+            "audio/",
+            "video/",
+            "image/",
+            "application/pdf",
+            "application/zip",
+            "application/x-tar",
+            "application/gzip"
+        ]
+
+        if any(content_type_lower.startswith(ct) for ct in binary_content_types):
+            return True
+
+        # Store large responses as blobs
+        return size > self.blob_threshold
+
+    def _maybe_store_blob(self, response, url: str) -> Any:
+        """
+        Check if response should be stored as blob and handle accordingly.
+
+        Args:
+            response: The HTTP response object
+            url: The request URL for metadata
+
+        Returns:
+            Either the normal response body or a blob reference dict
+        """
+        content_type = response.headers.get("Content-Type", "")
+        size = len(response.content)
+
+        if self._should_store_as_blob(content_type, size):
+            # Store as blob - ensure all metadata values are JSON serializable
+            metadata = {
+                "content_type": str(content_type) if content_type else "",
+                "size": int(size),
+                "url": str(url),
+                "status_code": int(response.status_code) if hasattr(response.status_code, '__int__') else 0
+            }
+
+            blob_id = self.blob_store.save(response.content, metadata)
+
+            logger.info(f"Stored response as blob {blob_id} ({size} bytes, {content_type})")
+
+            return {
+                "blob_ref": blob_id,
+                "content_type": content_type,
+                "size": size
+            }
+        else:
+            # Handle normally
+            try:
+                return response.json()
+            except Exception:
+                logger.debug("No JSON in response, returning text")
+                return response.text
 
     def execute_request(
         self, method: str, url: str, parameters: dict[str, Any], request_body: dict | None, security_options: list[SecurityOption] | None = None, source_name: str | None = None
@@ -110,7 +193,7 @@ class HTTPExecutor:
                     headers["Content-Type"] = content_type
                     logger.debug(f"Content type '{content_type}' specified but payload is None - sending empty body with header")
                 # If no content_type either, just send empty body (no header needed)
-                
+
             elif content_category == 'multipart':
                 # Path 1: Multipart form data with file uploads
                 files = {}
@@ -192,23 +275,8 @@ class HTTPExecutor:
             files=files,
         )
 
-        # Process the response
-        try:
-            response_json = response.json()
-        except Exception as e:
-            logger.debug(f"No JSON in response (or broken JSON): {e}")
-            response_json = None
-
-        # Decide final body representation (binary vs text)
-        if response_json is not None:
-            body_value = response_json
-        else:
-            ct = response.headers.get("Content-Type", "").lower()
-            if any(x in ct for x in ["audio/", "video/", "image/", "application/octet-stream"]):
-                body_value = response.content  # keep raw bytes
-                logger.debug(f"Preserving binary response ({len(response.content)} bytes) for content-type {ct}")
-            else:
-                body_value = response.text
+        # Process the response with blob handling
+        body_value = self._maybe_store_blob(response, url)
 
         return {
             "status_code": response.status_code,
