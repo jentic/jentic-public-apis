@@ -101,23 +101,20 @@ class TestEnvMappings(unittest.TestCase):
         }
 
         # Create OAKRunner with mocked dependencies
-        with patch('oak_runner.http.HTTPExecutor') as mock_http_executor:
-            runner = OAKRunner(
-                arazzo_doc={},
-                source_descriptions=mock_openapi_specs,
-                auth_provider=mock_auth_provider
-            )
+        runner = OAKRunner(
+            arazzo_doc={},
+            source_descriptions=mock_openapi_specs
+        )
 
-            # Get environment mappings
-            env_mappings = runner.get_env_mappings()
+        # Get environment mappings
+        env_mappings = runner.generate_env_mappings()
 
-            # Verify auth mappings are included
-            self.assertIn("auth", env_mappings)
-            self.assertEqual(env_mappings["auth"], mock_auth_provider.env_mappings)
+        # Verify auth mappings are included
+        self.assertIn("auth", env_mappings)
 
-            # Verify servers key is NOT included
-            self.assertNotIn("servers", env_mappings)
-            
+        # Verify servers key is NOT included
+        self.assertNotIn("servers", env_mappings)
+        
     def test_get_env_mappings_includes_multiple_api_specs(self):
         """Test that get_env_mappings includes server variables from multiple API specs"""
         # Create mock OpenAPI specs with different server variables

@@ -9,19 +9,20 @@ executes OpenAPI operations sequentially, handling success/failure conditions an
 
 import logging
 from collections.abc import Callable
-import re
+import json
 from typing import Any, Optional, Dict
 import requests
+
 from .auth.auth_processor import AuthProcessor
 from .evaluator import ExpressionEvaluator
 from .executor import StepExecutor
 from .http import HTTPExecutor
-from .models import ActionType, ArazzoDoc, ExecutionState, OpenAPIDoc, StepStatus, WorkflowExecutionStatus, WorkflowExecutionResult, RuntimeParams
-from .utils import dump_state, load_arazzo_doc, load_source_descriptions, load_openapi_file
-from .auth.default_credential_provider import DefaultCredentialProvider
-import json
+from .models import (
+    ActionType, ArazzoDoc, ExecutionState, OpenAPIDoc, StepStatus, WorkflowExecutionStatus, WorkflowExecutionResult, RuntimeParams
+)
+from .utils import dump_state, load_arazzo_doc, load_source_descriptions, load_openapi_file, deprecated
+from .auth.credentials.provider import CredentialProviderFactory, CredentialProvider
 from .executor.server_processor import ServerProcessor
-from .utils import create_env_var_name
 
 logger = logging.getLogger("arazzo-runner")
 
@@ -37,7 +38,7 @@ class OAKRunner:
         arazzo_doc: Optional[ArazzoDoc] = None,
         source_descriptions: dict[str, OpenAPIDoc] = None,
         http_client=None,
-        auth_provider=None
+        auth_provider: Optional[CredentialProvider] = None
     ):
         """
         Initialize the runner with Arazzo document and source descriptions
@@ -62,10 +63,9 @@ class OAKRunner:
         )
 
         http_client = http_client or requests.Session()
-
-        self.auth_provider = auth_provider or DefaultCredentialProvider(
+        self.auth_provider = auth_provider or CredentialProviderFactory.create_default(
             auth_requirements=auth_config.get("auth_requirements", []),
-            env_mappings=auth_config.get("env_mappings", {}),
+            env_mapping=auth_config.get("env_mappings", {}),
             http_client=http_client
         )
 
@@ -635,25 +635,33 @@ class OAKRunner:
             # Wrap or re-raise depending on desired error handling strategy
             raise RuntimeError(f"Unexpected error during operation execution: {e}") from e
 
+    @deprecated("Use OAKRunner.generate_env_mappings instead. Will drop support in a future release.")
     def get_env_mappings(self) -> dict[str, Any]:
         """
-        DEPRECATED: Use OAKRunner.get_env_mappings_static instead.
+        DEPRECATED: Use OAKRunner.generate_env_mappings instead.
         Returns the environment variable mappings for both authentication and server variables.
-        
+       
         Returns:
             Dictionary containing:
             - 'auth': Environment variable mappings for authentication
             - 'servers': Environment variable mappings for server URLs (only included if server variables exist)
         """
-        # Get authentication environment mappings
-        auth_mappings = self.auth_provider.env_mappings
+        # Get authentication environment mappings (old way)
+        try:
+            auth_mappings = self.auth_provider.env_mappings
+        except AttributeError:
+            auth_mappings = {}
+        
+        # Get authentication environment mappings via the EnvironmentVariableFetchStrategy
+        try:
+            auth_mappings = self.auth_provider.strategy._env_mapping
+        except AttributeError:
+            auth_mappings = {}
+
+        result = {"auth": auth_mappings}
         
         # Get server variable environment mappings
         server_mappings = self.step_executor.server_processor.get_env_mappings()
-        
-        # Start with auth mappings
-        result = {"auth": auth_mappings}
-        
         # Only include server mappings if they exist
         if server_mappings:
             result["servers"] = server_mappings
