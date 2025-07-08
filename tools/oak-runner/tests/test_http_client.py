@@ -18,22 +18,7 @@ from oak_runner.blob_store import InMemoryBlobStore
 
 logger = logging.getLogger(__name__)
 
-class MockCredentialProvider:
-    """Mock credential provider for testing - ONLY mock out what we need"""
-
-    def get_credentials(self, security_options, fetch_options):
-        """Mock implementation of get_credentials"""
-        return []
-
-
-@pytest.fixture
-def basic_http_client() -> HTTPExecutor:
-    return HTTPExecutor()
-
-
-@pytest.fixture
-def http_client() -> HTTPExecutor:
-    return HTTPExecutor(auth_provider=MockCredentialProvider())
+# Fixtures are now defined in conftest.py
 
 
 def test_init(basic_http_client: HTTPExecutor):
@@ -818,12 +803,10 @@ def test_execute_request_multipart_missing_content_key(http_client: HTTPExecutor
         assert kwargs['data']['description'] == "testing"
 
 
-def test_execute_request_large_binary_response():
+def test_execute_request_large_binary_response(http_client: HTTPExecutor):
     """Test handling of a larger binary response to ensure it still gets stored as blob."""
-    # Create HTTP client with in-memory blob store for testing
-    from oak_runner.blob_store import InMemoryBlobStore
-    blob_store = InMemoryBlobStore()
-    http_client = HTTPExecutor(blob_store=blob_store)
+    # Get the blob store from the fixture for verification
+    blob_store = http_client.blob_store
     
     # Create a larger binary payload (e.g., a fake PNG header + data)
     large_binary_data = b'\x89PNG\r\n\x1a\n' + b'x' * 1000  # 1008 bytes
