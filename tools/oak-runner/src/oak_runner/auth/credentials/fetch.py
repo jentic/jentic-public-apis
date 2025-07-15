@@ -76,6 +76,8 @@ class FetchStrategy(ABC):
         Retrieve credentials for a batch of ``SecurityOption`` instances.
     fetch_one(request, options)
         Retrieve credentials for a single ``SecurityOption`` instance.
+    set_auth_requirements(auth_requirements)
+        Set the list of authentication requirements.
     """
     
     @abstractmethod
@@ -87,6 +89,11 @@ class FetchStrategy(ABC):
     def fetch_one(self, request: SecurityOption, options: FetchOptions | None = None) -> List[Credential]:
         """Fetch credential(s) based on request."""
         raise NotImplementedError
+    
+    @abstractmethod
+    def set_auth_requirements(self, auth_requirements: List[AuthRequirement]):
+        """Set the list of authentication requirements."""
+        pass
 
 
 class EnvironmentVariableFetchStrategy(FetchStrategy):
@@ -103,6 +110,11 @@ class EnvironmentVariableFetchStrategy(FetchStrategy):
         self._auth_requirements: List[AuthRequirement] = auth_requirements or []
         self._security_schemes: Dict[str, Dict[str, SecurityScheme]] = \
             create_security_schemes_from_auth_requirements(self._auth_requirements)
+
+    def set_auth_requirements(self, auth_requirements: List[AuthRequirement]):
+        """Set the list of authentication requirements."""
+        self._auth_requirements = auth_requirements
+        self._security_schemes = create_security_schemes_from_auth_requirements(self._auth_requirements)
 
     def fetch_one(self, request: SecurityOption, options: FetchOptions | None = None) -> List[Credential]:
         """
