@@ -22,13 +22,15 @@ class ParameterProcessor:
     Processes parameters and request bodies for API operations
     """
 
-    def __init__(self, source_descriptions: dict[str, Any]):
+    def __init__(self, source_descriptions: dict[str, Any], blob_store=None):
         """
         Initialize the parameter processor
         Args:
             source_descriptions: OpenAPI source descriptions
+            blob_store: Optional blob store for handling blob references
         """
         self.source_descriptions = source_descriptions
+        self.blob_store = blob_store
 
     @staticmethod
     def _resolve_ref(ref: str, root: dict) -> dict:
@@ -178,9 +180,34 @@ class ParameterProcessor:
 
         return parameters
 
+    def _rehydrate_blob_reference(self, value, key):
+        """
+        Given a value dict with a 'blob_ref', load the blob data and info from the blob store and return the processed dict for multipart upload.
+        If the blob cannot be loaded, returns the original value dict.
+        """
+        if not self.blob_store:
+            logger.warning(f"Blob reference found in field '{key}' but no blob store available")
+            return value
+
+        try:
+            blob_data = self.blob_store.load(value["blob_ref"])
+            blob_info = self.blob_store.info(value["blob_ref"])
+            result = {
+                "content": blob_data,
+                "filename": value.get("filename", "attachment"),
+                "contentType": blob_info.get("content_type", "application/octet-stream"),
+            }
+            logger.debug(f"Rehydrated blob '{value['blob_ref']}' for field '{key}' ({len(blob_data)} bytes)")
+            return result
+        except FileNotFoundError:
+            logger.error(f"Blob {value['blob_ref']} not found for field '{key}'")
+            # Keep the blob reference as-is if we can't load it
+            return value
+
     def _process_multipart_payload(self, payload: dict[str, Any]) -> dict[str, Any]:
         """
         Wraps binary data in a payload dictionary for multipart/form-data upload.
+        Also handles blob references by rehydrating them back to binary data.
 
         Args:
             payload: The dictionary payload to process.
@@ -190,7 +217,10 @@ class ParameterProcessor:
         """
         processed_payload: dict[str, Any] = {}
         for key, value in payload.items():
-            if isinstance(value, (bytes, bytearray)):
+            # Handle blob references
+            if isinstance(value, dict) and "blob_ref" in value:
+                processed_payload[key] = self._rehydrate_blob_reference(value, key)
+            elif isinstance(value, (bytes, bytearray)):
                 logger.debug(f"Wrapping binary data in field '{key}' for multipart upload.")
                 processed_payload[key] = {
                     "content": value,
@@ -198,7 +228,16 @@ class ParameterProcessor:
                     "contentType": "application/octet-stream",
                 }
             else:
-                processed_payload[key] = value
+                # If the value is a dict/list (e.g., payload_json requires a JSON string),
+                # serialize it so that the form field contains a proper JSON string.
+                if isinstance(value, (dict, list)):
+                    try:
+                        processed_payload[key] = json.dumps(value, separators=(",", ":"))
+                    except (TypeError, ValueError):
+                        # Fallback: stringify the value
+                        processed_payload[key] = str(value)
+                else:
+                    processed_payload[key] = value
         return processed_payload
 
     def prepare_request_body(self, request_body: dict, state: ExecutionState) -> dict:
@@ -544,8 +583,19 @@ class ParameterProcessor:
                 # Determine content type based on the spec's definition
                 content_schema = request_body_def.get("content", {})
                 if content_schema and isinstance(content_schema, dict):
-                     # Prioritize application/json, otherwise take the first key
-                    if "application/json" in content_schema:
+                     # If we detect a file upload (bytes or blob_ref) we must choose multipart/form-data
+                    contains_file = False
+                    for _k, _v in payload_dict.items():
+                        if isinstance(_v, (bytes, bytearray)):
+                            contains_file = True
+                            break
+                        if isinstance(_v, dict) and ("content" in _v or "blob_ref" in _v):
+                            contains_file = True
+                            break
+
+                    if contains_file and "multipart/form-data" in content_schema:
+                        determined_content_type = "multipart/form-data"
+                    elif "application/json" in content_schema:
                         determined_content_type = "application/json"
                     elif content_schema:
                         determined_content_type = next(iter(content_schema.keys()), None)
