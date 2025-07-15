@@ -40,7 +40,7 @@ class CredentialToRequestAuthValueTransformer(CredentialTransformer):
             case AuthType.HTTP:  # Handle HTTP auth types
                 if isinstance(credential.auth_value, BearerAuth):
                     credential.request_auth_value = RequestAuthValue(
-                        location=credential.security_scheme.location,
+                        location=AuthLocation.HEADER,
                         name="Authorization",
                         auth_value=f"Bearer {credential.auth_value.token}"
                     )
