@@ -37,7 +37,8 @@ class OAKRunner:
         arazzo_doc: Optional[ArazzoDoc] = None,
         source_descriptions: dict[str, OpenAPIDoc] = None,
         http_client=None,
-        auth_provider=None
+        auth_provider=None,
+        blob_store=None
     ):
         """
         Initialize the runner with Arazzo document and source descriptions
@@ -47,6 +48,7 @@ class OAKRunner:
             source_descriptions: Dictionary of Open API Specs where the key is the source description name as defined in the Arazzo document
             http_client: Optional HTTP client for direct API calls (defaults to requests)
             auth_provider: Optional authentication provider
+            blob_store: Optional blob store for large/binary responses (None = disabled)
         """
         if not arazzo_doc and not source_descriptions:
             raise ValueError("Either arazzo_doc or source_descriptions must be provided.")
@@ -73,7 +75,7 @@ class OAKRunner:
         http_executor = HTTPExecutor(http_client, self.auth_provider)
 
         # Initialize step executor
-        self.step_executor = StepExecutor(http_executor, self.source_descriptions)
+        self.step_executor = StepExecutor(http_executor, self.source_descriptions, blob_store=blob_store)
 
         # Execution state
         self.execution_states = {}
@@ -87,7 +89,7 @@ class OAKRunner:
         }
 
     @classmethod
-    def from_arazzo_path(cls, arazzo_path: str, base_path: str = None, http_client=None, auth_provider=None):
+    def from_arazzo_path(cls, arazzo_path: str, base_path: str = None, http_client=None, auth_provider=None, blob_store=None):
         """
         Initialize the runner with an Arazzo document path
 
@@ -95,21 +97,28 @@ class OAKRunner:
             arazzo_path: Path to the Arazzo document
             base_path: Optional base path for source descriptions
             http_client: Optional HTTP client for direct API calls (defaults to requests)
+            auth_provider: Optional authentication provider
+            blob_store: Optional blob store for large/binary responses (None = disabled)
         """
         if not arazzo_path:
             raise ValueError("Arazzo document path is required to initialize the runner.")
 
         arazzo_doc = load_arazzo_doc(arazzo_path)
         source_descriptions = load_source_descriptions(arazzo_doc, arazzo_path, base_path, http_client)
-        return cls(arazzo_doc, source_descriptions, http_client, auth_provider)
+        return cls(arazzo_doc=arazzo_doc,
+                   source_descriptions=source_descriptions,
+                   http_client=http_client,
+                   auth_provider=auth_provider,
+                   blob_store=blob_store)
 
     @classmethod
-    def from_openapi_path(cls, openapi_path: str):
+    def from_openapi_path(cls, openapi_path: str, blob_store=None):
         """
         Initialize the runner with a single OpenAPI specification path.
 
         Args:
             openapi_path: Path to the local OpenAPI specification file.
+            blob_store: Optional blob store for large/binary responses (None = disabled)
         """
         if not openapi_path:
             raise ValueError("OpenAPI specification path is required.")
@@ -128,7 +137,8 @@ class OAKRunner:
             arazzo_doc=None,
             source_descriptions=source_descriptions,
             http_client=None, 
-            auth_provider=None    
+            auth_provider=None,
+            blob_store=blob_store
         )
 
     def register_callback(self, event_type: str, callback: Callable):

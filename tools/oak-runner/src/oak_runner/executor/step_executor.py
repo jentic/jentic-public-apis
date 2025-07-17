@@ -30,6 +30,7 @@ class StepExecutor:
         http_client: HTTPExecutor,
         source_descriptions: dict[str, Any],
         testing_mode: bool = False,
+        blob_store=None,
     ):
         """
         Initialize the step executor
@@ -38,13 +39,12 @@ class StepExecutor:
             http_client: HTTP client for executing API requests
             source_descriptions: OpenAPI source descriptions
             testing_mode: If True, enable test-specific behaviors like fallback outputs
+            blob_store: Optional blob store for handling large responses (None = disabled)
         """
         self.http_client = http_client
         self.source_descriptions = source_descriptions
         self.testing_mode = testing_mode
-
-        # Pass blob_store from http_client to parameter_processor for rehydration
-        blob_store = getattr(http_client, 'blob_store', None)
+        self.blob_store = blob_store
 
         # Initialize components
         self.operation_finder = OperationFinder(source_descriptions)
@@ -54,6 +54,51 @@ class StepExecutor:
         self.action_handler = ActionHandler(source_descriptions)
         self.server_processor = ServerProcessor(source_descriptions)
 
+    def _maybe_store_as_blob(self, response: dict, step_id: str) -> dict:
+        """
+        Handle blob storage for response if blob_store is available and appropriate.
+        
+        Args:
+            response: Response from HTTPExecutor containing body and blob_metadata
+            step_id: ID of the current step for logging
+            
+        Returns:
+            Updated response with blob reference if stored, original response otherwise
+        """
+        if not self.blob_store:
+            return response
+            
+        blob_metadata = response.get("blob_metadata", {})
+        if not blob_metadata.get("should_store", False):
+            return response
+            
+        # Store the response body as a blob
+        try:
+            metadata = {
+                "content_type": blob_metadata.get("content_type", ""),
+                "size": blob_metadata.get("size", 0),
+                "step_id": step_id,
+                "status_code": response.get("status_code", 0)
+            }
+            
+            blob_id = self.blob_store.save(response["body"], metadata)
+            
+            logger.info(f"Stored response as blob {blob_id} for step {step_id} "
+                       f"({blob_metadata.get('size', 0)} bytes, {blob_metadata.get('content_type', 'unknown')})")
+            
+            # Replace body with blob reference
+            response_copy = response.copy()
+            response_copy["body"] = {
+                "blob_ref": blob_id,
+                "content_type": blob_metadata.get("content_type", ""),
+                "size": blob_metadata.get("size", 0)
+            }
+            
+            return response_copy
+            
+        except Exception as e:
+            logger.error(f"Failed to store blob for step {step_id}: {e}")
+            return response
 
     def execute_step(self, step: dict, state: ExecutionState) -> dict:
         """
@@ -126,6 +171,9 @@ class StepExecutor:
             security_options=security_options,
             source_name=source_name,
         )
+
+        # Handle blob storage at workflow layer
+        response = self._maybe_store_as_blob(response, step.get("stepId", "unknown"))
 
         # Check success criteria
         success = self.success_checker.check_success_criteria(step, response, state)
@@ -223,6 +271,9 @@ class StepExecutor:
             security_options=security_options,
             source_name=source_name,
         )
+
+        # Handle blob storage at workflow layer
+        response = self._maybe_store_as_blob(response, step.get("stepId", "unknown"))
 
         # Check success criteria
         success = self.success_checker.check_success_criteria(step, response, state)
@@ -366,6 +417,11 @@ class StepExecutor:
                 request_body=request_body_payload,
                 security_options=security_options
             )
+            
+            # Handle blob storage for direct operations (always treated as final output)
+            if self.blob_store:
+                response_data = self._maybe_store_as_blob(response_data, f"direct-{log_identifier}")
+            
             logger.debug(f"Direct operation execution completed ({log_identifier}) - Status: {response_data.get('status_code')}")
             return response_data
         except Exception as e:
