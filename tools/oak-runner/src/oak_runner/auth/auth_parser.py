@@ -205,12 +205,6 @@ def extract_auth_from_openapi(openapi_spec: dict[str, Any]) -> list[AuthRequirem
             flows = scheme_data.get("flows", {})
 
             for flow_type, flow_data in flows.items():
-                # --- OAK RUNNER CHANGE: Skip unsupported OAuth flows ---
-                if flow_type in ["implicit", "authorizationCode"]:
-                    logger.debug(f"Skipping unsupported OAuth2 flow '{flow_type}' for scheme '{scheme_name}'.")
-                    continue  # Skip this flow
-                # --- END OAK RUNNER CHANGE ---
-
                 scopes = list(flow_data.get("scopes", {}).keys())
 
                 auth_urls = {}

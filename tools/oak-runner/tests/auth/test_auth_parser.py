@@ -120,7 +120,7 @@ class TestAuthParser(unittest.TestCase):
         for req in auth_reqs:
             req.source_description_id = "test_oauth2"
 
-        self.assertEqual(len(auth_reqs), 0)
+        self.assertEqual(len(auth_reqs), 1)
 
     def test_extract_auth_from_openapi_bearer(self):
         """Test extracting bearer token authentication from OpenAPI spec."""
@@ -169,11 +169,11 @@ class TestAuthParser(unittest.TestCase):
 
         auth_reqs = extract_auth_from_openapi(openapi_spec)
 
-        self.assertEqual(len(auth_reqs), 1)
+        self.assertEqual(len(auth_reqs), 2)
 
         auth_types = [req.auth_type for req in auth_reqs]
         self.assertIn(AuthType.API_KEY, auth_types)
-        self.assertNotIn(AuthType.OAUTH2, auth_types)
+        self.assertIn(AuthType.OAUTH2, auth_types)
 
         api_key_auth = next(req for req in auth_reqs if req.auth_type == AuthType.API_KEY)
         self.assertEqual(api_key_auth.name, "api_key")
@@ -233,30 +233,6 @@ class TestAuthParser(unittest.TestCase):
         self.assertEqual(oauth2_dict["scopes"], ["read", "write"])
         self.assertEqual(oauth2_dict["auth_urls"], {"authorization": "https://example.com/auth"})
 
-    def test_extract_auth_from_openapi_oauth2_authcode_only(self):
-        """Test that OAuth2 authorizationCode flow is skipped."""
-        spec = {
-            "openapi": "3.0.0",
-            "info": {"title": "Test AuthCode", "version": "1.0.0"},
-            "components": {
-                "securitySchemes": {
-                    "oauth2AuthCode": {
-                        "type": "oauth2",
-                        "flows": {
-                            "authorizationCode": {
-                                "authorizationUrl": "https://example.com/auth",
-                                "tokenUrl": "https://example.com/token",
-                                "scopes": {"read": "Read access"}
-                            }
-                        }
-                    }
-                }
-            },
-            "security": [{"oauth2AuthCode": ["read"]}]
-        }
-        auth_reqs = extract_auth_from_openapi(spec)
-        self.assertEqual(len(auth_reqs), 0, "AuthorizationCode flow should be skipped")
-
     def test_extract_auth_from_openapi_openid_only(self):
         """Test that OpenID Connect is skipped."""
         spec = {
@@ -300,10 +276,10 @@ class TestAuthParser(unittest.TestCase):
             "security": [{"mixedOAuth": ["internal"]}]
         }
         auth_reqs = extract_auth_from_openapi(spec)
-        self.assertEqual(len(auth_reqs), 1, "Only supported flows should be extracted")
-        self.assertEqual(auth_reqs[0].auth_type, AuthType.OAUTH2)
-        self.assertEqual(auth_reqs[0].flow_type, "clientCredentials")
-        self.assertEqual(auth_reqs[0].scopes, ["internal"])
+        self.assertEqual(len(auth_reqs), 2, "All flows should be extracted")
+        self.assertEqual(auth_reqs[1].auth_type, AuthType.OAUTH2)
+        self.assertEqual(auth_reqs[1].flow_type, "clientCredentials")
+        self.assertEqual(auth_reqs[1].scopes, ["internal"])
 
     def test_extract_auth_from_openapi_mixed_schemes(self):
         """Test handling of mixed supported/unsupported security schemes."""
@@ -337,11 +313,10 @@ class TestAuthParser(unittest.TestCase):
             ]
         }
         auth_reqs = extract_auth_from_openapi(spec)
-        self.assertEqual(len(auth_reqs), 2, "Only supported schemes should be extracted")
+        self.assertEqual(len(auth_reqs), 3, "All schemes must be extracted")
         extracted_types = {req.auth_type for req in auth_reqs}
         self.assertIn(AuthType.API_KEY, extracted_types)
         self.assertIn(AuthType.HTTP, extracted_types)
-        self.assertNotIn(AuthType.OAUTH2, extracted_types)
         self.assertNotIn(AuthType.OPENID, extracted_types)
 
 
