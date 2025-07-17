@@ -1,9 +1,8 @@
 ---
 name: Import OpenAPI to Jentic OAK
-description: Request import of OpenAPI spec to Jentic OAK from an OpenAPI URL.
 about: Request import of OpenAPI spec to Jentic OAK from an OpenAPI URL.
 title: "[AUTO] Import OpenAPI to Jentic Oak: "
-labels: [enhancement]
+labels: enhancement
 assignees: ''
 
 ---
