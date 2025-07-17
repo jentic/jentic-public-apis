@@ -4,12 +4,14 @@ HTTP Client for OAK Runner
 
 This module provides HTTP request handling for the OAK Runner.
 """
-
 import logging
 import os
 from typing import Any
 from typing import Optional
 from oak_runner.auth.models import SecurityOption, RequestAuthValue, AuthLocation
+from oak_runner.auth.credentials.provider import CredentialProvider
+from oak_runner.auth.credentials.fetch import FetchOptions
+from oak_runner.auth.credentials.models import Credential
 from oak_runner.auth.default_credential_provider import DefaultCredentialProvider
 import requests
 
@@ -20,7 +22,7 @@ logger = logging.getLogger("arazzo-runner.http")
 class HTTPExecutor:
     """HTTP client for executing API requests in Arazzo workflows"""
 
-    def __init__(self, http_client=None, auth_provider: Optional[DefaultCredentialProvider] = None):
+    def __init__(self, http_client=None, auth_provider: Optional[CredentialProvider] = None):
         """
         Initialize the HTTP client
 
@@ -29,7 +31,7 @@ class HTTPExecutor:
             auth_provider: Optional authentication provider
         """
         self.http_client = http_client or requests.Session()
-        self.auth_provider: Optional[DefaultCredentialProvider] = auth_provider
+        self.auth_provider: Optional[CredentialProvider] = auth_provider
 
     def _get_content_type_category(self, content_type: str | None) -> str:
         """
@@ -349,18 +351,21 @@ class HTTPExecutor:
 
         try:
             # If security options are provided, use them to resolve credentials
-            if security_options and hasattr(self.auth_provider, "resolve_credentials"):
+            if security_options:
                 logger.debug(f"Resolving credentials for security options: {security_options}")
                 
                 # Get auth values for the security requirements
-                request_auth_values: list[RequestAuthValue] = self.auth_provider.resolve_credentials(security_options, source_name)
-                
-                if not request_auth_values:
+                fetch_options = FetchOptions(
+                    source_name=source_name
+                )
+                credentials: list[Credential] = self.auth_provider.get_credentials(security_options, fetch_options)
+                if not credentials:
                     logger.debug("No credentials resolved for the security requirements")
                     return
-                
+
                 # Apply each auth value to the request
-                for auth_value in request_auth_values:
+                for credential in credentials:
+                    auth_value: RequestAuthValue = credential.request_auth_value
                     if auth_value.location == AuthLocation.QUERY:
                         query_params[auth_value.name] = auth_value.auth_value
                         logger.debug(f"Applied '{auth_value.name}' as query parameter")
