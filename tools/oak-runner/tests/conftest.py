@@ -14,13 +14,12 @@ class MockCredentialProvider:
 @pytest.fixture
 def basic_http_client() -> HTTPExecutor:
     """HTTP client without auth provider for basic tests"""
-    return HTTPExecutor(blob_store=InMemoryBlobStore())
+    return HTTPExecutor()
 
 
 @pytest.fixture  
 def http_client() -> HTTPExecutor:
-    """HTTP client with mock auth provider and in-memory blob store for tests"""
+    """HTTP client with mock auth provider for tests"""
     return HTTPExecutor(
-        auth_provider=MockCredentialProvider(),
-        blob_store=InMemoryBlobStore()
+        auth_provider=MockCredentialProvider()
     ) 

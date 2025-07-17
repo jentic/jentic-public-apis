@@ -14,7 +14,7 @@ import requests
 from unittest.mock import patch, MagicMock
 from oak_runner.auth.models import SecurityOption, SecurityRequirement, RequestAuthValue, AuthLocation
 from oak_runner.http import HTTPExecutor
-from oak_runner.blob_store import InMemoryBlobStore
+
 
 logger = logging.getLogger(__name__)
 
@@ -501,13 +501,9 @@ def test_execute_request_binary_response(http_client: HTTPExecutor):
             source_name=None
         )
 
-        # Binary content should now be stored as a blob reference
-        assert isinstance(response['body'], dict)
-        assert 'blob_ref' in response['body']
-        assert 'content_type' in response['body']
-        assert 'size' in response['body']
-        assert response['body']['content_type'] == 'image/png'
-        assert response['body']['size'] == 9  # len(b'imagedata')
+        # Binary content should be returned as raw bytes; blob storage is handled by the workflow layer
+        assert isinstance(response['body'], (bytes, bytearray))
+        assert response['body'] == b'imagedata'
 
 
 def test_execute_request_text_response(http_client: HTTPExecutor):
@@ -806,7 +802,7 @@ def test_execute_request_multipart_missing_content_key(http_client: HTTPExecutor
 def test_execute_request_large_binary_response(http_client: HTTPExecutor):
     """Test handling of a larger binary response to ensure it still gets stored as blob."""
     # Get the blob store from the fixture for verification
-    blob_store = http_client.blob_store
+    # blob_store = http_client.blob_store # This line is removed
     
     # Create a larger binary payload (e.g., a fake PNG header + data)
     large_binary_data = b'\x89PNG\r\n\x1a\n' + b'x' * 1000  # 1008 bytes
@@ -827,18 +823,15 @@ def test_execute_request_large_binary_response(http_client: HTTPExecutor):
             source_name=None
         )
 
-        # Large binary content should also be stored as a blob reference
-        assert isinstance(response['body'], dict)
-        assert 'blob_ref' in response['body']
-        assert 'content_type' in response['body']
-        assert 'size' in response['body']
-        assert response['body']['content_type'] == 'image/png'
-        assert response['body']['size'] == 1008  # len(large_binary_data)
+        # Large binary content is returned as raw bytes; blob storage is handled by the workflow layer
+        assert isinstance(response['body'], (bytes, bytearray))
+        assert len(response['body']) == 1008
+        assert response['body'] == large_binary_data
         
         # Verify the actual blob content matches what we expect
-        blob_id = response['body']['blob_ref']
-        stored_bytes = blob_store.load(blob_id)
-        assert stored_bytes == large_binary_data
+        # blob_id = response['body']['blob_ref'] # This line is removed
+        # stored_bytes = blob_store.load(blob_id) # This line is removed
+        # assert stored_bytes == large_binary_data # This line is removed
 
 
 if __name__ == "__main__":

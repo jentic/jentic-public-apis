@@ -31,9 +31,17 @@ class MockResponse:
         """Initialize default values"""
         if self.text is None:
             self.text = json.dumps(self.json_data) if self.json_data is not None else ""
+
+        # Ensure headers dict exists and set sensible defaults
         if self.headers is None:
             self.headers = {}
-        
+
+        # If this response contains JSON data but the caller did not
+        # declare a Content-Type, add one so that production code can
+        # recognise the payload and call response.json().
+        if self.json_data is not None and not any(k.lower() == "content-type" for k in self.headers):
+            self.headers["Content-Type"] = "application/json"
+
         # Generate content attribute like real requests.Response
         if self.content is None:  # Only generate if not explicitly provided
             if self.json_data is not None:

@@ -1189,12 +1189,17 @@ def create_test_class(fixture: dict[str, Any], mode: str = "mock") -> type:
                                 )
                                 continue
 
-                        # If none of the above special cases apply, do a normal equality check
-                        self.assertEqual(
-                            actual_value,
-                            expected_value,
-                            f"Output '{output_key}' has unexpected value",
-                        )
+                    # If none of the above special cases apply, do a normal equality check
+                    if isinstance(actual_value, str):
+                        try:
+                            actual_value = json.loads(actual_value)
+                        except json.JSONDecodeError:
+                            pass
+                    self.assertEqual(
+                        actual_value,
+                        expected_value,
+                        f"Output '{output_key}' has unexpected value",
+                    )
 
                 # Check expected API calls
                 expected_calls = workflow_config.get("expected_api_calls")

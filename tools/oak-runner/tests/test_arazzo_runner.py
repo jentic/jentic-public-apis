@@ -48,6 +48,13 @@ class MockResponse:
         self._json_data = json_data
         self.text = text or ""
         self.headers = headers or {}
+
+        # If this response carries JSON but caller omitted Content-Type,
+        # add one so that the production HTTP layer will parse it.
+        if json_data is not None and not any(k.lower() == "content-type" for k in self.headers):
+            self.headers["Content-Type"] = "application/json"
+
+        self.content = content or b""
         
         # Generate content attribute like real requests.Response
         if content is not None:
