@@ -13,6 +13,7 @@ from oak_runner.auth.credentials.provider import CredentialProvider
 from oak_runner.auth.credentials.fetch import FetchOptions
 from oak_runner.auth.credentials.models import Credential
 import requests
+from oak_runner.blob_utils import analyze_response_for_blob
 
 # Configure logging
 logger = logging.getLogger("arazzo-runner.http")
@@ -56,67 +57,6 @@ class HTTPExecutor:
         else:
             return 'raw'
 
-    def _analyze_response_for_blob(self, response) -> dict:
-        """
-        Analyze if response content should be stored as a blob.
-        This method only analyzes and provides metadata - it does not store anything.
-
-        Args:
-            response: The HTTP response object
-
-        Returns:
-            Dictionary with blob analysis metadata
-        """
-        content_type = response.headers.get("Content-Type", "")
-        size = len(response.content)
-        
-        # Default blob threshold for analysis (can be overridden by workflow layer)
-        blob_threshold = int(os.environ.get('ARAZZO_BLOB_THRESHOLD', '32768'))  # 32KB
-        
-        should_store = self._should_store_as_blob(content_type, size, blob_threshold)
-        
-        return {
-            "should_store": should_store,
-            "content_type": content_type,
-            "size": size,
-            "is_binary": self._is_binary_content(content_type)
-        }
-    
-    def _should_store_as_blob(self, content_type: str, size: int, blob_threshold: int) -> bool:
-        """
-        Determine if response content should be stored as a blob.
-
-        Args:
-            content_type: The response Content-Type header
-            size: Size of the response content in bytes
-            blob_threshold: Size threshold for blob storage
-
-        Returns:
-            True if content should be stored as blob, False otherwise
-        """
-        if not content_type:
-            return size > blob_threshold
-
-        content_type_lower = content_type.lower()
-
-        # Always store certain binary content types as blobs regardless of size
-        binary_content_types = [
-            "application/octet-stream",
-            "audio/",
-            "video/",
-            "image/",
-            "application/pdf",
-            "application/zip",
-            "application/x-tar",
-            "application/gzip"
-        ]
-
-        if any(content_type_lower.startswith(ct) for ct in binary_content_types):
-            return True
-
-        # Store large responses as blobs
-        return size > blob_threshold
-    
     def _is_binary_content(self, content_type: str) -> bool:
         """
         Check if content type represents binary data.
@@ -316,7 +256,8 @@ class HTTPExecutor:
         body_value = self._get_response_content(response)
         
         # Analyze blob storage metadata without actually storing
-        blob_metadata = self._analyze_response_for_blob(response)
+        is_binary = self._is_binary_content(response.headers.get("Content-Type", ""))
+        blob_metadata = analyze_response_for_blob(response, is_binary)
 
         return {
             "status_code": response.status_code,
