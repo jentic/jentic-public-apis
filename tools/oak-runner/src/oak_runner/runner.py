@@ -378,6 +378,9 @@ class OAKRunner:
         state.current_step_id = step_id
         state.status[step_id] = StepStatus.RUNNING
 
+        # Determine if this is the final step – used to control blob-storage behaviour
+        is_final_step = (next_step_idx == len(steps) - 1)
+
         # Dump state before executing the step for debugging
         logger.info(f"===== EXECUTING STEP: {step_id} =====")
         dump_state(state)
@@ -394,7 +397,20 @@ class OAKRunner:
                 step_result = self._execute_nested_workflow(next_step, state)
             else:
                 # Execute operation step
-                step_result = self.step_executor.execute_step(next_step, state)
+                # Temporarily disable blob storage for non-final steps so that only the
+                # workflow’s last output is eligible for blob-ification.  This avoids
+                # creating blob placeholders that intermediate steps (and thus the LLM)
+                # can’t conveniently use.
+                original_blob_store = self.step_executor.blob_store
+                if not is_final_step:
+                    self.step_executor.blob_store = None  # Disable for this call only
+
+                try:
+                    step_result = self.step_executor.execute_step(next_step, state)
+                finally:
+                    # Restore the blob store so later steps (including the final one)
+                    # can still use it.
+                    self.step_executor.blob_store = original_blob_store
 
             success = step_result.get("success", False)
 

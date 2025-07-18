@@ -4,7 +4,13 @@ import json
 import shutil
 import time
 import unittest
+from typing import Any
+
+from oak_runner import OAKRunner, WorkflowExecutionStatus
 from oak_runner.blob_store import InMemoryBlobStore, LocalFileBlobStore
+from .base_test import ArazzoTestCase
+from .mocks.http_client import MockResponse, RequestMatcher
+
 
 class TestInMemoryBlobStore(unittest.TestCase):
     def test_load_nonexistent_blob_raises(self):
@@ -98,6 +104,171 @@ class TestLocalFileBlobStore(unittest.TestCase):
         # The .bin file may remain, but info/load should now fail
         with self.assertRaises(FileNotFoundError):
             self.store.info(id_blob)
+
+
+class TestBlobLogicInWorkflow(ArazzoTestCase):
+    """Workflow-level blob logic tests."""
+
+    def test_large_binary_not_stored_in_workflow(self):  # noqa: C901 – fine for test
+        # ------------------------------------------------------------------
+        # 1. Minimal OpenAPI spec
+        # ------------------------------------------------------------------
+        openapi_spec: dict[str, Any] = {
+            "openapi": "3.0.0",
+            "info": {"title": "Blob API", "version": "1.0.0"},
+            "servers": [{"url": "https://api.example.com/v1"}],
+            "paths": {
+                "/binary": {
+                    "get": {
+                        "operationId": "getBinary",
+                        "responses": {
+                            "200": {
+                                "description": "binary data",
+                                "content": {
+                                    "audio/mpeg": {
+                                        "schema": {"type": "string", "format": "binary"}
+                                    }
+                                },
+                            }
+                        },
+                    }
+                },
+                "/upload": {
+                    "post": {
+                        "operationId": "uploadFile",
+                        "requestBody": {
+                            "required": True,
+                            "content": {
+                                "multipart/form-data": {
+                                    "schema": {
+                                        "type": "object",
+                                        "properties": {
+                                            "file": {"type": "string", "format": "binary"}
+                                        },
+                                    }
+                                }
+                            },
+                        },
+                        "responses": {
+                            "200": {
+                                "description": "OK",
+                                "content": {
+                                    "application/json": {
+                                        "schema": {
+                                            "type": "object",
+                                            "properties": {"status": {"type": "string"}},
+                                        }
+                                    }
+                                },
+                            }
+                        },
+                    }
+                },
+            },
+        }
+
+        openapi_path = self.create_openapi_spec(openapi_spec, "blob_api")
+
+        # ------------------------------------------------------------------
+        # 2. Arazzo workflow
+        # ------------------------------------------------------------------
+        arazzo_workflow: dict[str, Any] = {
+            "workflowId": "binaryWorkflow",
+            "summary": "Fetch binary and upload",
+            "inputs": {"type": "object", "properties": {}},
+            "steps": [
+                {
+                    "stepId": "fetchBinary",
+                    "operationId": "getBinary",
+                    "successCriteria": [{"condition": "$statusCode == 200"}],
+                    "outputs": {"audio": "$response.body"},
+                },
+                {
+                    "stepId": "sendBinary",
+                    "operationId": "uploadFile",
+                    "requestBody": {
+                        "contentType": "multipart/form-data",
+                        "payload": {"file": "$steps.fetchBinary.outputs.audio"},
+                    },
+                    "successCriteria": [{"condition": "$statusCode == 200"}],
+                    "outputs": {"status": "$response.body#/status"},
+                },
+            ],
+            "outputs": {"status": "$steps.sendBinary.outputs.status"},
+        }
+
+        arazzo_spec: dict[str, Any] = {
+            "arazzo": "1.0.0",
+            "info": {"title": "Blob Workflow", "version": "1.0.0"},
+            "sourceDescriptions": [
+                {"name": "blobApi", "url": openapi_path, "type": "openapi"}
+            ],
+            "workflows": [arazzo_workflow],
+        }
+
+        arazzo_doc = self.create_arazzo_spec(arazzo_spec, "blob_workflow")
+
+        # ------------------------------------------------------------------
+        # 3. Mock HTTP responses
+        # ------------------------------------------------------------------
+        large_binary = os.urandom(50_000)  # 50 KiB
+
+        # GET /binary returns large binary
+        self.http_client.add_matcher(
+            RequestMatcher("GET", "https://api.example.com/v1/binary"),
+            MockResponse(200, headers={"Content-Type": "audio/mpeg"}, content=large_binary),
+        )
+
+        # POST /upload returns JSON {"status": "ok"}
+        self.http_client.add_static_response(
+            "POST",
+            "https://api.example.com/v1/upload",
+            status_code=200,
+            json_data={"status": "ok"},
+            headers={"Content-Type": "application/json"},
+        )
+
+        # ------------------------------------------------------------------
+        # 4. Execute workflow with blob store attached
+        # ------------------------------------------------------------------
+        blob_store = InMemoryBlobStore()
+        runner = OAKRunner(
+            arazzo_doc=arazzo_doc,
+            source_descriptions={"blobApi": openapi_spec},
+            http_client=self.http_client,
+            blob_store=blob_store,
+        )
+
+        result = self.execute_workflow(runner, "binaryWorkflow", inputs={})
+
+        # ------------------------------------------------------------------
+        # 5. Assertions
+        # ------------------------------------------------------------------
+        self.assertEqual(
+            result.status,
+            WorkflowExecutionStatus.WORKFLOW_COMPLETE,
+            "Workflow should complete successfully",
+        )
+
+        # Blob store should still be empty (no intermediate storage)
+        self.assertEqual(
+            len(blob_store.blobs),
+            0,
+            "Blob store must remain empty for intermediate steps",
+        )
+
+        # First step output should be raw bytes
+        audio_bytes = result.step_outputs["fetchBinary"]["audio"]  # type: ignore[index]
+        self.assertIsInstance(audio_bytes, (bytes, bytearray))
+        self.assertEqual(
+            len(audio_bytes),
+            len(large_binary),
+            "Uploaded bytes length mismatch",
+        )
+
+        # Two HTTP calls should have been made
+        self.validate_api_calls(expected_call_count=2)
+
 
 if __name__ == "__main__":
     unittest.main() 
