@@ -234,12 +234,4 @@ class InMemoryBlobStore:
         if blob_id in self.access_order:
             self.access_order.remove(blob_id)
 
-
-def get_default_blob_store() -> BlobStore:
-    """Get the default blob store instance."""
-    # Check for feature flag to disable blob placeholders
-    if os.getenv("JENTIC_BLOB_PLACEHOLDERS", "1").lower() in ("0", "false", "no"):
-        # Return a no-op store that doesn't actually store anything
-        return InMemoryBlobStore(max_size=0)
-    
-    return LocalFileBlobStore() 
+ 
