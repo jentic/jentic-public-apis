@@ -216,6 +216,36 @@ uvx oak-runner execute-operation --openapi-path path/to/spec.yaml --operation-id
 ```
 
 
+### Blob Storage
+
+OAK Runner supports blob storage for handling large binary responses without putting the raw binary into LLM context windows. This feature is **disabled by default** and must be explicitly enabled.
+
+#### Enabling Blob Storage
+
+Instantiate either `LocalFileBlobStore` (persists to disk) or `InMemoryBlobStore` (ephemeral) and pass it to `OAKRunner`:
+
+```python
+from oak_runner import OAKRunner, LocalFileBlobStore
+
+blob_store = LocalFileBlobStore()  # Or InMemoryBlobStore() for testing
+
+runner = OAKRunner.from_arazzo_path("workflow.yaml", blob_store=blob_store)
+result = runner.execute_workflow("download-file", {"url": "https://example.com/large-file.pdf"})
+```
+
+Blob storage is **disabled** when `blob_store` is omitted or `None` (the default).
+
+### Configuration
+
+You can configure the blob storage threshold and directory via environment variables:
+- `ARAZZO_BLOB_THRESHOLD`: Size threshold in bytes for storing as blob (default: 32768)
+- `BLOB_STORE_PATH`: Directory for blob storage (default: ./blobs)
+
+**State Management**: Blob storage introduces additional state that must be managed:
+- Blob files are stored on disk and referenced by unique IDs
+- State persists between workflow executions
+
+
 ## Overview
 
 OAK Runner orchestrates API workflows by:
