@@ -9,6 +9,8 @@ import os
 from typing import Any
 import requests
 
+from .blob_store import BlobStore
+
 # Configure logging
 logger = logging.getLogger("arazzo-runner.blob_utils")
 
@@ -62,7 +64,7 @@ def analyze_response_for_blob(response: requests.Response, is_binary: bool) -> d
     }
 
 
-def maybe_store_response_as_blob(blob_store: Any, response: dict, step_id: str) -> dict:
+def maybe_store_response_as_blob(blob_store: BlobStore, response: dict, step_id: str) -> dict:
     """
     Handle blob storage for response if blob_store is available and appropriate.
 
