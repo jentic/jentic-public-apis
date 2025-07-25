@@ -31,7 +31,6 @@ The repository focuses on:
 1. Standardized OpenAPI specifications for public APIs
 1. Arazzo workflows that define composable operations across one or more APIs
 1. Associated tooling, for example to help import and enrich documentation, or to convert it out into other formats (e.g., AI model provider's tool definition formats).
-1. Reference implementations of libraries to allow easy execution of API operations and workflows in this repository.
 1. Evaluations and scorecards to measure API knowledge completeness, accuracy and AI-readiness
 1. RFCs for extensions to open formats used in the repository, and any other proposals.
 
@@ -58,13 +57,6 @@ The OAK Repository organizes API specifications and workflows using a standardiz
 
 For detailed information on the directory structure, please refer to [STRUCTURE.md](STRUCTURE.md).
 
-## OAK Runner
-
-The **OAK Runner** is the reference tool for executing agentic workflows and API operations described in this repository. It provides a robust engine for running OpenAPI and Arazzo-based workflows, handling authentication, security requirements, and step orchestration for agents and developers alike.
-
-- **Location:** The OAK Runner tool and its source code can be found in [`tools/oak-runner/`](tools/oak-runner/).
-
-For setup and usage instructions, see the [`tools/oak-runner/README.md`](tools/oak-runner/README.md).
 
 ## Acknowledgments
 
