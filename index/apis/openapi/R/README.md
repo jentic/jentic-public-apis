@@ -1,6 +1,6 @@
 # APIs — R
 
-Browsing 226 APIs starting with **R**.
+Browsing 228 APIs starting with **R**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · **R** · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -28,6 +28,7 @@ Browsing 226 APIs starting with **R**.
 | [rapid7.com](../../../../apis/openapi/rapid7.com) | [main](../../../../apis/openapi/rapid7.com/main) |
 | [rapidapi.com](../../../../apis/openapi/rapidapi.com) | [dynamicdocs](../../../../apis/openapi/rapidapi.com/dynamicdocs) · [ecowetter](../../../../apis/openapi/rapidapi.com/ecowetter) · [football-prediction](../../../../apis/openapi/rapidapi.com/football-prediction) |
 | [rappi.com](../../../../apis/openapi/rappi.com) | [main](../../../../apis/openapi/rappi.com/main) |
+| [rapyd.net](../../../../apis/openapi/rapyd.net) | [main](../../../../apis/openapi/rapyd.net/main) |
 | [rarible.org](../../../../apis/openapi/rarible.org) | [main](../../../../apis/openapi/rarible.org/main) |
 | [rasa.io](../../../../apis/openapi/rasa.io) | [main](../../../../apis/openapi/rasa.io/main) |
 | [rasayel.io](../../../../apis/openapi/rasayel.io) | [main](../../../../apis/openapi/rasayel.io/main) |
@@ -197,6 +198,7 @@ Browsing 226 APIs starting with **R**.
 | [rook-connect.com](../../../../apis/openapi/rook-connect.com) | [main](../../../../apis/openapi/rook-connect.com/main) |
 | [roomkeypms.com](../../../../apis/openapi/roomkeypms.com) | [main](../../../../apis/openapi/roomkeypms.com/main) |
 | [roor.app](../../../../apis/openapi/roor.app) | [main](../../../../apis/openapi/roor.app/main) |
+| [rootly.com](../../../../apis/openapi/rootly.com) | [main](../../../../apis/openapi/rootly.com/main) |
 | [rootplatform.com](../../../../apis/openapi/rootplatform.com) | [main](../../../../apis/openapi/rootplatform.com/main) |
 | [roserocket.com](../../../../apis/openapi/roserocket.com) | [main](../../../../apis/openapi/roserocket.com/main) |
 | [rossum.ai](../../../../apis/openapi/rossum.ai) | [main](../../../../apis/openapi/rossum.ai/main) |
