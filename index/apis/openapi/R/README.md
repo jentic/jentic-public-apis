@@ -1,6 +1,6 @@
 # APIs — R
 
-Browsing 228 APIs starting with **R**.
+Browsing 229 APIs starting with **R**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · **R** · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -173,6 +173,7 @@ Browsing 228 APIs starting with **R**.
 | [riotgames.com](../../../../apis/openapi/riotgames.com) | [main](../../../../apis/openapi/riotgames.com/main) |
 | [rippling.com](../../../../apis/openapi/rippling.com) | [main](../../../../apis/openapi/rippling.com/main) |
 | [riserphone.com](../../../../apis/openapi/riserphone.com) | [main](../../../../apis/openapi/riserphone.com/main) |
+| [riskified.com](../../../../apis/openapi/riskified.com) | [main](../../../../apis/openapi/riskified.com/main) |
 | [ritc.io](../../../../apis/openapi/ritc.io) | [main](../../../../apis/openapi/ritc.io/main) · [ritc](../../../../apis/openapi/ritc.io/ritc) |
 | [ritekit](../../../../apis/openapi/ritekit) | [main](../../../../apis/openapi/ritekit/main) |
 | [ritekit.com](../../../../apis/openapi/ritekit.com) | [main](../../../../apis/openapi/ritekit.com/main) · [ritekit-api](../../../../apis/openapi/ritekit.com/ritekit-api) |
