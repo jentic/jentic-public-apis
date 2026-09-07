@@ -1,6 +1,6 @@
 # APIs — S
 
-Browsing 663 APIs starting with **S**.
+Browsing 664 APIs starting with **S**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · **S** · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -329,6 +329,7 @@ Browsing 663 APIs starting with **S**.
 | [spotdraft.com](../../../../apis/openapi/spotdraft.com) | [main](../../../../apis/openapi/spotdraft.com/main) |
 | [spotify.com](../../../../apis/openapi/spotify.com) | [sonallux](../../../../apis/openapi/spotify.com/sonallux) |
 | [spotsense.io](../../../../apis/openapi/spotsense.io) | [main](../../../../apis/openapi/spotsense.io/main) · [spotsense](../../../../apis/openapi/spotsense.io/spotsense) |
+| [spreadshirt.net](../../../../apis/openapi/spreadshirt.net) | [main](../../../../apis/openapi/spreadshirt.net/main) |
 | [spream.co](../../../../apis/openapi/spream.co) | [main](../../../../apis/openapi/spream.co/main) |
 | [spreedly.com](../../../../apis/openapi/spreedly.com) | [main](../../../../apis/openapi/spreedly.com/main) |
 | [sprig.com](../../../../apis/openapi/sprig.com) | [main](../../../../apis/openapi/sprig.com/main) |
