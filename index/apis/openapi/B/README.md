@@ -1,6 +1,6 @@
 # APIs — B
 
-Browsing 204 APIs starting with **B**.
+Browsing 205 APIs starting with **B**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · **B** · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -83,6 +83,7 @@ Browsing 204 APIs starting with **B**.
 | [billberry.ee](../../../../apis/openapi/billberry.ee) | [main](../../../../apis/openapi/billberry.ee/main) |
 | [billetto.dk](../../../../apis/openapi/billetto.dk) | [main](../../../../apis/openapi/billetto.dk/main) |
 | [billetweb.fr](../../../../apis/openapi/billetweb.fr) | [main](../../../../apis/openapi/billetweb.fr/main) |
+| [billfold.app](../../../../apis/openapi/billfold.app) | [main](../../../../apis/openapi/billfold.app/main) |
 | [billie.io](../../../../apis/openapi/billie.io) | [main](../../../../apis/openapi/billie.io/main) |
 | [billingo.hu](../../../../apis/openapi/billingo.hu) | [main](../../../../apis/openapi/billingo.hu/main) |
 | [billit.be](../../../../apis/openapi/billit.be) | [main](../../../../apis/openapi/billit.be/main) |
