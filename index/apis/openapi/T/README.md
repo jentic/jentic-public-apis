@@ -1,6 +1,6 @@
 # APIs — T
 
-Browsing 211 APIs starting with **T**.
+Browsing 212 APIs starting with **T**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · **T** · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -209,6 +209,7 @@ Browsing 211 APIs starting with **T**.
 | [turbinelabs.io](../../../../apis/openapi/turbinelabs.io) | [main](../../../../apis/openapi/turbinelabs.io/main) |
 | [tvmaze](../../../../apis/openapi/tvmaze) | [main](../../../../apis/openapi/tvmaze/main) |
 | [tvmaze.com](../../../../apis/openapi/tvmaze.com) | [main](../../../../apis/openapi/tvmaze.com/main) · [tvmaze-user-api](../../../../apis/openapi/tvmaze.com/tvmaze-user-api) |
+| [twelvedata.com](../../../../apis/openapi/twelvedata.com) | [main](../../../../apis/openapi/twelvedata.com/main) |
 | [twilio.com](../../../../apis/openapi/twilio.com) | [43 APIs](../../../../apis/openapi/twilio.com) |
 | [twin.so](../../../../apis/openapi/twin.so) | [main](../../../../apis/openapi/twin.so/main) |
 | [twinehealth.com](../../../../apis/openapi/twinehealth.com) | [main](../../../../apis/openapi/twinehealth.com/main) |
