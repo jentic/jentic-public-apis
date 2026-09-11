@@ -1,6 +1,6 @@
 # APIs — V
 
-Browsing 51 APIs starting with **V**.
+Browsing 52 APIs starting with **V**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · **V** · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -9,6 +9,7 @@ Browsing 51 APIs starting with **V**.
 | [va.gov](../../../../apis/openapi/va.gov) | [benefits](../../../../apis/openapi/va.gov/benefits) · [confirmation](../../../../apis/openapi/va.gov/confirmation) · [forms](../../../../apis/openapi/va.gov/forms) |
 | [valence.desire2learn.com](../../../../apis/openapi/valence.desire2learn.com) | [main](../../../../apis/openapi/valence.desire2learn.com/main) |
 | [valida-cfdi.com.mx](../../../../apis/openapi/valida-cfdi.com.mx) | [main](../../../../apis/openapi/valida-cfdi.com.mx/main) |
+| [vast.ai](../../../../apis/openapi/vast.ai) | [main](../../../../apis/openapi/vast.ai/main) |
 | [vbout.com](../../../../apis/openapi/vbout.com) | [main](../../../../apis/openapi/vbout.com/main) |
 | [vectara.com](../../../../apis/openapi/vectara.com) | [main](../../../../apis/openapi/vectara.com/main) |
 | [vectara.io](../../../../apis/openapi/vectara.io) | [main](../../../../apis/openapi/vectara.io/main) |
