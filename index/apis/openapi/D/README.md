@@ -1,6 +1,6 @@
 # APIs — D
 
-Browsing 149 APIs starting with **D**.
+Browsing 150 APIs starting with **D**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · **D** · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -22,6 +22,7 @@ Browsing 149 APIs starting with **D**.
 | [dat.com](../../../../apis/openapi/dat.com) | [dat-freight-api](../../../../apis/openapi/dat.com/dat-freight-api) |
 | [data.crunchbase.com](../../../../apis/openapi/data.crunchbase.com) | [main](../../../../apis/openapi/data.crunchbase.com/main) |
 | [data.gov](../../../../apis/openapi/data.gov) | [main](../../../../apis/openapi/data.gov/main) |
+| [data.gov.uk](../../../../apis/openapi/data.gov.uk) | [main](../../../../apis/openapi/data.gov.uk/main) |
 | [data.rcsb.org](../../../../apis/openapi/data.rcsb.org) | [main](../../../../apis/openapi/data.rcsb.org/main) |
 | [data2crm.com](../../../../apis/openapi/data2crm.com) | [main](../../../../apis/openapi/data2crm.com/main) |
 | [databasus.com](../../../../apis/openapi/databasus.com) | [main](../../../../apis/openapi/databasus.com/main) |
