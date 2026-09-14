@@ -1,6 +1,6 @@
 # APIs — J
 
-Browsing 31 APIs starting with **J**.
+Browsing 32 APIs starting with **J**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · **J** · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -10,6 +10,7 @@ Browsing 31 APIs starting with **J**.
 | [jamf.com](../../../../apis/openapi/jamf.com) | [main](../../../../apis/openapi/jamf.com/main) |
 | [jammedapp.com](../../../../apis/openapi/jammedapp.com) | [main](../../../../apis/openapi/jammedapp.com/main) |
 | [javatpoint.com](../../../../apis/openapi/javatpoint.com) | [main](../../../../apis/openapi/javatpoint.com/main) |
+| [jazzhr.com](../../../../apis/openapi/jazzhr.com) | [main](../../../../apis/openapi/jazzhr.com/main) |
 | [jcdecaux.com](../../../../apis/openapi/jcdecaux.com) | [main](../../../../apis/openapi/jcdecaux.com/main) |
 | [jellyfin.local](../../../../apis/openapi/jellyfin.local) | [main](../../../../apis/openapi/jellyfin.local/main) |
 | [jentic.com](../../../../apis/openapi/jentic.com) | [main](../../../../apis/openapi/jentic.com/main) |
