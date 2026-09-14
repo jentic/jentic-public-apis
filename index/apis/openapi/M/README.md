@@ -1,6 +1,6 @@
 # APIs — M
 
-Browsing 226 APIs starting with **M**.
+Browsing 227 APIs starting with **M**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · **M** · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -63,6 +63,7 @@ Browsing 226 APIs starting with **M**.
 | [math.tools](../../../../apis/openapi/math.tools) | [main](../../../../apis/openapi/math.tools/main) |
 | [matrix.org](../../../../apis/openapi/matrix.org) | [main](../../../../apis/openapi/matrix.org/main) |
 | [mattermost.com](../../../../apis/openapi/mattermost.com) | [main](../../../../apis/openapi/mattermost.com/main) |
+| [matule.ru](../../../../apis/openapi/matule.ru) | [main](../../../../apis/openapi/matule.ru/main) |
 | [mavenlink.com](../../../../apis/openapi/mavenlink.com) | [main](../../../../apis/openapi/mavenlink.com/main) |
 | [maxmind.com](../../../../apis/openapi/maxmind.com) | [main](../../../../apis/openapi/maxmind.com/main) |
 | [maya.ph](../../../../apis/openapi/maya.ph) | [main](../../../../apis/openapi/maya.ph/main) |
