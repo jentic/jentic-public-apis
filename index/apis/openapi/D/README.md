@@ -1,6 +1,6 @@
 # APIs — D
 
-Browsing 147 APIs starting with **D**.
+Browsing 148 APIs starting with **D**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · **D** · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -89,6 +89,7 @@ Browsing 147 APIs starting with **D**.
 | [dhlparcel.nl](../../../../apis/openapi/dhlparcel.nl) | [main](../../../../apis/openapi/dhlparcel.nl/main) |
 | [dialgood.com](../../../../apis/openapi/dialgood.com) | [dialgood-api](../../../../apis/openapi/dialgood.com/dialgood-api) |
 | [dialpad.com](../../../../apis/openapi/dialpad.com) | [dialpad-api](../../../../apis/openapi/dialpad.com/dialpad-api) |
+| [dictionaryapi.dev](../../../../apis/openapi/dictionaryapi.dev) | [main](../../../../apis/openapi/dictionaryapi.dev/main) |
 | [dify.ai](../../../../apis/openapi/dify.ai) | [dify-api](../../../../apis/openapi/dify.ai/dify-api) |
 | [digikey.com](../../../../apis/openapi/digikey.com) | [digi-key](../../../../apis/openapi/digikey.com/digi-key) |
 | [digitallinguistics.io](../../../../apis/openapi/digitallinguistics.io) | [main](../../../../apis/openapi/digitallinguistics.io/main) |
