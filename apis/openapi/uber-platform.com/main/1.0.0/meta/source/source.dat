@@ -1,0 +1,3210 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Uber-Like Ride-Hailing Platform API",
+    "description": "REST API for an Uber-like ride-hailing platform. Supports fare estimation, ride requests, driver matching, trip monitoring, PIN verification, route management, ratings, and real-time location tracking.\n\n## Versioning\n\nThe API is versioned via the URL path. The current stable version is v1.\n\n| Version | Base Path | Status  |\n|---------|-----------|-------  |\n| v1      | /api/v1   | Current |\n\nAll endpoints are prefixed with `/api/{version}`. When a new version is released, older versions will continue to work.\n\n## Authentication\n\nMost endpoints require a valid session. Authenticate via `POST /auth/login` to receive a bearer token. Include it in subsequent requests:\n\n```\nAuthorization: Bearer <token>\n```\n\n## Rate Limiting\n\nRequests are rate-limited to 100 requests per minute per user. Unauthenticated requests are limited to 10/min by IP.\n\n| Header                | Description                    |\n|-----------------------|--------------------------------|\n| X-RateLimit-Remaining | Requests left this window      |\n| X-RateLimit-Reset     | Seconds until window reset     |\n\n## Errors\n\nAll errors return a consistent JSON body:\n\n```json\n{\n  \"error\": {\n    \"code\": \"not_found\",\n    \"message\": \"The requested resource does not exist.\",\n    \"status\": 404,\n    \"timestamp\": \"2026-02-28T10:15:30Z\",\n    \"requestId\": \"req-uuid-here\"\n  }\n}\n```\n\n\n### WebSocket Integration (Driver Dispatch)\n\nReal-time ride dispatch notifications are delivered to drivers via WebSocket.\n\n**Initiating the connection:** When the driver opens their app, the client calls `GET /drivers/{driverId}/ws-token` to obtain a short-lived WebSocket authentication token.  \nThe driver app then connects using:\n\n```\nwss://api.uber-platform.com/api/v1/ws?token=<ws_token>\n```\n\n**Server → Driver Events:**\n\n```json\n{\n  \"type\": \"RIDE_DISPATCH\",\n  \"rideId\": \"ride-uuid-456\",\n  \"dispatchedAt\": \"2026-02-28T08:00:30Z\",\n  \"expiresIn\": 15\n}\n```\n\n```json\n{\n  \"type\": \"RIDE_CANCELLED\",\n  \"rideId\": \"ride-uuid-456\",\n  \"reason\": \"Accepted by another driver\"\n}\n```\n\n```json\n{\n  \"type\": \"DESTINATION_CHANGED\",\n  \"rideId\": \"ride-uuid-456\",\n  \"newDropoff\": {\n    \"latitude\": 23.7461,\n    \"longitude\": 90.3742,\n    \"address\": \"Dhanmondi 27, Dhaka\"\n  },\n  \"updatedFareEstimate\": 420.50,\n  \"currency\": \"BDT\",\n  \"changedAt\": \"2026-02-28T08:18:00Z\"\n}\n```\n\nUpon receiving a `RIDE_DISPATCH` event, the driver app should immediately call `GET /drivers/{driverId}/ride-requests` to fetch full ride details.\nUpon receiving a `DESTINATION_CHANGED` event, the driver app should call `GET /rides/{rideId}/route` to fetch the updated route.\n",
+    "version": "1.0.0",
+    "x-jentic-source-url": "https://api.swaggerhub.com/apis/buet-0a8/uber-ride-sharing-api/1.0.0"
+  },
+  "servers": [
+    {
+      "url": "https://api.uber-platform.com/api/v1",
+      "description": "Production"
+    }
+  ],
+  "tags": [
+    {
+      "name": "WebSocket",
+      "description": "WebSocket token generation for real-time driver dispatch and ride event notifications."
+    },
+    {
+      "name": "Fare Estimates",
+      "description": "Upfront fare calculation based on distance, time, traffic, and surge pricing. Must be obtained before creating a ride."
+    },
+    {
+      "name": "Rides",
+      "description": "Core ride lifecycle — create, accept, arrive, start, complete, and cancel rides."
+    },
+    {
+      "name": "Driver Matching",
+      "description": "Geospatial driver queries and matching outcomes."
+    },
+    {
+      "name": "Drivers",
+      "description": "Driver profiles and availability management."
+    },
+    {
+      "name": "Location Tracking",
+      "description": "REST-based GPS location updates and position queries (4-second intervals)."
+    },
+    {
+      "name": "Trip Monitoring",
+      "description": "Active trip state and dynamic ETA recalculation."
+    },
+    {
+      "name": "Driver Arrival Monitoring",
+      "description": "Tracking the driver's journey to the pickup location."
+    },
+    {
+      "name": "PIN Verification",
+      "description": "One-time PIN generation (rider only) and verification for passenger identity confirmation."
+    },
+    {
+      "name": "Route Management",
+      "description": "Mid-trip route modification and current route retrieval."
+    },
+    {
+      "name": "Ratings",
+      "description": "Post-trip rating submission and retrieval for riders and drivers."
+    }
+  ],
+  "security": [
+    {
+      "ApiKeyAuth": [],
+      "BearerAuth": []
+    }
+  ],
+  "paths": {
+    "/drivers/{driverId}/ws-token": {
+      "get": {
+        "operationId": "getDriverWsToken",
+        "tags": [
+          "WebSocket"
+        ],
+        "summary": "Obtain a WebSocket authentication token",
+        "description": "Returns a short-lived token that the driver app uses to open a WebSocket connection for real-time dispatch notifications.\n\n**Flow:**\n1. Driver opens the app and calls this endpoint.\n2. The server returns a `wsToken` valid for 60 seconds.\n3. The driver app connects to `wss://api.uber-platform.com/api/v1/ws?token=<wsToken>`.\n4. Once connected, the server pushes events: `RIDE_DISPATCH`, `RIDE_CANCELLED`, `DESTINATION_CHANGED`.\n\nThe token is single-use. If the WebSocket disconnects, the driver app must request a new token.\n",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/DriverId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "WebSocket token generated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "wsToken": {
+                      "type": "string",
+                      "description": "Short-lived token for WebSocket authentication"
+                    },
+                    "expiresIn": {
+                      "type": "integer",
+                      "description": "Token validity in seconds"
+                    },
+                    "wsUrl": {
+                      "type": "string",
+                      "description": "Full WebSocket connection URL"
+                    }
+                  }
+                },
+                "example": {
+                  "wsToken": "ws-token-abc-123",
+                  "expiresIn": 60,
+                  "wsUrl": "wss://api.uber-platform.com/api/v1/ws?token=ws-token-abc-123"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/fare-estimates": {
+      "post": {
+        "operationId": "createFareEstimate",
+        "tags": [
+          "Fare Estimates"
+        ],
+        "summary": "Generate a fare estimate",
+        "description": "Calculates and returns a fare estimate for the specified route and vehicle type. The returned `fareEstimateId` must be provided when creating a ride.\n\nFare formula: `(baseFare + distanceCharge + timeCharge) × surgeMultiplier`\n\nEstimates are valid for 10 minutes and include current surge pricing based on demand.\n",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FareEstimateRequest"
+              },
+              "example": {
+                "pickup": {
+                  "latitude": 23.7266,
+                  "longitude": 90.3926
+                },
+                "dropoff": {
+                  "latitude": 23.7573,
+                  "longitude": 90.388
+                },
+                "vehicleType": "UberX"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Fare estimate created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FareEstimate"
+                },
+                "example": {
+                  "fareEstimateId": "fare-uuid-001",
+                  "baseFare": 50.0,
+                  "distanceCharge": 180.0,
+                  "timeCharge": 70.0,
+                  "surgeMultiplier": 1.2,
+                  "totalEstimate": 360.0,
+                  "currency": "BDT",
+                  "distanceKm": 12.0,
+                  "estimatedDurationMin": 22,
+                  "validUntil": "2026-02-28T08:10:00Z",
+                  "createdAt": "2026-02-28T08:00:00Z"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnprocessableEntity"
+          }
+        }
+      }
+    },
+    "/rides": {
+      "post": {
+        "operationId": "createRide",
+        "tags": [
+          "Rides"
+        ],
+        "summary": "Create a new ride request",
+        "description": "Creates a ride request using a previously generated fare estimate. The ride enters `MATCHING` status immediately, and the platform begins searching for available drivers.\n\nThe `fareEstimateId` must be valid (not expired) and match the provided pickup/dropoff coordinates.\n",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateRideRequest"
+              },
+              "example": {
+                "riderId": "usr-abc-123",
+                "fareEstimateId": "fare-uuid-001",
+                "pickup": {
+                  "latitude": 23.7266,
+                  "longitude": 90.3926,
+                  "address": "BUET, Dhaka"
+                },
+                "dropoff": {
+                  "latitude": 23.7573,
+                  "longitude": 90.388,
+                  "address": "Farmgate, Dhaka"
+                },
+                "vehicleType": "UberX"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Ride created and driver matching initiated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Ride"
+                },
+                "example": {
+                  "rideId": "ride-uuid-456",
+                  "riderId": "usr-abc-123",
+                  "driverId": null,
+                  "vehicleType": "UberX",
+                  "status": "MATCHING",
+                  "pickup": {
+                    "latitude": 23.7266,
+                    "longitude": 90.3926,
+                    "address": "BUET, Dhaka"
+                  },
+                  "dropoff": {
+                    "latitude": 23.7573,
+                    "longitude": 90.388,
+                    "address": "Farmgate, Dhaka"
+                  },
+                  "fareEstimate": {
+                    "fareEstimateId": "fare-uuid-001",
+                    "totalEstimate": 360.0,
+                    "currency": "BDT"
+                  },
+                  "finalFare": null,
+                  "pin": null,
+                  "route": null,
+                  "createdAt": "2026-02-28T08:00:00Z",
+                  "updatedAt": "2026-02-28T08:00:00Z"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnprocessableEntity"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          }
+        }
+      }
+    },
+    "/rides/{rideId}": {
+      "get": {
+        "operationId": "getRide",
+        "tags": [
+          "Rides"
+        ],
+        "summary": "Retrieve ride details",
+        "description": "Returns the complete ride resource including current status, fare, assigned driver, and route information.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RideId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Ride details retrieved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Ride"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "cancelRide",
+        "tags": [
+          "Rides"
+        ],
+        "summary": "Cancel a ride",
+        "description": "Cancels an active ride on behalf of the rider.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RideId"
+          },
+          {
+            "name": "cancelledBy",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "rider",
+                "driver"
+              ]
+            },
+            "description": "The party initiating the cancellation"
+          },
+          {
+            "name": "reason",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Cancellation reason"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Ride cancelled successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CancelRideResponse"
+                },
+                "example": {
+                  "rideId": "ride-uuid-456",
+                  "status": "CANCELLED_BY_RIDER",
+                  "cancelledBy": "rider",
+                  "cancelledAt": "2026-02-28T08:05:00Z"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          }
+        }
+      }
+    },
+    "/rides/{rideId}/driver-cancellation": {
+      "patch": {
+        "operationId": "driverCancelTrip",
+        "tags": [
+          "Rides"
+        ],
+        "summary": "Driver cancels an active trip",
+        "description": "The driver cancels, the platform automatically re-initiates the matching process and notifies the rider.\n\n**Cancellation reasons:**\n- `VEHICLE_BREAKDOWN` — mechanical or technical issue\n- `SAFETY_CONCERN` — unsafe conditions\n- `RIDER_NO_SHOW` — rider not present after waiting period\n- `EMERGENCY` — personal or medical emergency\n- `OTHER` — any other reason (must provide comment)\n",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RideId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "driverId",
+                  "reason"
+                ],
+                "properties": {
+                  "driverId": {
+                    "type": "string",
+                    "format": "uuid",
+                    "description": "ID of the cancelling driver"
+                  },
+                  "reason": {
+                    "type": "string",
+                    "enum": [
+                      "VEHICLE_BREAKDOWN",
+                      "SAFETY_CONCERN",
+                      "RIDER_NO_SHOW",
+                      "EMERGENCY",
+                      "OTHER"
+                    ],
+                    "description": "Reason for cancellation"
+                  },
+                  "comment": {
+                    "type": "string",
+                    "nullable": true,
+                    "description": "Optional additional details"
+                  }
+                }
+              },
+              "example": {
+                "driverId": "drv-xyz-789",
+                "reason": "RIDER_NO_SHOW",
+                "comment": "Waited 10 minutes at pickup location"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Trip cancelled by driver",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CancelRideResponse"
+                },
+                "example": {
+                  "rideId": "ride-uuid-456",
+                  "status": "CANCELLED_BY_DRIVER",
+                  "cancelledBy": "driver",
+                  "cancelledAt": "2026-02-28T08:15:00Z"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "description": "Ride is not in a cancellable state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "CONFLICT",
+                    "message": "Ride is already in status COMPLETED and cannot be cancelled.",
+                    "status": 409,
+                    "timestamp": "2026-02-28T10:15:30Z",
+                    "requestId": "req-uuid-here"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/rides/{rideId}/acceptance": {
+      "patch": {
+        "operationId": "acceptRide",
+        "tags": [
+          "Rides"
+        ],
+        "summary": "Driver accepts a ride request",
+        "description": "Assigns the accepting driver to the ride. The ride transitions to `DRIVER_ASSIGNED` status.\n\nThe first driver to successfully call this endpoint wins the assignment. All other dispatched drivers receive a cancellation event via WebSocket.\n\nThe rider is notified via push notification, and driver arrival monitoring begins.\n",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RideId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "driverId"
+                ],
+                "properties": {
+                  "driverId": {
+                    "type": "string",
+                    "format": "uuid",
+                    "description": "ID of the accepting driver"
+                  }
+                }
+              },
+              "example": {
+                "driverId": "drv-xyz-789"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Ride accepted — driver assigned",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RideStatusUpdateResponse"
+                },
+                "example": {
+                  "rideId": "ride-uuid-456",
+                  "status": "DRIVER_ASSIGNED",
+                  "driverId": "drv-xyz-789",
+                  "updatedAt": "2026-02-28T08:00:45Z"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          }
+        }
+      }
+    },
+    "/rides/{rideId}/arrival": {
+      "patch": {
+        "operationId": "driverArrival",
+        "tags": [
+          "Rides"
+        ],
+        "summary": "Driver signals arrival at pickup point",
+        "description": "Records the driver's arrival at the pickup location. The ride transitions to `DRIVER_ARRIVED` status.\n",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RideId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "driverId"
+                ],
+                "properties": {
+                  "driverId": {
+                    "type": "string",
+                    "format": "uuid"
+                  }
+                }
+              },
+              "example": {
+                "driverId": "drv-xyz-789"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Arrival confirmed, PIN generated (sent to rider only)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RideStatusUpdateResponse"
+                },
+                "example": {
+                  "rideId": "ride-uuid-456",
+                  "status": "DRIVER_ARRIVED",
+                  "updatedAt": "2026-02-28T08:05:00Z",
+                  "message": "PIN generated and sent to rider"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          }
+        }
+      }
+    },
+    "/rides/{rideId}/status": {
+      "patch": {
+        "operationId": "updateRideStatus",
+        "tags": [
+          "Rides"
+        ],
+        "summary": "Update ride status (start or complete trip)",
+        "description": "Transitions the ride to `IN_PROGRESS` (trip start) or `COMPLETED` (trip end).\n\n**Starting the trip (IN_PROGRESS):**\n- Validates that PIN has been verified\n- Starts trip timer for final fare calculation\n- Activates route monitoring, location sharing, and traffic-aware ETA updates\n- Enables destination change feature\n\n**Completing the trip (COMPLETED):**\n- Calculates final fare: (baseFare + distance + time + surge - discounts + tolls)\n- Charges payment method\n- Stops all monitoring services\n- Enables rating submission for both parties\n",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RideId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "status"
+                ],
+                "properties": {
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "IN_PROGRESS",
+                      "COMPLETED"
+                    ],
+                    "description": "Target ride status"
+                  }
+                }
+              },
+              "example": {
+                "status": "IN_PROGRESS"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Status updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RideStatusUpdateResponse"
+                },
+                "example": {
+                  "rideId": "ride-uuid-456",
+                  "status": "IN_PROGRESS",
+                  "updatedAt": "2026-02-28T08:10:00Z"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          }
+        }
+      }
+    },
+    "/users/{userId}/rides": {
+      "get": {
+        "operationId": "listUserRides",
+        "tags": [
+          "Rides"
+        ],
+        "summary": "List all rides for a user",
+        "description": "Returns a paginated ride history for the specified user, filterable by status and role.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/UserId"
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "schema": {
+              "$ref": "#/components/schemas/RideStatus"
+            },
+            "description": "Filter by ride status"
+          },
+          {
+            "name": "role",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "rider",
+                "driver"
+              ]
+            },
+            "description": "Role the user played in the ride"
+          },
+          {
+            "$ref": "#/components/parameters/Limit"
+          },
+          {
+            "$ref": "#/components/parameters/Offset"
+          },
+          {
+            "name": "sortBy",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "default": "createdAt"
+            },
+            "description": "Sort field"
+          },
+          {
+            "name": "order",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "asc",
+                "desc"
+              ],
+              "default": "desc"
+            },
+            "description": "Sort order"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Paginated list of rides",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaginatedRides"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/drivers": {
+      "get": {
+        "operationId": "queryDrivers",
+        "tags": [
+          "Driver Matching"
+        ],
+        "summary": "Query available drivers near a location (Internal)",
+        "description": "Performs a geospatial search for available drivers within the specified radius. Results include distance, ETA, and matching score.\n\n**Note:** This endpoint is primarily used by the backend matching algorithm and admin dashboards. Client apps do not typically call this directly.\n",
+        "parameters": [
+          {
+            "name": "latitude",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "number",
+              "format": "double"
+            },
+            "description": "Centre latitude for geospatial search",
+            "example": 23.7266
+          },
+          {
+            "name": "longitude",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "number",
+              "format": "double"
+            },
+            "description": "Centre longitude for geospatial search",
+            "example": 90.3926
+          },
+          {
+            "name": "radius",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "number",
+              "format": "double",
+              "default": 5
+            },
+            "description": "Search radius in kilometres"
+          },
+          {
+            "name": "vehicleType",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/VehicleType"
+            },
+            "description": "Filter by vehicle type"
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/DriverStatus",
+              "default": "AVAILABLE"
+            },
+            "description": "Driver status filter"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 10
+            },
+            "description": "Maximum number of drivers to return"
+          },
+          {
+            "name": "sortBy",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "distance",
+                "rating",
+                "eta"
+              ],
+              "default": "distance"
+            },
+            "description": "Sort criteria"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of nearby drivers",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NearbyDriversResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      }
+    },
+    "/rides/{rideId}/matching": {
+      "get": {
+        "operationId": "getRideMatching",
+        "tags": [
+          "Driver Matching"
+        ],
+        "summary": "Get matching result for a confirmed ride",
+        "description": "Returns the matched driver and associated metadata once the platform's matching algorithm has completed processing.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RideId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Matching result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MatchingResult"
+                },
+                "example": {
+                  "rideId": "ride-uuid-456",
+                  "matchStatus": "MATCHED",
+                  "driver": {
+                    "driverId": "drv-xyz-789",
+                    "name": "Rafiq Ahmed",
+                    "vehicleDetails": {
+                      "make": "Toyota",
+                      "model": "Corolla",
+                      "color": "White",
+                      "licensePlate": "DHA-KA 11-2345"
+                    },
+                    "currentLocation": {
+                      "latitude": 23.728,
+                      "longitude": 90.3935
+                    },
+                    "rating": 4.85,
+                    "etaMin": 3
+                  },
+                  "matchedAt": "2026-02-28T08:01:00Z"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/drivers/{driverId}/ride-requests": {
+      "get": {
+        "operationId": "listDriverRideRequests",
+        "tags": [
+          "Driver Matching"
+        ],
+        "summary": "List pending ride requests dispatched to a driver",
+        "description": "Returns ride requests currently dispatched to the specified driver awaiting acceptance.\n\n**Flow:** When a rider creates a ride, the backend dispatches it to 3-5 nearby drivers via WebSocket (lightweight notification). Each driver's app then calls this endpoint to fetch full ride details (pickup location, fare, rider rating, etc.).\n",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/DriverId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of dispatched ride requests",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DispatchedRideRequests"
+                },
+                "example": {
+                  "data": [
+                    {
+                      "rideId": "ride-uuid-456",
+                      "riderId": "usr-abc-123",
+                      "pickup": {
+                        "latitude": 23.7266,
+                        "longitude": 90.3926,
+                        "address": "BUET, Dhaka"
+                      },
+                      "dropoff": {
+                        "latitude": 23.7573,
+                        "longitude": 90.388,
+                        "address": "Farmgate, Dhaka"
+                      },
+                      "vehicleType": "UberX",
+                      "fareEstimate": {
+                        "totalEstimate": 360.0,
+                        "currency": "BDT"
+                      },
+                      "distanceToPickupKm": 0.8,
+                      "etaToPickupMin": 3,
+                      "dispatchedAt": "2026-02-28T08:00:30Z",
+                      "expiresAt": "2026-02-28T08:00:45Z"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/drivers/{driverId}": {
+      "get": {
+        "operationId": "getDriver",
+        "tags": [
+          "Drivers"
+        ],
+        "summary": "Retrieve driver profile",
+        "description": "Returns the complete profile for the specified driver, including vehicle details and current status.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/DriverId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Driver profile",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Driver"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/drivers/{driverId}/status": {
+      "patch": {
+        "operationId": "updateDriverStatus",
+        "tags": [
+          "Drivers"
+        ],
+        "summary": "Update driver availability status",
+        "description": "Toggles the driver's availability between AVAILABLE and OFFLINE. Drivers who decline a dispatch are automatically returned to the available pool.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/DriverId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "status"
+                ],
+                "properties": {
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "AVAILABLE",
+                      "OFFLINE"
+                    ]
+                  }
+                }
+              },
+              "example": {
+                "status": "AVAILABLE"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Status updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Driver"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/drivers/{driverId}/location": {
+      "put": {
+        "operationId": "updateDriverLocation",
+        "tags": [
+          "Location Tracking"
+        ],
+        "summary": "Update driver's current location",
+        "description": "Submits a GPS location update from the driver. Driver apps send location updates every **4 seconds** while the driver is online.\n\n\nRate limit: 1 request per second (to prevent abuse while allowing sub-4s updates if needed).\n",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/DriverId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LocationUpdate"
+              },
+              "example": {
+                "latitude": 23.728,
+                "longitude": 90.3935,
+                "timestamp": "2026-02-28T08:02:04Z",
+                "heading": 45.0,
+                "speed": 30.5
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Location updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LocationUpdateResponse"
+                },
+                "example": {
+                  "driverId": "drv-xyz-789",
+                  "acknowledged": true,
+                  "timestamp": "2026-02-28T08:02:04Z"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          }
+        }
+      },
+      "get": {
+        "operationId": "getDriverLocation",
+        "tags": [
+          "Location Tracking"
+        ],
+        "summary": "Retrieve driver's last known location",
+        "description": "Returns the most recent GPS position recorded for the specified driver.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/DriverId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Driver location",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DriverLocationResponse"
+                },
+                "example": {
+                  "driverId": "drv-xyz-789",
+                  "location": {
+                    "latitude": 23.728,
+                    "longitude": 90.3935,
+                    "timestamp": "2026-02-28T08:02:04Z"
+                  },
+                  "heading": 45.0,
+                  "speed": 30.5
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/rides/{rideId}/location": {
+      "get": {
+        "operationId": "getRideLocation",
+        "tags": [
+          "Location Tracking"
+        ],
+        "summary": "Get live driver location for a ride",
+        "description": "Returns the latest driver location snapshot associated with a specific ride, including ETA and remaining distance.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RideId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Live ride location",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RideLocationResponse"
+                },
+                "example": {
+                  "rideId": "ride-uuid-456",
+                  "driverId": "drv-xyz-789",
+                  "driverLocation": {
+                    "latitude": 23.728,
+                    "longitude": 90.3935,
+                    "timestamp": "2026-02-28T08:02:04Z"
+                  },
+                  "etaMin": 2,
+                  "distanceRemainingKm": 0.5,
+                  "heading": 45.0
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/riders/{riderId}/location": {
+      "put": {
+        "operationId": "updateRiderLocation",
+        "tags": [
+          "Location Tracking"
+        ],
+        "summary": "Update rider's current location",
+        "description": "Submits a GPS location update from the rider's device. The rider app sends location updates every **4 seconds** while a ride is active (from DRIVER_ASSIGNED through to DRIVER_ARRIVED).\n\nThis allows the driver to see the rider's real-time position on the map while en route to the pickup point, making it easier to locate the passenger.\n\nRate limit: 1 request per second.\n",
+        "parameters": [
+          {
+            "name": "riderId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Unique rider identifier"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LocationUpdate"
+              },
+              "example": {
+                "latitude": 23.7266,
+                "longitude": 90.3926,
+                "timestamp": "2026-02-28T08:03:30Z",
+                "speed": 0.0
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Rider location updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "riderId": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "acknowledged": {
+                      "type": "boolean",
+                      "description": "Always true when request succeeds"
+                    },
+                    "timestamp": {
+                      "type": "string",
+                      "format": "date-time",
+                      "description": "Server-side receipt timestamp"
+                    }
+                  }
+                },
+                "example": {
+                  "riderId": "usr-abc-123",
+                  "acknowledged": true,
+                  "timestamp": "2026-02-28T08:03:30Z"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          }
+        }
+      },
+      "get": {
+        "operationId": "getRiderLocation",
+        "tags": [
+          "Location Tracking"
+        ],
+        "summary": "Retrieve rider's last known location",
+        "description": "Returns the most recent GPS position of the rider. Used by the driver app during the approach phase to locate the passenger at the pickup point.\n",
+        "parameters": [
+          {
+            "name": "riderId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Unique rider identifier"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Rider location",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "riderId": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "location": {
+                      "$ref": "#/components/schemas/Location"
+                    },
+                    "speed": {
+                      "type": "number",
+                      "format": "double"
+                    }
+                  }
+                },
+                "example": {
+                  "riderId": "usr-abc-123",
+                  "location": {
+                    "latitude": 23.7266,
+                    "longitude": 90.3926,
+                    "timestamp": "2026-02-28T08:03:30Z"
+                  },
+                  "speed": 0.0
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/rides/{rideId}/trip": {
+      "get": {
+        "operationId": "getTripState",
+        "tags": [
+          "Trip Monitoring"
+        ],
+        "summary": "Get current trip monitoring state",
+        "description": "Returns real-time trip data including the active route, current ETA, driver position, and traffic conditions.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RideId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Trip monitoring state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TripState"
+                },
+                "example": {
+                  "rideId": "ride-uuid-456",
+                  "status": "IN_PROGRESS",
+                  "driverLocation": {
+                    "latitude": 23.74,
+                    "longitude": 90.39,
+                    "timestamp": "2026-02-28T08:15:04Z"
+                  },
+                  "route": {
+                    "routeId": "route-uuid-001",
+                    "distanceRemainingKm": 3.2,
+                    "estimatedDurationMin": 8,
+                    "polyline": "encoded_polyline_string"
+                  },
+                  "traffic": {
+                    "congestionLevel": "moderate",
+                    "delayMin": 2
+                  },
+                  "startedAt": "2026-02-28T08:10:00Z"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/rides/{rideId}/eta": {
+      "get": {
+        "operationId": "getRideEta",
+        "tags": [
+          "Trip Monitoring"
+        ],
+        "summary": "Get dynamically recalculated ETA",
+        "description": "Returns the latest estimated time of arrival, recalculated periodically based on current traffic and route conditions.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RideId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Current ETA",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EtaResponse"
+                },
+                "example": {
+                  "rideId": "ride-uuid-456",
+                  "etaMin": 8,
+                  "distanceRemainingKm": 3.2,
+                  "trafficCondition": "moderate",
+                  "recalculatedAt": "2026-02-28T08:15:04Z"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/rides/{rideId}/arrival-status": {
+      "get": {
+        "operationId": "getArrivalStatus",
+        "tags": [
+          "Driver Arrival Monitoring"
+        ],
+        "summary": "Get driver arrival monitoring state",
+        "description": "Returns the current state of the driver's journey to the pickup point, including live location, ETA, and remaining distance.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RideId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Arrival monitoring state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArrivalStatus"
+                },
+                "example": {
+                  "rideId": "ride-uuid-456",
+                  "monitoringActive": true,
+                  "driverLocation": {
+                    "latitude": 23.727,
+                    "longitude": 90.3928,
+                    "timestamp": "2026-02-28T08:03:30Z"
+                  },
+                  "riderLocation": {
+                    "latitude": 23.7266,
+                    "longitude": 90.3926,
+                    "timestamp": "2026-02-28T08:03:28Z"
+                  },
+                  "etaToPickupMin": 2,
+                  "distanceToPickupKm": 0.3,
+                  "driverStatus": "EN_ROUTE"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/rides/{rideId}/pin": {
+      "post": {
+        "operationId": "generatePin",
+        "tags": [
+          "PIN Verification"
+        ],
+        "summary": "Generate a one-time PIN for ride verification",
+        "description": "Generates a 4-digit one-time PIN for passenger identity verification.\n\nThe PIN is delivered **ONLY to the rider** via push notification and in-app display. The rider must verbally communicate the PIN to the driver, who then enters it into their app to verify they have the correct passenger.\n\n\n\nPIN expires after 10 minutes or when the ride is cancelled.\n",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RideId"
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "PIN generated and sent to rider only",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PinResponse"
+                },
+                "example": {
+                  "rideId": "ride-uuid-456",
+                  "PIN": "1234",
+                  "expiresAt": "2026-02-28T08:20:00Z"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          }
+        }
+      }
+    },
+    "/rides/{rideId}/pin-verification": {
+      "post": {
+        "operationId": "verifyPin",
+        "tags": [
+          "PIN Verification"
+        ],
+        "summary": "Verify rider's PIN code",
+        "description": "Validates the PIN provided by the rider to the driver. The driver enters the PIN the rider verbally communicated.\n\n**Success:** Ride transitions to `PIN_VERIFIED` status, enabling the trip to start.\n\n**Failure:** Returns error with remaining retry attempts (max 3 attempts before PIN expires).\n",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RideId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PinVerificationRequest"
+              },
+              "example": {
+                "driverId": "drv-xyz-789",
+                "pin": "4729"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "PIN verified successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PinVerificationResponse"
+                },
+                "example": {
+                  "rideId": "ride-uuid-456",
+                  "verified": true,
+                  "status": "PIN_VERIFIED",
+                  "message": "Passenger verified. You may start the trip."
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "422": {
+            "description": "PIN mismatch",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "PIN_MISMATCH",
+                    "message": "The provided PIN does not match. Please try again.",
+                    "status": 422,
+                    "timestamp": "2026-02-28T10:15:30Z",
+                    "requestId": "req-uuid-here",
+                    "attemptsRemaining": 2
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/rides/{rideId}/route": {
+      "patch": {
+        "operationId": "modifyRoute",
+        "tags": [
+          "Route Management"
+        ],
+        "summary": "Modify route mid-trip (change destination)",
+        "description": "Updates the destination during an active trip. The route and fare are automatically recalculated, and the driver is notified of the change.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RideId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RouteModificationRequest"
+              },
+              "example": {
+                "newDropoff": {
+                  "latitude": 23.7461,
+                  "longitude": 90.3742,
+                  "address": "Dhanmondi 27, Dhaka"
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Route modified",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RouteModificationResponse"
+                },
+                "example": {
+                  "rideId": "ride-uuid-456",
+                  "route": {
+                    "routeId": "route-uuid-002",
+                    "waypoints": [
+                      {
+                        "latitude": 23.74,
+                        "longitude": 90.39
+                      },
+                      {
+                        "latitude": 23.7461,
+                        "longitude": 90.3742
+                      }
+                    ],
+                    "distanceKm": 5.1,
+                    "estimatedDurationMin": 14,
+                    "polyline": "updated_encoded_polyline"
+                  },
+                  "updatedFareEstimate": {
+                    "totalEstimate": 420.5,
+                    "surgeMultiplier": 1.2,
+                    "currency": "BDT"
+                  },
+                  "updatedAt": "2026-02-28T08:18:00Z"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          }
+        }
+      },
+      "get": {
+        "operationId": "getRoute",
+        "tags": [
+          "Route Management"
+        ],
+        "summary": "Get current route for a ride",
+        "description": "Returns the active navigation route for the specified ride, including waypoints, distance, duration, and encoded polyline.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RideId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Current route",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Route"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/rides/{rideId}/ratings": {
+      "post": {
+        "operationId": "submitRating",
+        "tags": [
+          "Ratings"
+        ],
+        "summary": "Submit a rating for a completed ride",
+        "description": "Allows a rider to rate the driver or a driver to rate the rider following trip completion. Ratings can only be submitted once per party per ride.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RideId"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateRatingRequest"
+              },
+              "examples": {
+                "riderRatesDriver": {
+                  "summary": "Rider rates Driver with tip",
+                  "value": {
+                    "raterId": "usr-abc-123",
+                    "rateeId": "drv-xyz-789",
+                    "raterRole": "RIDER",
+                    "score": 5,
+                    "comment": "Great driver, very smooth ride!",
+                    "tipAmount": 50.0
+                  }
+                },
+                "driverRatesRider": {
+                  "summary": "Driver rates Rider",
+                  "value": {
+                    "raterId": "drv-xyz-789",
+                    "rateeId": "usr-abc-123",
+                    "raterRole": "DRIVER",
+                    "score": 4,
+                    "comment": "Polite rider."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Rating submitted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Rating"
+                },
+                "example": {
+                  "ratingId": "rat-uuid-001",
+                  "rideId": "ride-uuid-456",
+                  "raterId": "usr-abc-123",
+                  "rateeId": "drv-xyz-789",
+                  "raterRole": "RIDER",
+                  "score": 5,
+                  "comment": "Great driver, very smooth ride!",
+                  "tipAmount": 50.0,
+                  "createdAt": "2026-02-28T08:30:00Z"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/drivers/{driverId}/ratings": {
+      "get": {
+        "operationId": "getDriverRatings",
+        "tags": [
+          "Ratings"
+        ],
+        "summary": "Retrieve ratings for a driver",
+        "description": "Returns paginated ratings received by the specified driver, including computed average score and total rating count.\n\n**Use Cases:**\n- Rider checking driver's ratings before/during a ride\n- Driver viewing their own rating history\n- Admin dashboard monitoring driver performance\n",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/DriverId"
+          },
+          {
+            "$ref": "#/components/parameters/Limit"
+          },
+          {
+            "$ref": "#/components/parameters/Offset"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Driver ratings",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaginatedRatings"
+                },
+                "example": {
+                  "driverId": "drv-xyz-789",
+                  "averageScore": 4.85,
+                  "totalRatings": 142,
+                  "data": [
+                    {
+                      "ratingId": "rat-uuid-001",
+                      "rideId": "ride-uuid-456",
+                      "raterId": "usr-abc-123",
+                      "raterRole": "RIDER",
+                      "score": 5,
+                      "comment": "Great driver, very smooth ride!",
+                      "createdAt": "2026-02-28T08:30:00Z"
+                    },
+                    {
+                      "ratingId": "rat-uuid-002",
+                      "rideId": "ride-uuid-457",
+                      "raterId": "usr-def-456",
+                      "raterRole": "RIDER",
+                      "score": 4,
+                      "comment": "Good service",
+                      "createdAt": "2026-02-27T18:15:00Z"
+                    }
+                  ],
+                  "pagination": {
+                    "total": 142,
+                    "limit": 20,
+                    "offset": 0
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/riders/{riderId}/ratings": {
+      "get": {
+        "operationId": "getRiderRatings",
+        "tags": [
+          "Ratings"
+        ],
+        "summary": "Retrieve ratings for a rider",
+        "description": "Returns paginated ratings received by the specified rider from drivers.\n\n**Note:** Rider ratings are typically private and only visible to the rider themselves and platform admins. Drivers can see a rider's average score but not individual comments.\n",
+        "parameters": [
+          {
+            "name": "riderId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Unique rider identifier"
+          },
+          {
+            "$ref": "#/components/parameters/Limit"
+          },
+          {
+            "$ref": "#/components/parameters/Offset"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Rider ratings",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaginatedRatings"
+                },
+                "example": {
+                  "riderId": "usr-abc-123",
+                  "averageScore": 4.92,
+                  "totalRatings": 38,
+                  "data": [
+                    {
+                      "ratingId": "rat-uuid-003",
+                      "rideId": "ride-uuid-456",
+                      "raterId": "drv-xyz-789",
+                      "raterRole": "DRIVER",
+                      "score": 5,
+                      "comment": "Respectful and on time",
+                      "createdAt": "2026-02-28T08:35:00Z"
+                    }
+                  ],
+                  "pagination": {
+                    "total": 38,
+                    "limit": 20,
+                    "offset": 0
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "ApiKeyAuth": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-API-Key",
+        "description": "Unique API key issued per registered client application"
+      },
+      "BearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT",
+        "description": "OAuth 2.0 access token with role-based scopes (rider, driver, admin)"
+      }
+    },
+    "parameters": {
+      "RideId": {
+        "name": "rideId",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "description": "Unique ride identifier"
+      },
+      "DriverId": {
+        "name": "driverId",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "description": "Unique driver identifier"
+      },
+      "UserId": {
+        "name": "userId",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "description": "Unique user identifier (rider or driver)"
+      },
+      "Limit": {
+        "name": "limit",
+        "in": "query",
+        "schema": {
+          "type": "integer",
+          "default": 20,
+          "maximum": 100
+        },
+        "description": "Page size"
+      },
+      "Offset": {
+        "name": "offset",
+        "in": "query",
+        "schema": {
+          "type": "integer",
+          "default": 0
+        },
+        "description": "Pagination offset"
+      },
+      "IdempotencyKey": {
+        "name": "X-Idempotency-Key",
+        "in": "header",
+        "required": false,
+        "schema": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "description": "UUID to prevent duplicate resource creation"
+      }
+    },
+    "responses": {
+      "BadRequest": {
+        "description": "Invalid request — malformed body or missing required fields",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            },
+            "example": {
+              "error": {
+                "code": "INVALID_REQUEST",
+                "message": "Missing required field: 'pickup.latitude'",
+                "status": 400,
+                "timestamp": "2026-02-28T10:15:30Z",
+                "requestId": "req-uuid-here"
+              }
+            }
+          }
+        }
+      },
+      "Unauthorized": {
+        "description": "Missing or invalid authentication credentials",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            },
+            "example": {
+              "error": {
+                "code": "UNAUTHORIZED",
+                "message": "Invalid or expired access token.",
+                "status": 401,
+                "timestamp": "2026-02-28T10:15:30Z",
+                "requestId": "req-uuid-here"
+              }
+            }
+          }
+        }
+      },
+      "NotFound": {
+        "description": "The requested resource does not exist",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            },
+            "example": {
+              "error": {
+                "code": "RESOURCE_NOT_FOUND",
+                "message": "Ride with ID 'abc-123' does not exist.",
+                "status": 404,
+                "timestamp": "2026-02-28T10:15:30Z",
+                "requestId": "req-uuid-here"
+              }
+            }
+          }
+        }
+      },
+      "Conflict": {
+        "description": "State conflict — the resource is not in a valid state for this operation",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            },
+            "example": {
+              "error": {
+                "code": "CONFLICT",
+                "message": "Ride is already in status CANCELLED_BY_RIDER.",
+                "status": 409,
+                "timestamp": "2026-02-28T10:15:30Z",
+                "requestId": "req-uuid-here"
+              }
+            }
+          }
+        }
+      },
+      "UnprocessableEntity": {
+        "description": "Semantic validation failure",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            },
+            "example": {
+              "error": {
+                "code": "UNPROCESSABLE_ENTITY",
+                "message": "Pickup and dropoff locations cannot be the same.",
+                "status": 422,
+                "timestamp": "2026-02-28T10:15:30Z",
+                "requestId": "req-uuid-here"
+              }
+            }
+          }
+        }
+      },
+      "TooManyRequests": {
+        "description": "Rate limit exceeded",
+        "headers": {
+          "X-RateLimit-Limit": {
+            "schema": {
+              "type": "integer"
+            },
+            "description": "Maximum requests allowed in the current window"
+          },
+          "X-RateLimit-Remaining": {
+            "schema": {
+              "type": "integer"
+            },
+            "description": "Requests remaining in the current window"
+          },
+          "X-RateLimit-Reset": {
+            "schema": {
+              "type": "integer"
+            },
+            "description": "UTC epoch seconds when the rate-limit window resets"
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            },
+            "example": {
+              "error": {
+                "code": "RATE_LIMIT_EXCEEDED",
+                "message": "Too many requests. Please retry after 42 seconds.",
+                "status": 429,
+                "timestamp": "2026-02-28T10:15:30Z",
+                "requestId": "req-uuid-here"
+              }
+            }
+          }
+        }
+      }
+    },
+    "schemas": {
+      "VehicleType": {
+        "type": "string",
+        "enum": [
+          "UberX",
+          "Black",
+          "Pool"
+        ],
+        "description": "Vehicle service category"
+      },
+      "RideStatus": {
+        "type": "string",
+        "enum": [
+          "MATCHING",
+          "DRIVER_ASSIGNED",
+          "DRIVER_EN_ROUTE",
+          "DRIVER_ARRIVED",
+          "PIN_VERIFIED",
+          "IN_PROGRESS",
+          "COMPLETED",
+          "CANCELLED_BY_RIDER",
+          "CANCELLED_BY_DRIVER"
+        ],
+        "description": "Ride lifecycle status after fare estimation and ride creation.\n\n**Flow:** MATCHING → DRIVER_ASSIGNED → DRIVER_EN_ROUTE → DRIVER_ARRIVED → PIN_VERIFIED → IN_PROGRESS → COMPLETED\n"
+      },
+      "DriverStatus": {
+        "type": "string",
+        "enum": [
+          "AVAILABLE",
+          "EN_ROUTE",
+          "ON_TRIP",
+          "OFFLINE"
+        ],
+        "description": "Driver availability status"
+      },
+      "RaterRole": {
+        "type": "string",
+        "enum": [
+          "RIDER",
+          "DRIVER"
+        ],
+        "description": "Role of the user submitting the rating"
+      },
+      "Location": {
+        "type": "object",
+        "required": [
+          "latitude",
+          "longitude"
+        ],
+        "properties": {
+          "latitude": {
+            "type": "number",
+            "format": "double",
+            "description": "GPS latitude (WGS 84)",
+            "example": 23.7266
+          },
+          "longitude": {
+            "type": "number",
+            "format": "double",
+            "description": "GPS longitude (WGS 84)",
+            "example": 90.3926
+          },
+          "address": {
+            "type": "string",
+            "nullable": true,
+            "description": "Human-readable address",
+            "example": "BUET, Dhaka"
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Time the location was recorded",
+            "example": "2026-02-28T08:00:00Z"
+          }
+        }
+      },
+      "VehicleDetails": {
+        "type": "object",
+        "properties": {
+          "make": {
+            "type": "string",
+            "example": "Toyota"
+          },
+          "model": {
+            "type": "string",
+            "example": "Corolla"
+          },
+          "color": {
+            "type": "string",
+            "example": "White"
+          },
+          "licensePlate": {
+            "type": "string",
+            "example": "DHA-KA 11-2345"
+          }
+        }
+      },
+      "Ride": {
+        "type": "object",
+        "properties": {
+          "rideId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Unique ride identifier"
+          },
+          "riderId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "ID of the requesting rider"
+          },
+          "driverId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true,
+            "description": "ID of the assigned driver (null until matched)"
+          },
+          "vehicleType": {
+            "$ref": "#/components/schemas/VehicleType"
+          },
+          "status": {
+            "$ref": "#/components/schemas/RideStatus"
+          },
+          "pickup": {
+            "$ref": "#/components/schemas/Location"
+          },
+          "dropoff": {
+            "$ref": "#/components/schemas/Location"
+          },
+          "fareEstimate": {
+            "$ref": "#/components/schemas/FareEstimate"
+          },
+          "finalFare": {
+            "$ref": "#/components/schemas/FareEstimate"
+          },
+          "pin": {
+            "type": "string",
+            "nullable": true,
+            "description": "One-time PIN code (generated after driver arrival)"
+          },
+          "route": {
+            "$ref": "#/components/schemas/Route"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "FareEstimate": {
+        "type": "object",
+        "description": "Upfront fare calculation. Total is computed as (baseFare + distanceCharge + timeCharge) multiplied by the surge multiplier.",
+        "properties": {
+          "fareEstimateId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "rideId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true,
+            "description": "Associated ride (null for standalone previews)"
+          },
+          "baseFare": {
+            "type": "number",
+            "format": "double",
+            "description": "Base fare component in currency units",
+            "example": 50.0
+          },
+          "distanceCharge": {
+            "type": "number",
+            "format": "double",
+            "description": "Charge based on trip distance",
+            "example": 180.0
+          },
+          "timeCharge": {
+            "type": "number",
+            "format": "double",
+            "description": "Charge based on estimated trip duration",
+            "example": 70.0
+          },
+          "surgeMultiplier": {
+            "type": "number",
+            "format": "double",
+            "minimum": 1.0,
+            "description": "Dynamic pricing multiplier (1.0 or greater)",
+            "example": 1.2
+          },
+          "totalEstimate": {
+            "type": "number",
+            "format": "double",
+            "description": "Total estimated fare after applying surge multiplier",
+            "example": 360.0
+          },
+          "currency": {
+            "type": "string",
+            "description": "ISO 4217 currency code",
+            "example": "BDT"
+          },
+          "distanceKm": {
+            "type": "number",
+            "format": "double",
+            "description": "Estimated trip distance in kilometres",
+            "example": 12.0
+          },
+          "estimatedDurationMin": {
+            "type": "number",
+            "format": "double",
+            "description": "Estimated trip duration in minutes",
+            "example": 22
+          },
+          "etaMin": {
+            "type": "number",
+            "format": "double",
+            "description": "Estimated time of arrival for nearest driver",
+            "example": 5
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "validUntil": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Expiration timestamp (typically createdAt + 10 minutes)"
+          }
+        }
+      },
+      "Driver": {
+        "type": "object",
+        "properties": {
+          "driverId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string",
+            "example": "Rafiq Ahmed"
+          },
+          "vehicleType": {
+            "$ref": "#/components/schemas/VehicleType"
+          },
+          "vehicleDetails": {
+            "$ref": "#/components/schemas/VehicleDetails"
+          },
+          "status": {
+            "$ref": "#/components/schemas/DriverStatus"
+          },
+          "currentLocation": {
+            "$ref": "#/components/schemas/Location"
+          },
+          "rating": {
+            "type": "number",
+            "format": "double",
+            "minimum": 1.0,
+            "maximum": 5.0,
+            "description": "Average rating",
+            "example": 4.85
+          }
+        }
+      },
+      "Rating": {
+        "type": "object",
+        "description": "Post-trip rating record between a rider and a driver.",
+        "properties": {
+          "ratingId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "rideId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "raterId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "User who submitted the rating"
+          },
+          "rateeId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "User being rated"
+          },
+          "raterRole": {
+            "$ref": "#/components/schemas/RaterRole"
+          },
+          "score": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 5,
+            "description": "Rating value (1–5)",
+            "example": 5
+          },
+          "comment": {
+            "type": "string",
+            "nullable": true,
+            "description": "Optional text feedback"
+          },
+          "tipAmount": {
+            "type": "number",
+            "format": "double",
+            "nullable": true,
+            "description": "Tip from rider to driver (applicable only when raterRole is RIDER)",
+            "example": 50.0
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "Route": {
+        "type": "object",
+        "properties": {
+          "routeId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "rideId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "waypoints": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Location"
+            },
+            "description": "Ordered list of GPS waypoints"
+          },
+          "distanceKm": {
+            "type": "number",
+            "format": "double",
+            "description": "Total route distance in kilometres"
+          },
+          "estimatedDurationMin": {
+            "type": "number",
+            "format": "double",
+            "description": "Estimated duration considering current traffic conditions"
+          },
+          "polyline": {
+            "type": "string",
+            "description": "Encoded polyline for map rendering"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "CreateRideRequest": {
+        "type": "object",
+        "required": [
+          "riderId",
+          "pickup",
+          "dropoff",
+          "vehicleType",
+          "fareEstimateId"
+        ],
+        "properties": {
+          "riderId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Authenticated rider's ID"
+          },
+          "pickup": {
+            "$ref": "#/components/schemas/Location"
+          },
+          "dropoff": {
+            "$ref": "#/components/schemas/Location"
+          },
+          "vehicleType": {
+            "$ref": "#/components/schemas/VehicleType"
+          },
+          "fareEstimateId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "ID from a previously obtained fare estimate (valid for 10 minutes)"
+          }
+        }
+      },
+      "FareEstimateRequest": {
+        "type": "object",
+        "required": [
+          "pickup",
+          "dropoff",
+          "vehicleType"
+        ],
+        "properties": {
+          "pickup": {
+            "$ref": "#/components/schemas/Location"
+          },
+          "dropoff": {
+            "$ref": "#/components/schemas/Location"
+          },
+          "vehicleType": {
+            "$ref": "#/components/schemas/VehicleType"
+          }
+        }
+      },
+      "LocationUpdate": {
+        "type": "object",
+        "required": [
+          "latitude",
+          "longitude",
+          "timestamp"
+        ],
+        "properties": {
+          "latitude": {
+            "type": "number",
+            "format": "double",
+            "description": "GPS latitude"
+          },
+          "longitude": {
+            "type": "number",
+            "format": "double",
+            "description": "GPS longitude"
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Client-side timestamp"
+          },
+          "heading": {
+            "type": "number",
+            "format": "double",
+            "description": "Direction the vehicle is facing in degrees (0 = North, 90 = East, 180 = South, 270 = West). Used to orient the car icon on the map."
+          },
+          "speed": {
+            "type": "number",
+            "format": "double",
+            "description": "Speed in km/h"
+          }
+        }
+      },
+      "PinVerificationRequest": {
+        "type": "object",
+        "required": [
+          "driverId",
+          "pin"
+        ],
+        "properties": {
+          "driverId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "pin": {
+            "type": "string",
+            "minLength": 4,
+            "maxLength": 4,
+            "description": "4-digit one-time PIN"
+          }
+        }
+      },
+      "RouteModificationRequest": {
+        "type": "object",
+        "required": [
+          "newDropoff"
+        ],
+        "properties": {
+          "newDropoff": {
+            "$ref": "#/components/schemas/Location"
+          }
+        }
+      },
+      "CreateRatingRequest": {
+        "type": "object",
+        "required": [
+          "raterId",
+          "rateeId",
+          "raterRole",
+          "score"
+        ],
+        "properties": {
+          "raterId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "ID of the user submitting the rating"
+          },
+          "rateeId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "ID of the user being rated"
+          },
+          "raterRole": {
+            "$ref": "#/components/schemas/RaterRole"
+          },
+          "score": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 5,
+            "description": "Rating from 1 (lowest) to 5 (highest)"
+          },
+          "comment": {
+            "type": "string",
+            "nullable": true,
+            "description": "Optional feedback text"
+          },
+          "tipAmount": {
+            "type": "number",
+            "format": "double",
+            "nullable": true,
+            "description": "Tip in currency units (applicable only when raterRole is RIDER)"
+          }
+        }
+      },
+      "RideStatusUpdateResponse": {
+        "type": "object",
+        "description": "Minimal response returned from PATCH operations that update ride status (acceptance, arrival, start, completion). Reduces payload size compared to the full Ride object.",
+        "properties": {
+          "rideId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "$ref": "#/components/schemas/RideStatus"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "message": {
+            "type": "string",
+            "nullable": true,
+            "description": "Optional status-specific message"
+          },
+          "driverId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true,
+            "description": "Populated when driver is newly assigned"
+          }
+        }
+      },
+      "CancelRideResponse": {
+        "type": "object",
+        "properties": {
+          "rideId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "$ref": "#/components/schemas/RideStatus"
+          },
+          "cancelledBy": {
+            "type": "string",
+            "enum": [
+              "rider",
+              "driver"
+            ]
+          },
+          "cancelledAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "LocationUpdateResponse": {
+        "type": "object",
+        "description": "Simplified acknowledgment of location update. Telemetry processing happens asynchronously.",
+        "properties": {
+          "driverId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "acknowledged": {
+            "type": "boolean",
+            "description": "Always true when request succeeds"
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Server-side receipt timestamp"
+          }
+        }
+      },
+      "DriverLocationResponse": {
+        "type": "object",
+        "properties": {
+          "driverId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "location": {
+            "$ref": "#/components/schemas/Location"
+          },
+          "heading": {
+            "type": "number",
+            "format": "double"
+          },
+          "speed": {
+            "type": "number",
+            "format": "double"
+          }
+        }
+      },
+      "RideLocationResponse": {
+        "type": "object",
+        "properties": {
+          "rideId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "driverId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "driverLocation": {
+            "$ref": "#/components/schemas/Location"
+          },
+          "etaMin": {
+            "type": "number",
+            "format": "double"
+          },
+          "distanceRemainingKm": {
+            "type": "number",
+            "format": "double"
+          },
+          "heading": {
+            "type": "number",
+            "format": "double"
+          }
+        }
+      },
+      "TripState": {
+        "type": "object",
+        "description": "Real-time trip monitoring state including driver position, route progress, and traffic conditions.",
+        "properties": {
+          "rideId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "$ref": "#/components/schemas/RideStatus"
+          },
+          "driverLocation": {
+            "$ref": "#/components/schemas/Location"
+          },
+          "route": {
+            "type": "object",
+            "properties": {
+              "routeId": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "distanceRemainingKm": {
+                "type": "number",
+                "format": "double"
+              },
+              "estimatedDurationMin": {
+                "type": "number",
+                "format": "double"
+              },
+              "polyline": {
+                "type": "string"
+              }
+            }
+          },
+          "traffic": {
+            "type": "object",
+            "properties": {
+              "congestionLevel": {
+                "type": "string",
+                "enum": [
+                  "low",
+                  "moderate",
+                  "heavy"
+                ]
+              },
+              "delayMin": {
+                "type": "number",
+                "format": "double"
+              }
+            }
+          },
+          "startedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "EtaResponse": {
+        "type": "object",
+        "properties": {
+          "rideId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "etaMin": {
+            "type": "number",
+            "format": "double"
+          },
+          "distanceRemainingKm": {
+            "type": "number",
+            "format": "double"
+          },
+          "trafficCondition": {
+            "type": "string",
+            "enum": [
+              "low",
+              "moderate",
+              "heavy"
+            ]
+          },
+          "recalculatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "ArrivalStatus": {
+        "type": "object",
+        "description": "Current state of the driver's journey to the pickup location, including the rider's live position.",
+        "properties": {
+          "rideId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "monitoringActive": {
+            "type": "boolean"
+          },
+          "driverLocation": {
+            "$ref": "#/components/schemas/Location"
+          },
+          "riderLocation": {
+            "$ref": "#/components/schemas/Location"
+          },
+          "etaToPickupMin": {
+            "type": "number",
+            "format": "double"
+          },
+          "distanceToPickupKm": {
+            "type": "number",
+            "format": "double"
+          },
+          "driverStatus": {
+            "type": "string",
+            "enum": [
+              "EN_ROUTE",
+              "ARRIVED"
+            ]
+          }
+        }
+      },
+      "PinResponse": {
+        "type": "object",
+        "description": "Confirms PIN generation for rider.\n\n**Security Note:** The actual PIN is NOT returned in the API response. It is delivered to the rider via a separate secure channel (push notification or SMS) to prevent interception.\n",
+        "properties": {
+          "rideId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "pinGenerated": {
+            "type": "boolean",
+            "description": "Always true when request succeeds"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "PIN expiration time (typically 10 minutes)"
+          },
+          "deliveryMethod": {
+            "type": "string",
+            "enum": [
+              "PUSH_NOTIFICATION",
+              "SMS"
+            ],
+            "description": "Channel through which PIN was sent to rider"
+          }
+        }
+      },
+      "PinVerificationResponse": {
+        "type": "object",
+        "properties": {
+          "rideId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "verified": {
+            "type": "boolean"
+          },
+          "status": {
+            "$ref": "#/components/schemas/RideStatus"
+          },
+          "message": {
+            "type": "string",
+            "nullable": true,
+            "description": "Verification outcome message (e.g., \"Passenger verified. You may start the trip.\")"
+          }
+        }
+      },
+      "RouteModificationResponse": {
+        "type": "object",
+        "properties": {
+          "rideId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "route": {
+            "$ref": "#/components/schemas/Route"
+          },
+          "updatedFareEstimate": {
+            "type": "object",
+            "properties": {
+              "totalEstimate": {
+                "type": "number",
+                "format": "double"
+              },
+              "surgeMultiplier": {
+                "type": "number",
+                "format": "double"
+              },
+              "currency": {
+                "type": "string"
+              }
+            }
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "NearbyDriversResponse": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/Driver"
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "distanceKm": {
+                      "type": "number",
+                      "format": "double",
+                      "description": "Distance from search centre"
+                    },
+                    "etaMin": {
+                      "type": "number",
+                      "format": "double",
+                      "description": "Estimated time to reach pickup"
+                    },
+                    "score": {
+                      "type": "number",
+                      "format": "double",
+                      "description": "Internal matching score based on proximity, rating, and preferences"
+                    }
+                  }
+                }
+              ]
+            }
+          },
+          "meta": {
+            "type": "object",
+            "properties": {
+              "searchCenter": {
+                "$ref": "#/components/schemas/Location"
+              },
+              "radiusKm": {
+                "type": "number",
+                "format": "double"
+              },
+              "totalResults": {
+                "type": "integer"
+              }
+            }
+          }
+        }
+      },
+      "MatchingResult": {
+        "type": "object",
+        "description": "Outcome of the platform's driver matching algorithm for a confirmed ride.",
+        "properties": {
+          "rideId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "matchStatus": {
+            "type": "string",
+            "enum": [
+              "MATCHING",
+              "MATCHED",
+              "NO_DRIVER_FOUND"
+            ]
+          },
+          "driver": {
+            "type": "object",
+            "nullable": true,
+            "properties": {
+              "driverId": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "name": {
+                "type": "string"
+              },
+              "vehicleDetails": {
+                "$ref": "#/components/schemas/VehicleDetails"
+              },
+              "currentLocation": {
+                "$ref": "#/components/schemas/Location"
+              },
+              "rating": {
+                "type": "number",
+                "format": "double"
+              },
+              "etaMin": {
+                "type": "number",
+                "format": "double"
+              }
+            }
+          },
+          "matchedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          }
+        }
+      },
+      "DispatchedRideRequests": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "rideId": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "riderId": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "pickup": {
+                  "$ref": "#/components/schemas/Location"
+                },
+                "dropoff": {
+                  "$ref": "#/components/schemas/Location"
+                },
+                "vehicleType": {
+                  "$ref": "#/components/schemas/VehicleType"
+                },
+                "fareEstimate": {
+                  "type": "object",
+                  "properties": {
+                    "totalEstimate": {
+                      "type": "number",
+                      "format": "double"
+                    },
+                    "currency": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "distanceToPickupKm": {
+                  "type": "number",
+                  "format": "double"
+                },
+                "etaToPickupMin": {
+                  "type": "number",
+                  "format": "double"
+                },
+                "dispatchedAt": {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              }
+            }
+          }
+        }
+      },
+      "PaginatedRides": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Ride"
+            }
+          },
+          "pagination": {
+            "$ref": "#/components/schemas/Pagination"
+          }
+        }
+      },
+      "PaginatedRatings": {
+        "type": "object",
+        "properties": {
+          "userId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "averageScore": {
+            "type": "number",
+            "format": "double"
+          },
+          "totalRatings": {
+            "type": "integer"
+          },
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Rating"
+            }
+          },
+          "pagination": {
+            "$ref": "#/components/schemas/Pagination"
+          }
+        }
+      },
+      "Pagination": {
+        "type": "object",
+        "properties": {
+          "total": {
+            "type": "integer"
+          },
+          "limit": {
+            "type": "integer"
+          },
+          "offset": {
+            "type": "integer"
+          }
+        }
+      },
+      "Error": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "description": "Machine-readable error code"
+              },
+              "message": {
+                "type": "string",
+                "description": "Human-readable error message"
+              },
+              "status": {
+                "type": "integer",
+                "description": "HTTP status code"
+              },
+              "timestamp": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "requestId": {
+                "type": "string",
+                "description": "Request trace ID"
+              },
+              "attemptsRemaining": {
+                "type": "integer",
+                "nullable": true,
+                "description": "Remaining retry attempts (PIN verification only)"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
