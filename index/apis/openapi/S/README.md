@@ -1,6 +1,6 @@
 # APIs — S
 
-Browsing 665 APIs starting with **S**.
+Browsing 666 APIs starting with **S**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · **S** · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -224,6 +224,7 @@ Browsing 665 APIs starting with **S**.
 | [skoot.eco](../../../../apis/openapi/skoot.eco) | [main](../../../../apis/openapi/skoot.eco/main) |
 | [skybiometry.com](../../../../apis/openapi/skybiometry.com) | [skybiometry](../../../../apis/openapi/skybiometry.com/skybiometry) |
 | [skynewz-api-fortnite.herokuapp.com](../../../../apis/openapi/skynewz-api-fortnite.herokuapp.com) | [main](../../../../apis/openapi/skynewz-api-fortnite.herokuapp.com/main) |
+| [skyscanner.net](../../../../apis/openapi/skyscanner.net) | [main](../../../../apis/openapi/skyscanner.net/main) |
 | [skyvia.com](../../../../apis/openapi/skyvia.com) | [main](../../../../apis/openapi/skyvia.com/main) |
 | [slack.com](../../../../apis/openapi/slack.com) | [main](../../../../apis/openapi/slack.com/main) · [openai](../../../../apis/openapi/slack.com/openai) |
 | [slapfive.com](../../../../apis/openapi/slapfive.com) | [main](../../../../apis/openapi/slapfive.com/main) |
