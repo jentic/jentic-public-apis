@@ -250,7 +250,7 @@ Browsing 413 APIs starting with **C**.
 | [coinmarketcap.com](../../../../apis/openapi/coinmarketcap.com) | [main](../../../../apis/openapi/coinmarketcap.com/main) |
 | [coinpaprika.com](../../../../apis/openapi/coinpaprika.com) | [main](../../../../apis/openapi/coinpaprika.com/main) |
 | [coinranking.com](../../../../apis/openapi/coinranking.com) | [main](../../../../apis/openapi/coinranking.com/main) |
-| [coinremitter.com](../../../../apis/openapi/coinremitter.com) | [coinremitter-api](../../../../apis/openapi/coinremitter.com/coinremitter-api) · [main](../../../../apis/openapi/coinremitter.com/main) |
+| [coinremitter.com](../../../../apis/openapi/coinremitter.com) | [main](../../../../apis/openapi/coinremitter.com/main) |
 | [coldiq.com](../../../../apis/openapi/coldiq.com) | [main](../../../../apis/openapi/coldiq.com/main) |
 | [collectednotes.com](../../../../apis/openapi/collectednotes.com) | [main](../../../../apis/openapi/collectednotes.com/main) |
 | [collectiveaccess.org](../../../../apis/openapi/collectiveaccess.org) | [main](../../../../apis/openapi/collectiveaccess.org/main) |
@@ -408,7 +408,7 @@ Browsing 413 APIs starting with **C**.
 | [customer.guru](../../../../apis/openapi/customer.guru) | [main](../../../../apis/openapi/customer.guru/main) |
 | [customer.io](../../../../apis/openapi/customer.io) | [customerio-api](../../../../apis/openapi/customer.io/customerio-api) · [main](../../../../apis/openapi/customer.io/main) · [track-api](../../../../apis/openapi/customer.io/track-api) |
 | [customerbase.com](../../../../apis/openapi/customerbase.com) | [main](../../../../apis/openapi/customerbase.com/main) |
-| [customgpt.ai](../../../../apis/openapi/customgpt.ai) | [customgpt-api](../../../../apis/openapi/customgpt.ai/customgpt-api) · [customgptai](../../../../apis/openapi/customgpt.ai/customgptai) |
+| [customgpt.ai](../../../../apis/openapi/customgpt.ai) | [customgptai](../../../../apis/openapi/customgpt.ai/customgptai) |
 | [customjs.space](../../../../apis/openapi/customjs.space) | [main](../../../../apis/openapi/customjs.space/main) |
 | [cutt.ly](../../../../apis/openapi/cutt.ly) | [cuttly-team-api](../../../../apis/openapi/cutt.ly/cuttly-team-api) |
 | [cvent.com](../../../../apis/openapi/cvent.com) | [main](../../../../apis/openapi/cvent.com/main) |
