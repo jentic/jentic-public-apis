@@ -1,6 +1,6 @@
 # APIs — Y
 
-Browsing 13 APIs starting with **Y**.
+Browsing 14 APIs starting with **Y**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · **Y** · [Z](../Z) · [~rest](../~rest)
 
@@ -18,5 +18,6 @@ Browsing 13 APIs starting with **Y**.
 | [yotpo.com](../../../../apis/openapi/yotpo.com) | [yotpo-app-developer-api](../../../../apis/openapi/yotpo.com/yotpo-app-developer-api) · [yotpo-ugc-api](../../../../apis/openapi/yotpo.com/yotpo-ugc-api) |
 | [you.com](../../../../apis/openapi/you.com) | [main](../../../../apis/openapi/you.com/main) |
 | [youneedabudget.com](../../../../apis/openapi/youneedabudget.com) | [main](../../../../apis/openapi/youneedabudget.com/main) · [ynab-api-endpoints](../../../../apis/openapi/youneedabudget.com/ynab-api-endpoints) |
+| [your.rentals](../../../../apis/openapi/your.rentals) | [main](../../../../apis/openapi/your.rentals/main) |
 | [yourang.ai](../../../../apis/openapi/yourang.ai) | [main](../../../../apis/openapi/yourang.ai/main) |
 
