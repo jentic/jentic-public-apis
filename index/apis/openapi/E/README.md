@@ -1,6 +1,6 @@
 # APIs — E
 
-Browsing 142 APIs starting with **E**.
+Browsing 143 APIs starting with **E**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · **E** · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -104,6 +104,7 @@ Browsing 142 APIs starting with **E**.
 | [evaboot.com](../../../../apis/openapi/evaboot.com) | [main](../../../../apis/openapi/evaboot.com/main) |
 | [evalumo.com](../../../../apis/openapi/evalumo.com) | [main](../../../../apis/openapi/evalumo.com/main) |
 | [evemarketer.com](../../../../apis/openapi/evemarketer.com) | [evemarketer-api](../../../../apis/openapi/evemarketer.com/evemarketer-api) · [evemarketer-marketstat-api](../../../../apis/openapi/evemarketer.com/evemarketer-marketstat-api) |
+| [eventbrite.com](../../../../apis/openapi/eventbrite.com) | [main](../../../../apis/openapi/eventbrite.com/main) |
 | [eventcinch.com](../../../../apis/openapi/eventcinch.com) | [e-cinch-api](../../../../apis/openapi/eventcinch.com/e-cinch-api) |
 | [eventleaf.com](../../../../apis/openapi/eventleaf.com) | [main](../../../../apis/openapi/eventleaf.com/main) |
 | [eventmaker.io](../../../../apis/openapi/eventmaker.io) | [main](../../../../apis/openapi/eventmaker.io/main) |
