@@ -1,6 +1,6 @@
 # APIs — S
 
-Browsing 667 APIs starting with **S**.
+Browsing 668 APIs starting with **S**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · **S** · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -253,6 +253,7 @@ Browsing 667 APIs starting with **S**.
 | [smartsuite.com](../../../../apis/openapi/smartsuite.com) | [main](../../../../apis/openapi/smartsuite.com/main) |
 | [smartsurvey.io](../../../../apis/openapi/smartsurvey.io) | [main](../../../../apis/openapi/smartsurvey.io/main) |
 | [smarttask.io](../../../../apis/openapi/smarttask.io) | [main](../../../../apis/openapi/smarttask.io/main) |
+| [smartthings.com](../../../../apis/openapi/smartthings.com) | [main](../../../../apis/openapi/smartthings.com/main) |
 | [smarty.com](../../../../apis/openapi/smarty.com) | [us-autocomplete](../../../../apis/openapi/smarty.com/us-autocomplete) · [us-extract](../../../../apis/openapi/smarty.com/us-extract) · [us-zipcode](../../../../apis/openapi/smarty.com/us-zipcode) |
 | [smith.langchain.com](../../../../apis/openapi/smith.langchain.com) | [langsmith-api](../../../../apis/openapi/smith.langchain.com/langsmith-api) |
 | [smore.com](../../../../apis/openapi/smore.com) | [main](../../../../apis/openapi/smore.com/main) |
