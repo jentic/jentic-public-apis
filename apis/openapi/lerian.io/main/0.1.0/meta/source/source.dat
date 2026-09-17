@@ -1,0 +1,1763 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Bank Transfer (TED) Plugin API",
+    "description": "# Bank Transfer (TED) Plugin for Lerian Platform\n\nEnable Brazilian bank transfers (TED OUT, TED IN, P2P) through Lerian platform with:\n- **TED OUT**: Send transfers to any Brazilian bank via JD Consultores SPB\n- **TED IN**: Receive transfers from any Brazilian bank\n- **P2P**: Same-institution transfers (same ISPB, faster and cheaper)\n\n## Key Features\n- Real-time transfer status tracking\n- Automatic fee calculation via plugin-fees\n- BACEN operating hours compliance (Mon-Fri 06:30-17:00 UTC-3)\n- Duplicate transfer prevention\n- Transaction limits enforcement\n- Multi-tenant architecture (SaaS, BYOC Single, BYOC Multi)\n\n## Integration Pattern: Two-Step Flow\n\n1. **InitiateTransfer** - Calculate fee, get confirmation\n2. **ProcessTransfer** - Execute with user approval\n\nThis pattern ensures users see fees before committing funds.\n\n## Authentication\n- Optional via lib-auth (customer configurable)\n- Bearer token with JWT containing `tenantId` claim\n\n## Multi-Tenant Headers (Required)\nAll endpoints require:\n- `X-Organization-Id`: UUID (must match JWT `tenantId`)\n- `Authorization`: Bearer token (if auth enabled)\n\n## Error Handling\nAll errors follow standard format with `code` (BTF-XXXX), `title`, `message`, and optional `fields`.\n\n## Rate Limiting\n- Rate limits configured per organization\n- 429 Too Many Requests with Retry-After header\n\n## Environments\n- **Development**: http://localhost:3000\n- **Staging**: https://api-staging.lerian.io/bank-transfer\n- **Production**: https://api.lerian.io/bank-transfer\n\n## References\n- PRD: Gate 1 - Product Requirements\n- Feature Map: Gate 2 - 21 Features, 7 Domains\n- TRD: Gate 3 - Technical Architecture\n- API Design: Gate 4 - Technology-agnostic contracts\n- Data Model: Gate 5 - Entity definitions\n\n## Support\n- Documentation: https://docs.lerian.io/plugins/bank-transfer\n- Support: support@lerian.io\n",
+    "version": "0.1.0",
+    "contact": {
+      "name": "Lerian Platform Team",
+      "email": "support@lerian.io",
+      "url": "https://lerian.io"
+    },
+    "license": {
+      "name": "Proprietary",
+      "url": "https://lerian.io/license"
+    },
+    "x-jentic-source-url": "https://api.swaggerhub.com/apis/lelele/bank-transfer-ted-plugin-api/0.1.0"
+  },
+  "servers": [
+    {
+      "url": "https://api.lerian.io/bank-transfer",
+      "description": "Production server"
+    }
+  ],
+  "tags": [
+    {
+      "name": "Transfers",
+      "description": "Transfer operations (initiate, process, status, list, cancel)"
+    },
+    {
+      "name": "Health",
+      "description": "Health check endpoints"
+    }
+  ],
+  "security": [
+    {
+      "BearerAuth": []
+    },
+    {}
+  ],
+  "paths": {
+    "/v1/transfers/initiate": {
+      "post": {
+        "tags": [
+          "Transfers"
+        ],
+        "summary": "Initiate Transfer (Step 1 of 2)",
+        "description": "Calculate fee and prepare transfer for confirmation. No funds held yet.\n\n**Flow:**\n1. Validate sender account (CRM)\n2. Validate operating hours (Mon-Fri 06:30-17:00 UTC-3)\n3. Check usage limits\n4. Detect duplicates (60s window)\n5. Calculate fee (plugin-fees)\n6. Return initiationId with fee details\n\n**Next Step:** User reviews fee → calls ProcessTransfer with initiationId\n\n**Idempotency:** Use `X-Idempotency-Key` header for guaranteed deduplication\n\n**Expiration:** initiationId expires in 24 hours\n",
+        "operationId": "initiateTransfer",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrganizationId"
+          },
+          {
+            "$ref": "#/components/parameters/XIdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InitiateTransferRequest"
+              },
+              "examples": {
+                "tedOut": {
+                  "summary": "TED OUT to external bank",
+                  "value": {
+                    "senderAccountId": "550e8400-e29b-41d4-a716-446655440000",
+                    "recipient": {
+                      "ispb": "00000000",
+                      "branch": "0001",
+                      "account": "1234567890",
+                      "accountType": "CACC",
+                      "holderName": "João Silva",
+                      "holderDocument": "12345678901"
+                    },
+                    "amount": 1000.5,
+                    "description": "Payment for services",
+                    "metadata": {
+                      "invoiceId": "INV-2024-001"
+                    }
+                  }
+                },
+                "p2p": {
+                  "summary": "P2P (same institution)",
+                  "value": {
+                    "senderAccountId": "550e8400-e29b-41d4-a716-446655440000",
+                    "recipient": {
+                      "ispb": "12345678",
+                      "branch": "0001",
+                      "account": "9876543210",
+                      "accountType": "CACC",
+                      "holderName": "Maria Santos",
+                      "holderDocument": "98765432100"
+                    },
+                    "amount": 500.0,
+                    "description": "Transfer to friend"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Transfer initiated successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InitiateTransferResponse"
+                },
+                "examples": {
+                  "success": {
+                    "summary": "Initiation with fee",
+                    "value": {
+                      "initiationId": "660e8400-e29b-41d4-a716-446655440001",
+                      "feeAmount": 1.5,
+                      "totalAmount": 1002.0,
+                      "estimatedCompletionAt": "2026-02-01T18:00:00-03:00",
+                      "expiresAt": "2026-02-02T15:30:00-03:00",
+                      "status": "PENDING_CONFIRMATION"
+                    }
+                  },
+                  "freeTransfer": {
+                    "summary": "No fee configured",
+                    "value": {
+                      "initiationId": "660e8400-e29b-41d4-a716-446655440002",
+                      "feeAmount": 0.0,
+                      "totalAmount": 1000.5,
+                      "estimatedCompletionAt": "2026-02-01T18:00:00-03:00",
+                      "expiresAt": "2026-02-02T15:30:00-03:00",
+                      "status": "PENDING_CONFIRMATION"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/TenantMismatch"
+          },
+          "404": {
+            "$ref": "#/components/responses/AccountNotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/DuplicateTransfer"
+          },
+          "422": {
+            "$ref": "#/components/responses/OperatingHoursViolation"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimitExceeded"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/v1/transfers/process": {
+      "post": {
+        "tags": [
+          "Transfers"
+        ],
+        "summary": "Process Transfer (Step 2 of 2)",
+        "description": "Execute transfer after user confirmation. Holds funds and submits to external systems.\n\n**Flow:**\n1. Validate initiationId (not expired, not processed)\n2. Validate limits (amount + fee)\n3. Check balance (TED OUT/P2P)\n4. Hold funds in Midaz (pending transaction)\n5. Route transfer:\n   - **TED OUT**: Send to JD SPB (STR0008)\n   - **P2P**: Create internal Midaz transaction\n6. Return transferId for tracking\n\n**Status Transitions:**\n- CREATED → PENDING → PROCESSING → COMPLETED/REJECTED/FAILED\n\n**Idempotency:** Same initiationId returns same transferId\n",
+        "operationId": "processTransfer",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrganizationId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProcessTransferRequest"
+              },
+              "examples": {
+                "process": {
+                  "summary": "Process initiated transfer",
+                  "value": {
+                    "initiationId": "660e8400-e29b-41d4-a716-446655440001"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Transfer processing started",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProcessTransferResponse"
+                },
+                "examples": {
+                  "success": {
+                    "summary": "Transfer created",
+                    "value": {
+                      "transferId": "770e8400-e29b-41d4-a716-446655440003",
+                      "confirmationNumber": "20260201001",
+                      "status": "CREATED",
+                      "feeAmount": 1.5,
+                      "totalAmount": 1002.0
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/InitiationNotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/AlreadyProcessed"
+          },
+          "410": {
+            "$ref": "#/components/responses/InitiationExpired"
+          },
+          "422": {
+            "$ref": "#/components/responses/LimitExceeded"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/v1/transfers/{transferId}": {
+      "get": {
+        "tags": [
+          "Transfers"
+        ],
+        "summary": "Get Transfer Status",
+        "description": "Query current status and details of a transfer.\n\n**Returns:**\n- Transfer type (TED_OUT, TED_IN, P2P)\n- Current status with history\n- Sender and recipient details\n- Amounts (transfer, fee, total)\n- Timestamps (created, updated, completed)\n\n**Security:** Only returns transfers from same organization (tenant isolation)\n",
+        "operationId": "getTransferStatus",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrganizationId"
+          },
+          {
+            "name": "transferId",
+            "in": "path",
+            "required": true,
+            "description": "Transfer unique identifier",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Transfer found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Transfer"
+                },
+                "examples": {
+                  "tedOutCompleted": {
+                    "summary": "TED OUT completed",
+                    "value": {
+                      "transferId": "770e8400-e29b-41d4-a716-446655440003",
+                      "type": "TED_OUT",
+                      "status": "COMPLETED",
+                      "sender": {
+                        "accountId": "550e8400-e29b-41d4-a716-446655440000",
+                        "holderName": "João Silva"
+                      },
+                      "recipient": {
+                        "ispb": "00000000",
+                        "branch": "0001",
+                        "account": "1234567890",
+                        "accountType": "CACC",
+                        "holderName": "Maria Santos",
+                        "holderDocument": "98765432100"
+                      },
+                      "amount": 1000.5,
+                      "feeAmount": 1.5,
+                      "totalAmount": 1002.0,
+                      "confirmationNumber": "20260201001",
+                      "controlNumber": "202602010001",
+                      "createdAt": "2026-02-01T15:30:00-03:00",
+                      "updatedAt": "2026-02-01T15:35:00-03:00",
+                      "completedAt": "2026-02-01T15:35:00-03:00",
+                      "statusHistory": [
+                        {
+                          "status": "CREATED",
+                          "timestamp": "2026-02-01T15:30:00-03:00",
+                          "reason": null
+                        },
+                        {
+                          "status": "PENDING",
+                          "timestamp": "2026-02-01T15:30:05-03:00",
+                          "reason": null
+                        },
+                        {
+                          "status": "PROCESSING",
+                          "timestamp": "2026-02-01T15:30:10-03:00",
+                          "reason": null
+                        },
+                        {
+                          "status": "COMPLETED",
+                          "timestamp": "2026-02-01T15:35:00-03:00",
+                          "reason": null
+                        }
+                      ]
+                    }
+                  },
+                  "tedInReceived": {
+                    "summary": "TED IN received",
+                    "value": {
+                      "transferId": "880e8400-e29b-41d4-a716-446655440004",
+                      "type": "TED_IN",
+                      "status": "COMPLETED",
+                      "sender": {
+                        "accountId": null,
+                        "holderName": "Pedro Costa (External)"
+                      },
+                      "recipient": {
+                        "ispb": "12345678",
+                        "branch": "0001",
+                        "account": "9876543210",
+                        "accountType": "CACC",
+                        "holderName": "João Silva",
+                        "holderDocument": "12345678901"
+                      },
+                      "amount": 500.0,
+                      "feeAmount": 0.0,
+                      "totalAmount": 500.0,
+                      "confirmationNumber": "20260201002",
+                      "controlNumber": "202602010002",
+                      "createdAt": "2026-02-01T16:00:00-03:00",
+                      "updatedAt": "2026-02-01T16:00:05-03:00",
+                      "completedAt": "2026-02-01T16:00:05-03:00",
+                      "statusHistory": [
+                        {
+                          "status": "RECEIVED",
+                          "timestamp": "2026-02-01T16:00:00-03:00",
+                          "reason": null
+                        },
+                        {
+                          "status": "COMPLETED",
+                          "timestamp": "2026-02-01T16:00:05-03:00",
+                          "reason": null
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/TransferNotFound"
+          }
+        }
+      }
+    },
+    "/v1/transfers": {
+      "get": {
+        "tags": [
+          "Transfers"
+        ],
+        "summary": "List Transfers",
+        "description": "Query transfers with filtering, sorting, and pagination.\n\n**Filters:**\n- Type (TED_OUT, TED_IN, P2P)\n- Status (CREATED, PENDING, PROCESSING, COMPLETED, etc.)\n- Date range (fromDate, toDate)\n- Amount range (minAmount, maxAmount)\n\n**Pagination:**\n- Default: 50 items per page\n- Max: 100 items per page\n\n**Security:** Only returns transfers from same organization\n",
+        "operationId": "listTransfers",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrganizationId"
+          },
+          {
+            "name": "type",
+            "in": "query",
+            "description": "Filter by transfer type",
+            "schema": {
+              "$ref": "#/components/schemas/TransferType"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "description": "Filter by transfer status",
+            "schema": {
+              "$ref": "#/components/schemas/TransferStatus"
+            }
+          },
+          {
+            "name": "fromDate",
+            "in": "query",
+            "description": "Start of date range (ISO 8601)",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "toDate",
+            "in": "query",
+            "description": "End of date range (ISO 8601)",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "minAmount",
+            "in": "query",
+            "description": "Minimum transfer amount",
+            "schema": {
+              "type": "number",
+              "format": "decimal",
+              "minimum": 0.01
+            }
+          },
+          {
+            "name": "maxAmount",
+            "in": "query",
+            "description": "Maximum transfer amount",
+            "schema": {
+              "type": "number",
+              "format": "decimal",
+              "maximum": 999999.99
+            }
+          },
+          {
+            "name": "pageNumber",
+            "in": "query",
+            "description": "Page number (1-indexed)",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1
+            }
+          },
+          {
+            "name": "pageSize",
+            "in": "query",
+            "description": "Items per page",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 50
+            }
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "description": "Sort field",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "createdAt",
+                "amount",
+                "status"
+              ],
+              "default": "createdAt"
+            }
+          },
+          {
+            "name": "order",
+            "in": "query",
+            "description": "Sort order",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "ASC",
+                "DESC"
+              ],
+              "default": "DESC"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Transfers found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TransferList"
+                },
+                "examples": {
+                  "list": {
+                    "summary": "Paginated transfers",
+                    "value": {
+                      "data": [
+                        {
+                          "transferId": "770e8400-e29b-41d4-a716-446655440003",
+                          "type": "TED_OUT",
+                          "status": "COMPLETED",
+                          "amount": 1000.5,
+                          "feeAmount": 1.5,
+                          "recipientHolderName": "Maria Santos",
+                          "createdAt": "2026-02-01T15:30:00-03:00"
+                        },
+                        {
+                          "transferId": "880e8400-e29b-41d4-a716-446655440004",
+                          "type": "TED_IN",
+                          "status": "COMPLETED",
+                          "amount": 500.0,
+                          "feeAmount": 0.0,
+                          "recipientHolderName": "João Silva",
+                          "createdAt": "2026-02-01T16:00:00-03:00"
+                        }
+                      ],
+                      "pagination": {
+                        "pageNumber": 1,
+                        "pageSize": 50,
+                        "totalCount": 2,
+                        "totalPages": 1
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidFilter"
+          }
+        }
+      }
+    },
+    "/v1/transfers/{transferId}/cancel": {
+      "post": {
+        "tags": [
+          "Transfers"
+        ],
+        "summary": "Cancel Transfer",
+        "description": "Cancel a pending transfer before it executes.\n\n**Cancellable Status:**\n- CREATED\n- PENDING\n\n**Non-Cancellable Status:**\n- PROCESSING (already submitted to external systems)\n- COMPLETED\n- REJECTED\n- FAILED\n- CANCELLED\n\n**Effects:**\n- Releases held funds in Midaz\n- Sets status to CANCELLED\n- Cannot be reversed\n\n**Idempotency:** Calling cancel on already-cancelled transfer returns success\n",
+        "operationId": "cancelTransfer",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrganizationId"
+          },
+          {
+            "name": "transferId",
+            "in": "path",
+            "required": true,
+            "description": "Transfer to cancel",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "reason": {
+                    "type": "string",
+                    "maxLength": 500,
+                    "description": "Reason for cancellation"
+                  }
+                }
+              },
+              "examples": {
+                "withReason": {
+                  "summary": "With cancellation reason",
+                  "value": {
+                    "reason": "User requested cancellation"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Transfer cancelled",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CancelTransferResponse"
+                },
+                "examples": {
+                  "success": {
+                    "summary": "Cancellation successful",
+                    "value": {
+                      "transferId": "770e8400-e29b-41d4-a716-446655440003",
+                      "status": "CANCELLED",
+                      "cancelledAt": "2026-02-01T15:35:00-03:00"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/TransferNotFound"
+          },
+          "422": {
+            "$ref": "#/components/responses/CannotCancel"
+          }
+        }
+      }
+    },
+    "/health/live": {
+      "get": {
+        "tags": [
+          "Health"
+        ],
+        "summary": "Liveness Check",
+        "description": "Check if service is alive (responds to requests).\n\n**Returns 200 if:**\n- Service process is running\n- HTTP server is responding\n\n**Kubernetes:** Use for `livenessProbe`\n",
+        "operationId": "liveness",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Service is alive",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                },
+                "examples": {
+                  "alive": {
+                    "summary": "Service running",
+                    "value": {
+                      "status": "ok",
+                      "timestamp": "2026-02-01T15:30:00-03:00"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/health/ready": {
+      "get": {
+        "tags": [
+          "Health"
+        ],
+        "summary": "Readiness Check",
+        "description": "Check if service is ready to accept traffic.\n\n**Returns 200 if:**\n- Database connections healthy\n- Redis connections healthy\n- External dependencies reachable (JD, Midaz, CRM, Fees)\n\n**Returns 503 if:**\n- Critical dependency unavailable\n\n**Kubernetes:** Use for `readinessProbe`\n",
+        "operationId": "readiness",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Service is ready",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                },
+                "examples": {
+                  "ready": {
+                    "summary": "All dependencies healthy",
+                    "value": {
+                      "status": "ok",
+                      "timestamp": "2026-02-01T15:30:00-03:00",
+                      "dependencies": {
+                        "database": "ok",
+                        "redis": "ok",
+                        "jd_spb": "ok",
+                        "midaz": "ok",
+                        "crm": "ok",
+                        "fees": "ok"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service not ready",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                },
+                "examples": {
+                  "notReady": {
+                    "summary": "Database unavailable",
+                    "value": {
+                      "status": "unavailable",
+                      "timestamp": "2026-02-01T15:30:00-03:00",
+                      "dependencies": {
+                        "database": "unavailable",
+                        "redis": "ok",
+                        "jd_spb": "ok",
+                        "midaz": "ok",
+                        "crm": "ok",
+                        "fees": "ok"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "BearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT",
+        "description": "JWT token with `tenantId` claim (required for multi-tenant isolation).\n\n**JWT Claims:**\n- `sub`: User ID (UUID)\n- `tenantId`: Organization ID (UUID) - **MUST match X-Organization-Id header**\n- `type`: User type (normal-user, admin, etc.)\n- `iss`: Issuer (plugin-auth)\n\n**Example:**\n```\nAuthorization: Bearer eyJhbGciOiJIUzI1NiIs...\n```\n"
+      }
+    },
+    "parameters": {
+      "XOrganizationId": {
+        "name": "X-Organization-Id",
+        "in": "header",
+        "required": true,
+        "description": "Organization ID (tenant identifier). Must match JWT `tenantId` claim.\n\n**Multi-Tenant Isolation:**\n- All data scoped to this organization\n- Prevents cross-tenant access\n- Enables per-tenant configuration (credentials, webhooks, fees)\n\n**Deployment Models:**\n- SaaS Multi-Tenant: Multiple organizations\n- BYOC Single-Tenant: Single organization (client-specific)\n- BYOC Multi-Tenant: Client subsidiaries/partners\n",
+        "schema": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "example": "550e8400-e29b-41d4-a716-446655440000"
+      },
+      "XIdempotencyKey": {
+        "name": "X-Idempotency-Key",
+        "in": "header",
+        "required": false,
+        "description": "Client-provided idempotency key for guaranteed deduplication.\n\n**Behavior:**\n- Same key within 24h returns cached response\n- Prevents duplicate transfers from network retries\n- UUID v4 recommended\n\n**Without key:**\n- Auto-generated from hash(org, sender, recipient, amount, timestamp)\n- 60-second duplicate detection window\n",
+        "schema": {
+          "type": "string",
+          "maxLength": 255
+        },
+        "example": "660e8400-e29b-41d4-a716-446655440001"
+      }
+    },
+    "schemas": {
+      "InitiateTransferRequest": {
+        "type": "object",
+        "required": [
+          "senderAccountId",
+          "recipient",
+          "amount"
+        ],
+        "properties": {
+          "senderAccountId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Midaz account ID of sender",
+            "example": "550e8400-e29b-41d4-a716-446655440000"
+          },
+          "recipient": {
+            "$ref": "#/components/schemas/RecipientDetails"
+          },
+          "amount": {
+            "type": "number",
+            "format": "decimal",
+            "minimum": 0.01,
+            "maximum": 999999.99,
+            "description": "Transfer amount in BRL",
+            "example": 1000.5
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 140,
+            "description": "Transfer purpose/description",
+            "example": "Payment for services"
+          },
+          "metadata": {
+            "type": "object",
+            "additionalProperties": true,
+            "description": "Custom metadata (key-value pairs)",
+            "example": {
+              "invoiceId": "INV-2024-001",
+              "orderId": "ORD-2024-123"
+            }
+          }
+        }
+      },
+      "ProcessTransferRequest": {
+        "type": "object",
+        "required": [
+          "initiationId"
+        ],
+        "properties": {
+          "initiationId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "ID from InitiateTransfer (expires in 24h)",
+            "example": "660e8400-e29b-41d4-a716-446655440001"
+          }
+        }
+      },
+      "InitiateTransferResponse": {
+        "type": "object",
+        "required": [
+          "initiationId",
+          "feeAmount",
+          "totalAmount",
+          "estimatedCompletionAt",
+          "expiresAt",
+          "status"
+        ],
+        "properties": {
+          "initiationId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Unique initiation ID (use in ProcessTransfer)",
+            "example": "660e8400-e29b-41d4-a716-446655440001"
+          },
+          "feeAmount": {
+            "type": "number",
+            "format": "decimal",
+            "description": "Calculated fee (0.00 if disabled)",
+            "example": 1.5
+          },
+          "totalAmount": {
+            "type": "number",
+            "format": "decimal",
+            "description": "amount + feeAmount",
+            "example": 1002.0
+          },
+          "estimatedCompletionAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Estimated completion time (TED OUT/P2P)",
+            "example": "2026-02-01T18:00:00-03:00"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Expiration time (24h from creation)",
+            "example": "2026-02-02T15:30:00-03:00"
+          },
+          "status": {
+            "$ref": "#/components/schemas/InitiationStatus"
+          }
+        }
+      },
+      "ProcessTransferResponse": {
+        "type": "object",
+        "required": [
+          "transferId",
+          "confirmationNumber",
+          "status",
+          "feeAmount",
+          "totalAmount"
+        ],
+        "properties": {
+          "transferId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Unique transfer ID (use for tracking)",
+            "example": "770e8400-e29b-41d4-a716-446655440003"
+          },
+          "confirmationNumber": {
+            "type": "string",
+            "maxLength": 20,
+            "description": "Human-readable confirmation (YYYYMMDD+seq)",
+            "example": "20260201001"
+          },
+          "status": {
+            "$ref": "#/components/schemas/TransferStatus"
+          },
+          "feeAmount": {
+            "type": "number",
+            "format": "decimal",
+            "description": "Fee amount (from initiation)",
+            "example": 1.5
+          },
+          "totalAmount": {
+            "type": "number",
+            "format": "decimal",
+            "description": "Total amount held/transferred",
+            "example": 1002.0
+          }
+        }
+      },
+      "Transfer": {
+        "type": "object",
+        "required": [
+          "transferId",
+          "type",
+          "status",
+          "sender",
+          "recipient",
+          "amount",
+          "feeAmount",
+          "totalAmount",
+          "createdAt",
+          "updatedAt",
+          "statusHistory"
+        ],
+        "properties": {
+          "transferId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Transfer unique ID",
+            "example": "770e8400-e29b-41d4-a716-446655440003"
+          },
+          "type": {
+            "$ref": "#/components/schemas/TransferType"
+          },
+          "status": {
+            "$ref": "#/components/schemas/TransferStatus"
+          },
+          "sender": {
+            "$ref": "#/components/schemas/SenderDetails"
+          },
+          "recipient": {
+            "$ref": "#/components/schemas/RecipientDetails"
+          },
+          "amount": {
+            "type": "number",
+            "format": "decimal",
+            "description": "Transfer amount (without fee)",
+            "example": 1000.5
+          },
+          "feeAmount": {
+            "type": "number",
+            "format": "decimal",
+            "description": "Fee charged",
+            "example": 1.5
+          },
+          "totalAmount": {
+            "type": "number",
+            "format": "decimal",
+            "description": "amount + fee",
+            "example": 1002.0
+          },
+          "confirmationNumber": {
+            "type": "string",
+            "nullable": true,
+            "maxLength": 20,
+            "description": "Confirmation code (if available)",
+            "example": "20260201001"
+          },
+          "controlNumber": {
+            "type": "string",
+            "nullable": true,
+            "maxLength": 20,
+            "description": "JD SPB control number (if TED OUT/IN)",
+            "example": "202602010001"
+          },
+          "midazTransactionId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true,
+            "description": "Midaz transaction ID",
+            "example": "990e8400-e29b-41d4-a716-446655440005"
+          },
+          "description": {
+            "type": "string",
+            "nullable": true,
+            "maxLength": 140,
+            "description": "Transfer purpose",
+            "example": "Payment for services"
+          },
+          "metadata": {
+            "type": "object",
+            "nullable": true,
+            "additionalProperties": true,
+            "description": "Custom metadata"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Creation time",
+            "example": "2026-02-01T15:30:00-03:00"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Last update time",
+            "example": "2026-02-01T15:35:00-03:00"
+          },
+          "completedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true,
+            "description": "Completion time (if completed)",
+            "example": "2026-02-01T15:35:00-03:00"
+          },
+          "statusHistory": {
+            "type": "array",
+            "description": "Status transition history",
+            "items": {
+              "$ref": "#/components/schemas/StatusHistoryEntry"
+            }
+          }
+        }
+      },
+      "TransferList": {
+        "type": "object",
+        "required": [
+          "data",
+          "pagination"
+        ],
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TransferSummary"
+            }
+          },
+          "pagination": {
+            "$ref": "#/components/schemas/PaginationInfo"
+          }
+        }
+      },
+      "TransferSummary": {
+        "type": "object",
+        "required": [
+          "transferId",
+          "type",
+          "status",
+          "amount",
+          "feeAmount",
+          "recipientHolderName",
+          "createdAt"
+        ],
+        "properties": {
+          "transferId": {
+            "type": "string",
+            "format": "uuid",
+            "example": "770e8400-e29b-41d4-a716-446655440003"
+          },
+          "type": {
+            "$ref": "#/components/schemas/TransferType"
+          },
+          "status": {
+            "$ref": "#/components/schemas/TransferStatus"
+          },
+          "amount": {
+            "type": "number",
+            "format": "decimal",
+            "example": 1000.5
+          },
+          "feeAmount": {
+            "type": "number",
+            "format": "decimal",
+            "example": 1.5
+          },
+          "recipientHolderName": {
+            "type": "string",
+            "description": "Recipient name",
+            "example": "Maria Santos"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "example": "2026-02-01T15:30:00-03:00"
+          }
+        }
+      },
+      "CancelTransferResponse": {
+        "type": "object",
+        "required": [
+          "transferId",
+          "status",
+          "cancelledAt"
+        ],
+        "properties": {
+          "transferId": {
+            "type": "string",
+            "format": "uuid",
+            "example": "770e8400-e29b-41d4-a716-446655440003"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "CANCELLED"
+            ],
+            "example": "CANCELLED"
+          },
+          "cancelledAt": {
+            "type": "string",
+            "format": "date-time",
+            "example": "2026-02-01T15:35:00-03:00"
+          }
+        }
+      },
+      "RecipientDetails": {
+        "type": "object",
+        "required": [
+          "ispb",
+          "branch",
+          "account",
+          "accountType",
+          "holderName",
+          "holderDocument"
+        ],
+        "properties": {
+          "ispb": {
+            "type": "string",
+            "pattern": "^[0-9]{8}$",
+            "description": "8-digit ISPB code of recipient's bank",
+            "example": "00000000"
+          },
+          "branch": {
+            "type": "string",
+            "pattern": "^[0-9]{4}$",
+            "description": "4-digit branch code (agência)",
+            "example": "0001"
+          },
+          "account": {
+            "type": "string",
+            "pattern": "^[0-9]{1,20}$",
+            "description": "Account number (1-20 digits)",
+            "example": "1234567890"
+          },
+          "accountType": {
+            "$ref": "#/components/schemas/AccountType"
+          },
+          "holderName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "description": "Account holder full name",
+            "example": "Maria Santos"
+          },
+          "holderDocument": {
+            "type": "string",
+            "pattern": "^[0-9]{11}$|^[0-9]{14}$",
+            "description": "CPF (11 digits) or CNPJ (14 digits)",
+            "example": "12345678901"
+          }
+        }
+      },
+      "SenderDetails": {
+        "type": "object",
+        "required": [
+          "accountId",
+          "holderName"
+        ],
+        "properties": {
+          "accountId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true,
+            "description": "Midaz account ID (null for TED IN from external)",
+            "example": "550e8400-e29b-41d4-a716-446655440000"
+          },
+          "holderName": {
+            "type": "string",
+            "description": "Account holder name",
+            "example": "João Silva"
+          }
+        }
+      },
+      "StatusHistoryEntry": {
+        "type": "object",
+        "required": [
+          "status",
+          "timestamp"
+        ],
+        "properties": {
+          "status": {
+            "$ref": "#/components/schemas/TransferStatus"
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time",
+            "example": "2026-02-01T15:30:00-03:00"
+          },
+          "reason": {
+            "type": "string",
+            "nullable": true,
+            "maxLength": 500,
+            "description": "Reason for status change (if applicable)",
+            "example": "JD timeout after 3 retries"
+          }
+        }
+      },
+      "PaginationInfo": {
+        "type": "object",
+        "required": [
+          "pageNumber",
+          "pageSize",
+          "totalCount",
+          "totalPages"
+        ],
+        "properties": {
+          "pageNumber": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Current page number",
+            "example": 1
+          },
+          "pageSize": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "description": "Items per page",
+            "example": 50
+          },
+          "totalCount": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Total matching items",
+            "example": 123
+          },
+          "totalPages": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Total pages",
+            "example": 3
+          }
+        }
+      },
+      "HealthResponse": {
+        "type": "object",
+        "required": [
+          "status",
+          "timestamp"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "ok",
+              "unavailable"
+            ],
+            "example": "ok"
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time",
+            "example": "2026-02-01T15:30:00-03:00"
+          },
+          "dependencies": {
+            "type": "object",
+            "description": "Health status of dependencies (readiness only)",
+            "properties": {
+              "database": {
+                "type": "string",
+                "enum": [
+                  "ok",
+                  "unavailable"
+                ]
+              },
+              "redis": {
+                "type": "string",
+                "enum": [
+                  "ok",
+                  "unavailable"
+                ]
+              },
+              "jd_spb": {
+                "type": "string",
+                "enum": [
+                  "ok",
+                  "unavailable"
+                ]
+              },
+              "midaz": {
+                "type": "string",
+                "enum": [
+                  "ok",
+                  "unavailable"
+                ]
+              },
+              "crm": {
+                "type": "string",
+                "enum": [
+                  "ok",
+                  "unavailable"
+                ]
+              },
+              "fees": {
+                "type": "string",
+                "enum": [
+                  "ok",
+                  "unavailable"
+                ]
+              }
+            }
+          }
+        }
+      },
+      "TransferType": {
+        "type": "string",
+        "enum": [
+          "TED_OUT",
+          "TED_IN",
+          "P2P"
+        ],
+        "description": "Transfer type:\n- **TED_OUT**: Outgoing transfer to external bank via JD SPB\n- **TED_IN**: Incoming transfer from external bank\n- **P2P**: Peer-to-peer (same institution, same ISPB)\n",
+        "example": "TED_OUT"
+      },
+      "TransferStatus": {
+        "type": "string",
+        "enum": [
+          "CREATED",
+          "PENDING",
+          "PROCESSING",
+          "COMPLETED",
+          "REJECTED",
+          "FAILED",
+          "CANCELLED",
+          "RECEIVED"
+        ],
+        "description": "Transfer status:\n\n**TED OUT/P2P Flow:**\n- **CREATED**: Transfer record created, funds held\n- **PENDING**: Awaiting external processing\n- **PROCESSING**: Submitted to JD SPB or internal processing\n- **COMPLETED**: Successfully completed\n- **REJECTED**: Rejected by JD/BACEN (invalid recipient, etc.)\n- **FAILED**: System error (timeout, unavailable, etc.)\n- **CANCELLED**: User cancelled before processing\n\n**TED IN Flow:**\n- **RECEIVED**: Incoming transfer received from JD\n- **COMPLETED**: Credited to recipient account\n- **REJECTED**: Invalid recipient (not our customer)\n\n**State Machine:**\n- CREATED → PENDING → PROCESSING → COMPLETED/REJECTED/FAILED\n- CREATED → CANCELLED (before PENDING)\n- PENDING → CANCELLED (before PROCESSING)\n- RECEIVED → COMPLETED/REJECTED (TED IN only)\n",
+        "example": "COMPLETED"
+      },
+      "InitiationStatus": {
+        "type": "string",
+        "enum": [
+          "PENDING_CONFIRMATION",
+          "PROCESSED",
+          "EXPIRED"
+        ],
+        "description": "Initiation status:\n- **PENDING_CONFIRMATION**: Awaiting ProcessTransfer call\n- **PROCESSED**: Transfer created via ProcessTransfer\n- **EXPIRED**: Expired after 24 hours\n",
+        "example": "PENDING_CONFIRMATION"
+      },
+      "AccountType": {
+        "type": "string",
+        "enum": [
+          "CACC",
+          "SLRY",
+          "SVGS",
+          "TRAN",
+          "OTHR"
+        ],
+        "description": "Account type (ISO 20022):\n- **CACC**: Current account (Conta Corrente)\n- **SLRY**: Salary account (Conta Salário)\n- **SVGS**: Savings account (Conta Poupança)\n- **TRAN**: Transactional account (Conta de Pagamento)\n- **OTHR**: Other account type\n",
+        "example": "CACC"
+      },
+      "ErrorResponse": {
+        "type": "object",
+        "required": [
+          "code",
+          "title",
+          "message"
+        ],
+        "properties": {
+          "code": {
+            "type": "string",
+            "pattern": "^BTF-[0-9]{4}$",
+            "description": "Error code (BTF-XXXX format)",
+            "example": "BTF-0010"
+          },
+          "title": {
+            "type": "string",
+            "description": "Short, human-readable title",
+            "example": "Operating Hours Violation"
+          },
+          "message": {
+            "type": "string",
+            "description": "Detailed error message",
+            "example": "Transfers can only be initiated Monday-Friday between 06:30 and 17:00 Brasília time"
+          },
+          "fields": {
+            "type": "object",
+            "additionalProperties": true,
+            "description": "Field-level validation errors (body params)",
+            "example": {
+              "currentTime": "2026-02-01T18:30:00-03:00",
+              "operatingHours": "Mon-Fri 06:30-17:00 UTC-3"
+            }
+          },
+          "headers": {
+            "type": "object",
+            "additionalProperties": true,
+            "description": "Header validation errors"
+          },
+          "paths": {
+            "type": "object",
+            "additionalProperties": true,
+            "description": "Path parameter validation errors"
+          },
+          "queryParams": {
+            "type": "object",
+            "additionalProperties": true,
+            "description": "Query parameter validation errors"
+          }
+        }
+      }
+    },
+    "responses": {
+      "BadRequest": {
+        "description": "Invalid input",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            },
+            "examples": {
+              "invalidInput": {
+                "summary": "Validation error",
+                "value": {
+                  "code": "BTF-0001",
+                  "title": "Invalid Input",
+                  "message": "The request contains invalid fields. Please check the field details below.",
+                  "fields": {
+                    "recipientIspb": "must be 8 digits",
+                    "amount": "must be positive"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "InvalidFilter": {
+        "description": "Invalid filter parameters",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            },
+            "examples": {
+              "invalidDateRange": {
+                "summary": "Invalid date range",
+                "value": {
+                  "code": "BTF-0002",
+                  "title": "Invalid Filter",
+                  "message": "Invalid filter parameters",
+                  "queryParams": {
+                    "toDate": "must be >= fromDate"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "Unauthorized": {
+        "description": "Unauthorized (invalid or missing authentication)",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            },
+            "examples": {
+              "unauthorized": {
+                "summary": "Missing authorization",
+                "value": {
+                  "code": "BTF-0401",
+                  "title": "Unauthorized",
+                  "message": "Missing or invalid authentication token"
+                }
+              }
+            }
+          }
+        }
+      },
+      "TenantMismatch": {
+        "description": "Tenant mismatch (X-Organization-Id doesn't match JWT tenantId)",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            },
+            "examples": {
+              "tenantMismatch": {
+                "summary": "Header/JWT mismatch",
+                "value": {
+                  "code": "BTF-0402",
+                  "title": "Tenant Mismatch",
+                  "message": "X-Organization-Id header does not match JWT tenantId claim. Access denied.",
+                  "headers": {
+                    "X-Organization-Id": "Header value: abc-123, JWT tenantId: xyz-789"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "AccountNotFound": {
+        "description": "Account not found in CRM",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            },
+            "examples": {
+              "accountNotFound": {
+                "summary": "Invalid sender account",
+                "value": {
+                  "code": "BTF-0500",
+                  "title": "Account Not Found",
+                  "message": "Sender account does not exist in CRM"
+                }
+              }
+            }
+          }
+        }
+      },
+      "TransferNotFound": {
+        "description": "Transfer not found (or belongs to different organization)",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            },
+            "examples": {
+              "transferNotFound": {
+                "summary": "Transfer ID invalid",
+                "value": {
+                  "code": "BTF-0200",
+                  "title": "Transfer Not Found",
+                  "message": "Transfer not found"
+                }
+              }
+            }
+          }
+        }
+      },
+      "InitiationNotFound": {
+        "description": "Initiation not found",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            },
+            "examples": {
+              "initiationNotFound": {
+                "summary": "Invalid initiation ID",
+                "value": {
+                  "code": "BTF-0201",
+                  "title": "Initiation Not Found",
+                  "message": "Initiation not found or belongs to different organization"
+                }
+              }
+            }
+          }
+        }
+      },
+      "DuplicateTransfer": {
+        "description": "Duplicate transfer detected (within 60s window)",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            },
+            "examples": {
+              "duplicate": {
+                "summary": "Same transfer submitted twice",
+                "value": {
+                  "code": "BTF-0012",
+                  "title": "Duplicate Transfer",
+                  "message": "Identical transfer submitted 15 seconds ago",
+                  "fields": {
+                    "originalTransferId": "770e8400-e29b-41d4-a716-446655440003",
+                    "detectedAt": "2026-02-01T15:30:15-03:00"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "AlreadyProcessed": {
+        "description": "Initiation already processed",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            },
+            "examples": {
+              "alreadyProcessed": {
+                "summary": "Initiation used",
+                "value": {
+                  "code": "BTF-0203",
+                  "title": "Already Processed",
+                  "message": "This initiation has already been processed",
+                  "fields": {
+                    "transferId": "770e8400-e29b-41d4-a716-446655440003"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "InitiationExpired": {
+        "description": "Initiation expired (older than 24 hours)",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            },
+            "examples": {
+              "expired": {
+                "summary": "Initiation too old",
+                "value": {
+                  "code": "BTF-0202",
+                  "title": "Initiation Expired",
+                  "message": "Initiation expired after 24 hours. Please create a new initiation.",
+                  "fields": {
+                    "expiresAt": "2026-01-31T15:30:00-03:00"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "OperatingHoursViolation": {
+        "description": "Transfer attempted outside BACEN operating hours",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            },
+            "examples": {
+              "outsideHours": {
+                "summary": "After 17:00",
+                "value": {
+                  "code": "BTF-0010",
+                  "title": "Operating Hours Violation",
+                  "message": "Transfers can only be initiated Monday-Friday between 06:30 and 17:00 Brasília time",
+                  "fields": {
+                    "currentTime": "2026-02-01T18:30:00-03:00",
+                    "nextAvailableTime": "2026-02-03T06:30:00-03:00"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "LimitExceeded": {
+        "description": "Usage limit exceeded",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            },
+            "examples": {
+              "limitExceeded": {
+                "summary": "Daily limit reached",
+                "value": {
+                  "code": "BTF-0011",
+                  "title": "Limit Exceeded",
+                  "message": "Transfer amount exceeds daily limit",
+                  "fields": {
+                    "limitType": "PERIOD",
+                    "periodType": "DAILY",
+                    "limitAmount": 10000.0,
+                    "usedAmount": 8000.0,
+                    "requestedAmount": 3000.0,
+                    "excessAmount": 1000.0
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "CannotCancel": {
+        "description": "Transfer cannot be cancelled (already processing/completed)",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            },
+            "examples": {
+              "cannotCancel": {
+                "summary": "Already processing",
+                "value": {
+                  "code": "BTF-0204",
+                  "title": "Cannot Cancel",
+                  "message": "Transfer cannot be cancelled. Current status does not allow cancellation.",
+                  "fields": {
+                    "currentStatus": "PROCESSING",
+                    "allowedStatuses": [
+                      "CREATED",
+                      "PENDING"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "RateLimitExceeded": {
+        "description": "Rate limit exceeded",
+        "headers": {
+          "Retry-After": {
+            "description": "Seconds until rate limit resets",
+            "schema": {
+              "type": "integer",
+              "example": 60
+            }
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            },
+            "examples": {
+              "rateLimitExceeded": {
+                "summary": "Too many requests",
+                "value": {
+                  "code": "BTF-0900",
+                  "title": "Rate Limit Exceeded",
+                  "message": "Too many requests. Please retry after 60 seconds."
+                }
+              }
+            }
+          }
+        }
+      },
+      "ServiceUnavailable": {
+        "description": "External service unavailable (CRM, JD, Midaz, Fees)",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            },
+            "examples": {
+              "crmUnavailable": {
+                "summary": "CRM service down",
+                "value": {
+                  "code": "BTF-0501",
+                  "title": "CRM Service Unavailable",
+                  "message": "Unable to validate account. The CRM service is temporarily unavailable. Please try again later."
+                }
+              },
+              "jdUnavailable": {
+                "summary": "JD SPB unavailable",
+                "value": {
+                  "code": "BTF-1000",
+                  "title": "JD SPB Unavailable",
+                  "message": "Unable to submit transfer. The JD SPB service is temporarily unavailable. Please try again later."
+                }
+              },
+              "midazUnavailable": {
+                "summary": "Midaz ledger unavailable",
+                "value": {
+                  "code": "BTF-2000",
+                  "title": "Midaz Unavailable",
+                  "message": "Unable to process transfer. The Midaz ledger service is temporarily unavailable. Please try again later."
+                }
+              },
+              "feeServiceUnavailable": {
+                "summary": "Fee service unavailable (fail-closed mode)",
+                "value": {
+                  "code": "BTF-3000",
+                  "title": "Fee Service Unavailable",
+                  "message": "Unable to calculate fee. The fee service is temporarily unavailable. Please try again later."
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
