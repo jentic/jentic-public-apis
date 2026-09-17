@@ -1,6 +1,6 @@
 # APIs — M
 
-Browsing 232 APIs starting with **M**.
+Browsing 231 APIs starting with **M**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · **M** · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -53,7 +53,6 @@ Browsing 232 APIs starting with **M**.
 | [marketdata.app](../../../../apis/openapi/marketdata.app) | [main](../../../../apis/openapi/marketdata.app/main) |
 | [marketo.com](../../../../apis/openapi/marketo.com) | [main](../../../../apis/openapi/marketo.com/main) |
 | [marketplace.api.1worldsync.com](../../../../apis/openapi/marketplace.api.1worldsync.com) | [main](../../../../apis/openapi/marketplace.api.1worldsync.com/main) |
-| [marketplace.your.rentals](../../../../apis/openapi/marketplace.your.rentals) | [main](../../../../apis/openapi/marketplace.your.rentals/main) |
 | [marketstack.com](../../../../apis/openapi/marketstack.com) | [main](../../../../apis/openapi/marketstack.com/main) |
 | [markup.ai](../../../../apis/openapi/markup.ai) | [main](../../../../apis/openapi/markup.ai/main) |
 | [marlie.ai](../../../../apis/openapi/marlie.ai) | [main](../../../../apis/openapi/marlie.ai/main) |

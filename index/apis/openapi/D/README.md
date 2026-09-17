@@ -45,7 +45,7 @@ Browsing 150 APIs starting with **D**.
 | [debounce.io](../../../../apis/openapi/debounce.io) | [main](../../../../apis/openapi/debounce.io/main) |
 | [deep-image.ai](../../../../apis/openapi/deep-image.ai) | [main](../../../../apis/openapi/deep-image.ai/main) |
 | [deepai.org](../../../../apis/openapi/deepai.org) | [main](../../../../apis/openapi/deepai.org/main) |
-| [deeparteffects.com](../../../../apis/openapi/deeparteffects.com) | [deep-art-effects](../../../../apis/openapi/deeparteffects.com/deep-art-effects) · [deeparteffects-api](../../../../apis/openapi/deeparteffects.com/deeparteffects-api) |
+| [deeparteffects.com](../../../../apis/openapi/deeparteffects.com) | [deeparteffects-api](../../../../apis/openapi/deeparteffects.com/deeparteffects-api) |
 | [deepgram.com](../../../../apis/openapi/deepgram.com) | [main](../../../../apis/openapi/deepgram.com/main) |
 | [deepseek.com](../../../../apis/openapi/deepseek.com) | [main](../../../../apis/openapi/deepseek.com/main) |
 | [defastra.com](../../../../apis/openapi/defastra.com) | [main](../../../../apis/openapi/defastra.com/main) |
