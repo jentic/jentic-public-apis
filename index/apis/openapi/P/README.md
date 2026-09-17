@@ -89,7 +89,7 @@ Browsing 303 APIs starting with **P**.
 | [paypi.dev](../../../../apis/openapi/paypi.dev) | [main](../../../../apis/openapi/paypi.dev/main) |
 | [payplug.com](../../../../apis/openapi/payplug.com) | [main](../../../../apis/openapi/payplug.com/main) |
 | [payretailers.com](../../../../apis/openapi/payretailers.com) | [main](../../../../apis/openapi/payretailers.com/main) |
-| [payrun.io](../../../../apis/openapi/payrun.io) | [main](../../../../apis/openapi/payrun.io/main) · [payrun-api](../../../../apis/openapi/payrun.io/payrun-api) · [payrun.io](../../../../apis/openapi/payrun.io/payrun.io) |
+| [payrun.io](../../../../apis/openapi/payrun.io) | [payrun-api](../../../../apis/openapi/payrun.io/payrun-api) |
 | [payscale.com](../../../../apis/openapi/payscale.com) | [jobalyzer-api](../../../../apis/openapi/payscale.com/jobalyzer-api) · [payscale](../../../../apis/openapi/payscale.com/payscale) |
 | [paysend.com](../../../../apis/openapi/paysend.com) | [main](../../../../apis/openapi/paysend.com/main) |
 | [paystack.com](../../../../apis/openapi/paystack.com) | [main](../../../../apis/openapi/paystack.com/main) |
