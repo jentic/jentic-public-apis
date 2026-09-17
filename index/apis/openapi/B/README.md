@@ -203,7 +203,7 @@ Browsing 206 APIs starting with **B**.
 | [burstyai.com](../../../../apis/openapi/burstyai.com) | [main](../../../../apis/openapi/burstyai.com/main) |
 | [business-api.tiktok.com](../../../../apis/openapi/business-api.tiktok.com) | [main](../../../../apis/openapi/business-api.tiktok.com/main) |
 | [busybusy.com](../../../../apis/openapi/busybusy.com) | [main](../../../../apis/openapi/busybusy.com/main) |
-| [busybusy.io](../../../../apis/openapi/busybusy.io) | [busybusy](../../../../apis/openapi/busybusy.io/busybusy) · [busybusy-api](../../../../apis/openapi/busybusy.io/busybusy-api) |
+| [busybusy.io](../../../../apis/openapi/busybusy.io) | [busybusy-api](../../../../apis/openapi/busybusy.io/busybusy-api) |
 | [buttondown.com](../../../../apis/openapi/buttondown.com) | [main](../../../../apis/openapi/buttondown.com/main) |
 | [buttondown.email](../../../../apis/openapi/buttondown.email) | [buttondown](../../../../apis/openapi/buttondown.email/buttondown) · [buttondown-api](../../../../apis/openapi/buttondown.email/buttondown-api) |
 | [buymeacoffee.com](../../../../apis/openapi/buymeacoffee.com) | [main](../../../../apis/openapi/buymeacoffee.com/main) |
