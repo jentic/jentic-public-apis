@@ -1,6 +1,6 @@
 # APIs — B
 
-Browsing 206 APIs starting with **B**.
+Browsing 207 APIs starting with **B**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · **B** · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -108,6 +108,7 @@ Browsing 206 APIs starting with **B**.
 | [bitskout.com](../../../../apis/openapi/bitskout.com) | [main](../../../../apis/openapi/bitskout.com/main) |
 | [bitstamp.net](../../../../apis/openapi/bitstamp.net) | [main](../../../../apis/openapi/bitstamp.net/main) |
 | [bittrex.com](../../../../apis/openapi/bittrex.com) | [main](../../../../apis/openapi/bittrex.com/main) |
+| [biza.io](../../../../apis/openapi/biza.io) | [main](../../../../apis/openapi/biza.io/main) |
 | [biztoc.com](../../../../apis/openapi/biztoc.com) | [main](../../../../apis/openapi/biztoc.com/main) |
 | [blackfire.io](../../../../apis/openapi/blackfire.io) | [main](../../../../apis/openapi/blackfire.io/main) |
 | [blackkitetech.com](../../../../apis/openapi/blackkitetech.com) | [main](../../../../apis/openapi/blackkitetech.com/main) |

@@ -1,6 +1,6 @@
 # APIs — T
 
-Browsing 217 APIs starting with **T**.
+Browsing 218 APIs starting with **T**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · **T** · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -223,4 +223,5 @@ Browsing 217 APIs starting with **T**.
 | [tyk.com](../../../../apis/openapi/tyk.com) | [main](../../../../apis/openapi/tyk.com/main) |
 | [tyme-app.com](../../../../apis/openapi/tyme-app.com) | [main](../../../../apis/openapi/tyme-app.com/main) |
 | [typeform.com](../../../../apis/openapi/typeform.com) | [main](../../../../apis/openapi/typeform.com/main) |
+| [typicode.com](../../../../apis/openapi/typicode.com) | [main](../../../../apis/openapi/typicode.com/main) |
 
