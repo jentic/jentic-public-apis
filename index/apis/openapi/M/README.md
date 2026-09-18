@@ -1,6 +1,6 @@
 # APIs — M
 
-Browsing 231 APIs starting with **M**.
+Browsing 232 APIs starting with **M**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · **M** · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -204,6 +204,7 @@ Browsing 231 APIs starting with **M**.
 | [mozilla.com](../../../../apis/openapi/mozilla.com) | [kinto](../../../../apis/openapi/mozilla.com/kinto) |
 | [mpds.io](../../../../apis/openapi/mpds.io) | [main](../../../../apis/openapi/mpds.io/main) |
 | [mrpeasy.com](../../../../apis/openapi/mrpeasy.com) | [mrpeasy-api](../../../../apis/openapi/mrpeasy.com/mrpeasy-api) |
+| [mrsool.co](../../../../apis/openapi/mrsool.co) | [main](../../../../apis/openapi/mrsool.co/main) |
 | [msg91.com](../../../../apis/openapi/msg91.com) | [main](../../../../apis/openapi/msg91.com/main) |
 | [mta.info](../../../../apis/openapi/mta.info) | [main](../../../../apis/openapi/mta.info/main) |
 | [mtaa-api.herokuapp.com](../../../../apis/openapi/mtaa-api.herokuapp.com) | [main](../../../../apis/openapi/mtaa-api.herokuapp.com/main) |
