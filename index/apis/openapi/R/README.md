@@ -1,6 +1,6 @@
 # APIs — R
 
-Browsing 232 APIs starting with **R**.
+Browsing 233 APIs starting with **R**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · **R** · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -146,6 +146,7 @@ Browsing 232 APIs starting with **R**.
 | [reteno.com](../../../../apis/openapi/reteno.com) | [main](../../../../apis/openapi/reteno.com/main) |
 | [retently.com](../../../../apis/openapi/retently.com) | [main](../../../../apis/openapi/retently.com/main) |
 | [retine.io](../../../../apis/openapi/retine.io) | [main](../../../../apis/openapi/retine.io/main) |
+| [retool.com](../../../../apis/openapi/retool.com) | [main](../../../../apis/openapi/retool.com/main) |
 | [rev.ai](../../../../apis/openapi/rev.ai) | [asynchronous-speech-to-text-api-documentation](../../../../apis/openapi/rev.ai/asynchronous-speech-to-text-api-documentation) · [main](../../../../apis/openapi/rev.ai/main) |
 | [rev.io](../../../../apis/openapi/rev.io) | [revio-api](../../../../apis/openapi/rev.io/revio-api) |
 | [revaluate.com](../../../../apis/openapi/revaluate.com) | [main](../../../../apis/openapi/revaluate.com/main) |
