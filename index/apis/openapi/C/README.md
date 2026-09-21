@@ -1,6 +1,6 @@
 # APIs — C
 
-Browsing 417 APIs starting with **C**.
+Browsing 418 APIs starting with **C**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · **C** · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -238,6 +238,7 @@ Browsing 417 APIs starting with **C**.
 | [codescene.io](../../../../apis/openapi/codescene.io) | [main](../../../../apis/openapi/codescene.io/main) |
 | [codesearch.debian.net](../../../../apis/openapi/codesearch.debian.net) | [main](../../../../apis/openapi/codesearch.debian.net/main) |
 | [codestats.net](../../../../apis/openapi/codestats.net) | [main](../../../../apis/openapi/codestats.net/main) |
+| [cogdepot.com](../../../../apis/openapi/cogdepot.com) | [main](../../../../apis/openapi/cogdepot.com/main) |
 | [cognisantmd.com](../../../../apis/openapi/cognisantmd.com) | [ocean-health-api](../../../../apis/openapi/cognisantmd.com/ocean-health-api) |
 | [cognitivefashion.github.io](../../../../apis/openapi/cognitivefashion.github.io) | [ibm-ai-for-fashion-api](../../../../apis/openapi/cognitivefashion.github.io/ibm-ai-for-fashion-api) |
 | [cohere.com](../../../../apis/openapi/cohere.com) | [main](../../../../apis/openapi/cohere.com/main) |
