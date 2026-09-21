@@ -1,6 +1,6 @@
 # APIs — T
 
-Browsing 219 APIs starting with **T**.
+Browsing 220 APIs starting with **T**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · **T** · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -204,6 +204,7 @@ Browsing 219 APIs starting with **T**.
 | [truesight.local](../../../../apis/openapi/truesight.local) | [main](../../../../apis/openapi/truesight.local/main) |
 | [trune.io](../../../../apis/openapi/trune.io) | [main](../../../../apis/openapi/trune.io/main) |
 | [truora.com](../../../../apis/openapi/truora.com) | [checks-api](../../../../apis/openapi/truora.com/checks-api) · [main](../../../../apis/openapi/truora.com/main) · [truora-api](../../../../apis/openapi/truora.com/truora-api) |
+| [truphone.com](../../../../apis/openapi/truphone.com) | [main](../../../../apis/openapi/truphone.com/main) |
 | [trustswiftly.com](../../../../apis/openapi/trustswiftly.com) | [main](../../../../apis/openapi/trustswiftly.com/main) |
 | [truthscan.com](../../../../apis/openapi/truthscan.com) | [main](../../../../apis/openapi/truthscan.com/main) |
 | [trychroma.com](../../../../apis/openapi/trychroma.com) | [main](../../../../apis/openapi/trychroma.com/main) |
