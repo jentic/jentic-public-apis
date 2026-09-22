@@ -1,6 +1,6 @@
 # APIs — E
 
-Browsing 143 APIs starting with **E**.
+Browsing 144 APIs starting with **E**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · **E** · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -24,6 +24,7 @@ Browsing 143 APIs starting with **E**.
 | [ecommpay.com](../../../../apis/openapi/ecommpay.com) | [main](../../../../apis/openapi/ecommpay.com/main) |
 | [ecwid.com](../../../../apis/openapi/ecwid.com) | [main](../../../../apis/openapi/ecwid.com/main) |
 | [edamam.com](../../../../apis/openapi/edamam.com) | [main](../../../../apis/openapi/edamam.com/main) |
+| [edgegap.com](../../../../apis/openapi/edgegap.com) | [main](../../../../apis/openapi/edgegap.com/main) |
 | [ediware.net](../../../../apis/openapi/ediware.net) | [main](../../../../apis/openapi/ediware.net/main) |
 | [edluminate.com](../../../../apis/openapi/edluminate.com) | [main](../../../../apis/openapi/edluminate.com/main) |
 | [edmunds.com](../../../../apis/openapi/edmunds.com) | [main](../../../../apis/openapi/edmunds.com/main) |
