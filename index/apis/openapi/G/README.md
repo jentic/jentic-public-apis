@@ -1,6 +1,6 @@
 # APIs — G
 
-Browsing 166 APIs starting with **G**.
+Browsing 167 APIs starting with **G**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · **G** · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -21,6 +21,7 @@ Browsing 166 APIs starting with **G**.
 | [genderize.io](../../../../apis/openapi/genderize.io) | [main](../../../../apis/openapi/genderize.io/main) |
 | [geneea.com](../../../../apis/openapi/geneea.com) | [main](../../../../apis/openapi/geneea.com/main) |
 | [generadordni.es](../../../../apis/openapi/generadordni.es) | [main](../../../../apis/openapi/generadordni.es/main) |
+| [generativelanguage.googleapis.com](../../../../apis/openapi/generativelanguage.googleapis.com) | [gemini-api](../../../../apis/openapi/generativelanguage.googleapis.com/gemini-api) |
 | [genetec.com](../../../../apis/openapi/genetec.com) | [main](../../../../apis/openapi/genetec.com/main) |
 | [geniussports.com](../../../../apis/openapi/geniussports.com) | [main](../../../../apis/openapi/geniussports.com/main) |
 | [genny.lovo.ai](../../../../apis/openapi/genny.lovo.ai) | [main](../../../../apis/openapi/genny.lovo.ai/main) |
