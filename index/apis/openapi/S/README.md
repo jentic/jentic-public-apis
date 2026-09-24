@@ -1,6 +1,6 @@
 # APIs — S
 
-Browsing 669 APIs starting with **S**.
+Browsing 670 APIs starting with **S**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · **S** · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -405,6 +405,7 @@ Browsing 669 APIs starting with **S**.
 | [sublime.security](../../../../apis/openapi/sublime.security) | [main](../../../../apis/openapi/sublime.security/main) · [sublimesecurity](../../../../apis/openapi/sublime.security/sublimesecurity) |
 | [submittable.com](../../../../apis/openapi/submittable.com) | [main](../../../../apis/openapi/submittable.com/main) |
 | [subscribe.linphone.org](../../../../apis/openapi/subscribe.linphone.org) | [main](../../../../apis/openapi/subscribe.linphone.org/main) |
+| [sudoku100.com](../../../../apis/openapi/sudoku100.com) | [main](../../../../apis/openapi/sudoku100.com/main) |
 | [sugarcrm.com](../../../../apis/openapi/sugarcrm.com) | [main](../../../../apis/openapi/sugarcrm.com/main) |
 | [suitebox.suitebox.co.nz](../../../../apis/openapi/suitebox.suitebox.co.nz) | [main](../../../../apis/openapi/suitebox.suitebox.co.nz/main) |
 | [suiteboxmeetingreque](../../../../apis/openapi/suiteboxmeetingreque) | [main](../../../../apis/openapi/suiteboxmeetingreque/main) |
