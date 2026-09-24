@@ -1,6 +1,6 @@
 # APIs — S
 
-Browsing 670 APIs starting with **S**.
+Browsing 671 APIs starting with **S**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · **S** · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -661,6 +661,7 @@ Browsing 670 APIs starting with **S**.
 | [swiftype.com](../../../../apis/openapi/swiftype.com) | [main](../../../../apis/openapi/swiftype.com/main) |
 | [swoogo.com](../../../../apis/openapi/swoogo.com) | [main](../../../../apis/openapi/swoogo.com/main) |
 | [sydnee.app](../../../../apis/openapi/sydnee.app) | [main](../../../../apis/openapi/sydnee.app/main) |
+| [syegps.com](../../../../apis/openapi/syegps.com) | [main](../../../../apis/openapi/syegps.com/main) |
 | [symanto.net](../../../../apis/openapi/symanto.net) | [main](../../../../apis/openapi/symanto.net/main) |
 | [sympa.community](../../../../apis/openapi/sympa.community) | [main](../../../../apis/openapi/sympa.community/main) |
 | [symphony.com](../../../../apis/openapi/symphony.com) | [main](../../../../apis/openapi/symphony.com/main) |
