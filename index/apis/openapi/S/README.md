@@ -1,6 +1,6 @@
 # APIs — S
 
-Browsing 673 APIs starting with **S**.
+Browsing 674 APIs starting with **S**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · **S** · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -651,6 +651,7 @@ Browsing 673 APIs starting with **S**.
 | [swaggerhub.xvrbovskym](../../../../apis/openapi/swaggerhub.xvrbovskym) | [b-vsa-semestralny-projekt-2](../../../../apis/openapi/swaggerhub.xvrbovskym/b-vsa-semestralny-projekt-2) · [b-vsa-semestralny-projekt-2-correct](../../../../apis/openapi/swaggerhub.xvrbovskym/b-vsa-semestralny-projekt-2-correct) |
 | [swaggerhub.zeyos](../../../../apis/openapi/swaggerhub.zeyos) | [api-kickz](../../../../apis/openapi/swaggerhub.zeyos/api-kickz) · [api-spontent](../../../../apis/openapi/swaggerhub.zeyos/api-spontent) · [api-stockly](../../../../apis/openapi/swaggerhub.zeyos/api-stockly) · [api-top4sports](../../../../apis/openapi/swaggerhub.zeyos/api-top4sports) |
 | [swapi.dev](../../../../apis/openapi/swapi.dev) | [main](../../../../apis/openapi/swapi.dev/main) |
+| [swapi.info](../../../../apis/openapi/swapi.info) | [main](../../../../apis/openapi/swapi.info/main) |
 | [swapkaart.com](../../../../apis/openapi/swapkaart.com) | [main](../../../../apis/openapi/swapkaart.com/main) |
 | [swarmnode.ai](../../../../apis/openapi/swarmnode.ai) | [main](../../../../apis/openapi/swarmnode.ai/main) |
 | [swarmtix.com](../../../../apis/openapi/swarmtix.com) | [main](../../../../apis/openapi/swarmtix.com/main) |
