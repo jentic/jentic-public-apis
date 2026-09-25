@@ -1,6 +1,6 @@
 # APIs — C
 
-Browsing 420 APIs starting with **C**.
+Browsing 421 APIs starting with **C**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · **C** · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -386,6 +386,7 @@ Browsing 420 APIs starting with **C**.
 | [crushthememory.com](../../../../apis/openapi/crushthememory.com) | [main](../../../../apis/openapi/crushthememory.com/main) |
 | [crusoecloud.com](../../../../apis/openapi/crusoecloud.com) | [main](../../../../apis/openapi/crusoecloud.com/main) |
 | [crustdata.com](../../../../apis/openapi/crustdata.com) | [main](../../../../apis/openapi/crustdata.com/main) |
+| [cruzeirotickets.com.br](../../../../apis/openapi/cruzeirotickets.com.br) | [main](../../../../apis/openapi/cruzeirotickets.com.br/main) |
 | [cryptapi.io](../../../../apis/openapi/cryptapi.io) | [main](../../../../apis/openapi/cryptapi.io/main) |
 | [cryptlex.com](../../../../apis/openapi/cryptlex.com) | [main](../../../../apis/openapi/cryptlex.com/main) |
 | [cryptoapis.io](../../../../apis/openapi/cryptoapis.io) | [main](../../../../apis/openapi/cryptoapis.io/main) |
