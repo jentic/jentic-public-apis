@@ -1,6 +1,6 @@
 # APIs — S
 
-Browsing 679 APIs starting with **S**.
+Browsing 680 APIs starting with **S**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · **S** · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -82,6 +82,7 @@ Browsing 679 APIs starting with **S**.
 | [screenshotbase.com](../../../../apis/openapi/screenshotbase.com) | [main](../../../../apis/openapi/screenshotbase.com/main) |
 | [screenshotmachinecom](../../../../apis/openapi/screenshotmachinecom) | [main](../../../../apis/openapi/screenshotmachinecom/main) |
 | [scribblemaps.com](../../../../apis/openapi/scribblemaps.com) | [main](../../../../apis/openapi/scribblemaps.com/main) |
+| [scryfall.com](../../../../apis/openapi/scryfall.com) | [main](../../../../apis/openapi/scryfall.com/main) |
 | [seam.co](../../../../apis/openapi/seam.co) | [main](../../../../apis/openapi/seam.co/main) |
 | [seamless.ai](../../../../apis/openapi/seamless.ai) | [main](../../../../apis/openapi/seamless.ai/main) |
 | [search.dip.bundestag.de](../../../../apis/openapi/search.dip.bundestag.de) | [main](../../../../apis/openapi/search.dip.bundestag.de/main) |
