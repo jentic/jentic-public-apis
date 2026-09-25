@@ -1,6 +1,6 @@
 # APIs — A
 
-Browsing 406 APIs starting with **A**.
+Browsing 407 APIs starting with **A**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · **A** · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -163,6 +163,7 @@ Browsing 406 APIs starting with **A**.
 | [amadeus-hospitality.com](../../../../apis/openapi/amadeus-hospitality.com) | [main](../../../../apis/openapi/amadeus-hospitality.com/main) |
 | [amadeus.com](../../../../apis/openapi/amadeus.com) | [31 APIs](../../../../apis/openapi/amadeus.com) |
 | [amara.org](../../../../apis/openapi/amara.org) | [main](../../../../apis/openapi/amara.org/main) |
+| [amazon.com](../../../../apis/openapi/amazon.com) | [main](../../../../apis/openapi/amazon.com/main) |
 | [amazonaws.com](../../../../apis/openapi/amazonaws.com) | [148 APIs](../../../../apis/openapi/amazonaws.com) |
 | [amazonservices.com](../../../../apis/openapi/amazonservices.com) | [main](../../../../apis/openapi/amazonservices.com/main) |
 | [ambeedata.com](../../../../apis/openapi/ambeedata.com) | [main](../../../../apis/openapi/ambeedata.com/main) |
