@@ -1,6 +1,6 @@
 # APIs — S
 
-Browsing 678 APIs starting with **S**.
+Browsing 679 APIs starting with **S**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · **S** · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -143,6 +143,7 @@ Browsing 678 APIs starting with **S**.
 | [setu.co](../../../../apis/openapi/setu.co) | [main](../../../../apis/openapi/setu.co/main) |
 | [seven-time](../../../../apis/openapi/seven-time) | [main](../../../../apis/openapi/seven-time/main) |
 | [sevenrooms.com](../../../../apis/openapi/sevenrooms.com) | [main](../../../../apis/openapi/sevenrooms.com/main) |
+| [sezzle.com](../../../../apis/openapi/sezzle.com) | [main](../../../../apis/openapi/sezzle.com/main) |
 | [sfbay511.org](../../../../apis/openapi/sfbay511.org) | [main](../../../../apis/openapi/sfbay511.org/main) |
 | [sfu.mirotalk.com](../../../../apis/openapi/sfu.mirotalk.com) | [main](../../../../apis/openapi/sfu.mirotalk.com/main) |
 | [shadowserver.org](../../../../apis/openapi/shadowserver.org) | [main](../../../../apis/openapi/shadowserver.org/main) |
