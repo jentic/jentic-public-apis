@@ -1,6 +1,6 @@
 # APIs — P
 
-Browsing 307 APIs starting with **P**.
+Browsing 308 APIs starting with **P**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · **P** · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -177,6 +177,7 @@ Browsing 307 APIs starting with **P**.
 | [plaid.com](../../../../apis/openapi/plaid.com) | [main](../../../../apis/openapi/plaid.com/main) |
 | [planday.com](../../../../apis/openapi/planday.com) | [main](../../../../apis/openapi/planday.com/main) |
 | [plandayplatformapi](../../../../apis/openapi/plandayplatformapi) | [main](../../../../apis/openapi/plandayplatformapi/main) |
+| [planero4ka.ru](../../../../apis/openapi/planero4ka.ru) | [main](../../../../apis/openapi/planero4ka.ru/main) |
 | [planet.com](../../../../apis/openapi/planet.com) | [main](../../../../apis/openapi/planet.com/main) |
 | [planetscale.com](../../../../apis/openapi/planetscale.com) | [main](../../../../apis/openapi/planetscale.com/main) |
 | [planful.com](../../../../apis/openapi/planful.com) | [main](../../../../apis/openapi/planful.com/main) |
