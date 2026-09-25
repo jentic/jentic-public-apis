@@ -120,7 +120,7 @@ Browsing 304 APIs starting with **P**.
 | [penpot.app](../../../../apis/openapi/penpot.app) | [main](../../../../apis/openapi/penpot.app/main) |
 | [people-doc.com](../../../../apis/openapi/people-doc.com) | [main](../../../../apis/openapi/people-doc.com/main) |
 | [peopledatalabs.com](../../../../apis/openapi/peopledatalabs.com) | [main](../../../../apis/openapi/peopledatalabs.com/main) |
-| [peoplefinderspro.com](../../../../apis/openapi/peoplefinderspro.com) | [main](../../../../apis/openapi/peoplefinderspro.com/main) · [peoplefinderspro-api](../../../../apis/openapi/peoplefinderspro.com/peoplefinderspro-api) · [self-service-developer-api](../../../../apis/openapi/peoplefinderspro.com/self-service-developer-api) |
+| [peoplefinderspro.com](../../../../apis/openapi/peoplefinderspro.com) | [self-service-developer-api](../../../../apis/openapi/peoplefinderspro.com/self-service-developer-api) |
 | [peoplehr.com](../../../../apis/openapi/peoplehr.com) | [main](../../../../apis/openapi/peoplehr.com/main) |
 | [peoplehr.net](../../../../apis/openapi/peoplehr.net) | [main](../../../../apis/openapi/peoplehr.net/main) |
 | [percy.io](../../../../apis/openapi/percy.io) | [main](../../../../apis/openapi/percy.io/main) |
@@ -154,7 +154,7 @@ Browsing 304 APIs starting with **P**.
 | [pike13.com](../../../../apis/openapi/pike13.com) | [main](../../../../apis/openapi/pike13.com/main) |
 | [piloterr.com](../../../../apis/openapi/piloterr.com) | [main](../../../../apis/openapi/piloterr.com/main) |
 | [pimms.io](../../../../apis/openapi/pimms.io) | [main](../../../../apis/openapi/pimms.io/main) |
-| [pims.io](../../../../apis/openapi/pims.io) | [main](../../../../apis/openapi/pims.io/main) · [pims](../../../../apis/openapi/pims.io/pims) · [pims-api](../../../../apis/openapi/pims.io/pims-api) |
+| [pims.io](../../../../apis/openapi/pims.io) | [pims-api](../../../../apis/openapi/pims.io/pims-api) |
 | [pinata.cloud](../../../../apis/openapi/pinata.cloud) | [main](../../../../apis/openapi/pinata.cloud/main) |
 | [pinecone.io](../../../../apis/openapi/pinecone.io) | [main](../../../../apis/openapi/pinecone.io/main) |
 | [pingdom.com](../../../../apis/openapi/pingdom.com) | [pingdom-api](../../../../apis/openapi/pingdom.com/pingdom-api) |
