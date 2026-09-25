@@ -1,6 +1,6 @@
 # APIs — S
 
-Browsing 671 APIs starting with **S**.
+Browsing 672 APIs starting with **S**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · **S** · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -134,6 +134,7 @@ Browsing 671 APIs starting with **S**.
 | [serioverify.com](../../../../apis/openapi/serioverify.com) | [main](../../../../apis/openapi/serioverify.com/main) |
 | [serpapi](../../../../apis/openapi/serpapi) | [main](../../../../apis/openapi/serpapi/main) · [serpapi-travel](../../../../apis/openapi/serpapi/serpapi-travel) |
 | [serper.dev](../../../../apis/openapi/serper.dev) | [main](../../../../apis/openapi/serper.dev/main) |
+| [serpro.gov.br](../../../../apis/openapi/serpro.gov.br) | [main](../../../../apis/openapi/serpro.gov.br/main) |
 | [serpstack.com](../../../../apis/openapi/serpstack.com) | [main](../../../../apis/openapi/serpstack.com/main) |
 | [serversmtp.com](../../../../apis/openapi/serversmtp.com) | [main](../../../../apis/openapi/serversmtp.com/main) |
 | [servicenow.com](../../../../apis/openapi/servicenow.com) | [main](../../../../apis/openapi/servicenow.com/main) |
