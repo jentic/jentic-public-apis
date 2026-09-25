@@ -1,6 +1,6 @@
 # APIs — W
 
-Browsing 70 APIs starting with **W**.
+Browsing 71 APIs starting with **W**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · **W** · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -52,6 +52,7 @@ Browsing 70 APIs starting with **W**.
 | [whop.com](../../../../apis/openapi/whop.com) | [main](../../../../apis/openapi/whop.com/main) |
 | [wikimedia.org](../../../../apis/openapi/wikimedia.org) | [main](../../../../apis/openapi/wikimedia.org/main) |
 | [wikipathways.org](../../../../apis/openapi/wikipathways.org) | [main](../../../../apis/openapi/wikipathways.org/main) |
+| [wiktionary.org](../../../../apis/openapi/wiktionary.org) | [main](../../../../apis/openapi/wiktionary.org/main) |
 | [wildapricot.com](../../../../apis/openapi/wildapricot.com) | [main](../../../../apis/openapi/wildapricot.com/main) |
 | [windows.net](../../../../apis/openapi/windows.net) | [batch-BatchService](../../../../apis/openapi/windows.net/batch-BatchService) · [graphrbac](../../../../apis/openapi/windows.net/graphrbac) |
 | [windy](../../../../apis/openapi/windy) | [main](../../../../apis/openapi/windy/main) |
