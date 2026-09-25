@@ -45,7 +45,7 @@ Browsing 63 APIs starting with **K**.
 | [klaviyo.com](../../../../apis/openapi/klaviyo.com) | [main](../../../../apis/openapi/klaviyo.com/main) |
 | [kleverkey.com](../../../../apis/openapi/kleverkey.com) | [main](../../../../apis/openapi/kleverkey.com/main) |
 | [klick-tipp.com](../../../../apis/openapi/klick-tipp.com) | [main](../../../../apis/openapi/klick-tipp.com/main) |
-| [klingo.app](../../../../apis/openapi/klingo.app) | [klingo-informacoes](../../../../apis/openapi/klingo.app/klingo-informacoes) · [klingo-telefonia](../../../../apis/openapi/klingo.app/klingo-telefonia) |
+| [klingo.app](../../../../apis/openapi/klingo.app) | [klingo-ferramentas](../../../../apis/openapi/klingo.app/klingo-ferramentas) · [klingo-informacoes](../../../../apis/openapi/klingo.app/klingo-informacoes) · [klingo-telefonia](../../../../apis/openapi/klingo.app/klingo-telefonia) |
 | [klipl.ink](../../../../apis/openapi/klipl.ink) | [main](../../../../apis/openapi/klipl.ink/main) |
 | [knack.com](../../../../apis/openapi/knack.com) | [main](../../../../apis/openapi/knack.com/main) |
 | [knips.app](../../../../apis/openapi/knips.app) | [main](../../../../apis/openapi/knips.app/main) |
