@@ -68,7 +68,7 @@ Browsing 233 APIs starting with **R**.
 | [redbooth.com](../../../../apis/openapi/redbooth.com) | [main](../../../../apis/openapi/redbooth.com/main) |
 | [reddit.com](../../../../apis/openapi/reddit.com) | [main](../../../../apis/openapi/reddit.com/main) |
 | [redeal.io](../../../../apis/openapi/redeal.io) | [analytics](../../../../apis/openapi/redeal.io/analytics) · [main](../../../../apis/openapi/redeal.io/main) · [redeal-analytics-api](../../../../apis/openapi/redeal.io/redeal-analytics-api) |
-| [redhat.com](../../../../apis/openapi/redhat.com) | [catalog_inventory](../../../../apis/openapi/redhat.com/catalog_inventory) |
+| [redhat.com](../../../../apis/openapi/redhat.com) | [catalog_inventory](../../../../apis/openapi/redhat.com/catalog_inventory) · [main](../../../../apis/openapi/redhat.com/main) |
 | [redhat.local](../../../../apis/openapi/redhat.local) | [patchman-engine](../../../../apis/openapi/redhat.local/patchman-engine) · [patchman-engine-api](../../../../apis/openapi/redhat.local/patchman-engine-api) |
 | [redirection.io](../../../../apis/openapi/redirection.io) | [main](../../../../apis/openapi/redirection.io/main) |
 | [redis.io](../../../../apis/openapi/redis.io) | [main](../../../../apis/openapi/redis.io/main) |
