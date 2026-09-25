@@ -1,6 +1,6 @@
 # APIs — K
 
-Browsing 62 APIs starting with **K**.
+Browsing 63 APIs starting with **K**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · **K** · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -45,6 +45,7 @@ Browsing 62 APIs starting with **K**.
 | [klaviyo.com](../../../../apis/openapi/klaviyo.com) | [main](../../../../apis/openapi/klaviyo.com/main) |
 | [kleverkey.com](../../../../apis/openapi/kleverkey.com) | [main](../../../../apis/openapi/kleverkey.com/main) |
 | [klick-tipp.com](../../../../apis/openapi/klick-tipp.com) | [main](../../../../apis/openapi/klick-tipp.com/main) |
+| [klingo.app](../../../../apis/openapi/klingo.app) | [klingo-informacoes](../../../../apis/openapi/klingo.app/klingo-informacoes) |
 | [klipl.ink](../../../../apis/openapi/klipl.ink) | [main](../../../../apis/openapi/klipl.ink/main) |
 | [knack.com](../../../../apis/openapi/knack.com) | [main](../../../../apis/openapi/knack.com/main) |
 | [knips.app](../../../../apis/openapi/knips.app) | [main](../../../../apis/openapi/knips.app/main) |
