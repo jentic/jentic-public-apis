@@ -1,6 +1,6 @@
 # APIs — F
 
-Browsing 112 APIs starting with **F**.
+Browsing 113 APIs starting with **F**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · **F** · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -47,6 +47,7 @@ Browsing 112 APIs starting with **F**.
 | [figfinance.io](../../../../apis/openapi/figfinance.io) | [fig-finance-api](../../../../apis/openapi/figfinance.io/fig-finance-api) |
 | [figma.com](../../../../apis/openapi/figma.com) | [figma-rest-api](../../../../apis/openapi/figma.com/figma-rest-api) |
 | [figshare.com](../../../../apis/openapi/figshare.com) | [main](../../../../apis/openapi/figshare.com/main) |
+| [fiingroup.vn](../../../../apis/openapi/fiingroup.vn) | [main](../../../../apis/openapi/fiingroup.vn/main) |
 | [fiix.io](../../../../apis/openapi/fiix.io) | [main](../../../../apis/openapi/fiix.io/main) |
 | [fiksu.cc](../../../../apis/openapi/fiksu.cc) | [fiksu-api](../../../../apis/openapi/fiksu.cc/fiksu-api) |
 | [filepass.com](../../../../apis/openapi/filepass.com) | [main](../../../../apis/openapi/filepass.com/main) |
