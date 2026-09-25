@@ -1,6 +1,6 @@
 # APIs — S
 
-Browsing 675 APIs starting with **S**.
+Browsing 676 APIs starting with **S**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · **S** · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -323,6 +323,7 @@ Browsing 675 APIs starting with **S**.
 | [spiky.ai](../../../../apis/openapi/spiky.ai) | [main](../../../../apis/openapi/spiky.ai/main) |
 | [spinbot.net](../../../../apis/openapi/spinbot.net) | [main](../../../../apis/openapi/spinbot.net/main) |
 | [spinitron.com](../../../../apis/openapi/spinitron.com) | [main](../../../../apis/openapi/spinitron.com/main) |
+| [splash360.fr](../../../../apis/openapi/splash360.fr) | [main](../../../../apis/openapi/splash360.fr/main) |
 | [split.io](../../../../apis/openapi/split.io) | [main](../../../../apis/openapi/split.io/main) |
 | [splitwise.com](../../../../apis/openapi/splitwise.com) | [main](../../../../apis/openapi/splitwise.com/main) |
 | [splunk.com](../../../../apis/openapi/splunk.com) | [main](../../../../apis/openapi/splunk.com/main) |
