@@ -1,6 +1,6 @@
 # APIs — M
 
-Browsing 238 APIs starting with **M**.
+Browsing 239 APIs starting with **M**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · **M** · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -195,6 +195,7 @@ Browsing 238 APIs starting with **M**.
 | [moodeaudio.org](../../../../apis/openapi/moodeaudio.org) | [main](../../../../apis/openapi/moodeaudio.org/main) |
 | [moodle.org](../../../../apis/openapi/moodle.org) | [main](../../../../apis/openapi/moodle.org/main) |
 | [moov.io](../../../../apis/openapi/moov.io) | [main](../../../../apis/openapi/moov.io/main) |
+| [moralis.io](../../../../apis/openapi/moralis.io) | [main](../../../../apis/openapi/moralis.io/main) |
 | [morelogin.com](../../../../apis/openapi/morelogin.com) | [morelogin-api](../../../../apis/openapi/morelogin.com/morelogin-api) |
 | [morgen.so](../../../../apis/openapi/morgen.so) | [main](../../../../apis/openapi/morgen.so/main) |
 | [mosselenoesterhabita](../../../../apis/openapi/mosselenoesterhabita) | [main](../../../../apis/openapi/mosselenoesterhabita/main) |
