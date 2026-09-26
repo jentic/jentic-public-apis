@@ -1,6 +1,6 @@
 # APIs — E
 
-Browsing 150 APIs starting with **E**.
+Browsing 151 APIs starting with **E**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · **E** · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -31,6 +31,7 @@ Browsing 150 APIs starting with **E**.
 | [edmunds.com](../../../../apis/openapi/edmunds.com) | [main](../../../../apis/openapi/edmunds.com/main) |
 | [edoobox.com](../../../../apis/openapi/edoobox.com) | [edoobox-api](../../../../apis/openapi/edoobox.com/edoobox-api) |
 | [edrv.io](../../../../apis/openapi/edrv.io) | [main](../../../../apis/openapi/edrv.io/main) |
+| [educhecker.io](../../../../apis/openapi/educhecker.io) | [main](../../../../apis/openapi/educhecker.io/main) |
 | [edusign.com](../../../../apis/openapi/edusign.com) | [edusign-api](../../../../apis/openapi/edusign.com/edusign-api) |
 | [eduzz.com](../../../../apis/openapi/eduzz.com) | [main](../../../../apis/openapi/eduzz.com/main) |
 | [efbin.org](../../../../apis/openapi/efbin.org) | [main](../../../../apis/openapi/efbin.org/main) |
