@@ -1,6 +1,6 @@
 # APIs — D
 
-Browsing 160 APIs starting with **D**.
+Browsing 162 APIs starting with **D**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · **D** · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -57,6 +57,7 @@ Browsing 160 APIs starting with **D**.
 | [departureboard.io](../../../../apis/openapi/departureboard.io) | [main](../../../../apis/openapi/departureboard.io/main) |
 | [deputy.com](../../../../apis/openapi/deputy.com) | [main](../../../../apis/openapi/deputy.com/main) |
 | [descope.com](../../../../apis/openapi/descope.com) | [main](../../../../apis/openapi/descope.com/main) |
+| [descriptapi.com](../../../../apis/openapi/descriptapi.com) | [main](../../../../apis/openapi/descriptapi.com/main) |
 | [desec.io](../../../../apis/openapi/desec.io) | [main](../../../../apis/openapi/desec.io/main) |
 | [desire2learn.com](../../../../apis/openapi/desire2learn.com) | [d2l-brightspace-valence-api](../../../../apis/openapi/desire2learn.com/d2l-brightspace-valence-api) |
 | [destaxa.com](../../../../apis/openapi/destaxa.com) | [main](../../../../apis/openapi/destaxa.com/main) |
@@ -90,6 +91,7 @@ Browsing 160 APIs starting with **D**.
 | [developers.wargaming.net](../../../../apis/openapi/developers.wargaming.net) | [main](../../../../apis/openapi/developers.wargaming.net/main) · [wargaming-net](../../../../apis/openapi/developers.wargaming.net/wargaming-net) |
 | [devflocks.id](../../../../apis/openapi/devflocks.id) | [main](../../../../apis/openapi/devflocks.id/main) |
 | [devopness.com](../../../../apis/openapi/devopness.com) | [main](../../../../apis/openapi/devopness.com/main) |
+| [dfshop.com](../../../../apis/openapi/dfshop.com) | [main](../../../../apis/openapi/dfshop.com/main) |
 | [dg1.dev](../../../../apis/openapi/dg1.dev) | [main](../../../../apis/openapi/dg1.dev/main) |
 | [dhl.com](../../../../apis/openapi/dhl.com) | [dhl-shipment-tracking-unified-api](../../../../apis/openapi/dhl.com/dhl-shipment-tracking-unified-api) · [dhl-tracking-api](../../../../apis/openapi/dhl.com/dhl-tracking-api) |
 | [dhlparcel.nl](../../../../apis/openapi/dhlparcel.nl) | [main](../../../../apis/openapi/dhlparcel.nl/main) |
