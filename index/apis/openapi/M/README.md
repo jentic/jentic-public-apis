@@ -1,6 +1,6 @@
 # APIs — M
 
-Browsing 239 APIs starting with **M**.
+Browsing 241 APIs starting with **M**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · **M** · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -94,6 +94,7 @@ Browsing 239 APIs starting with **M**.
 | [mend.io](../../../../apis/openapi/mend.io) | [main](../../../../apis/openapi/mend.io/main) |
 | [mensagia.com](../../../../apis/openapi/mensagia.com) | [main](../../../../apis/openapi/mensagia.com/main) |
 | [mention.net](../../../../apis/openapi/mention.net) | [main](../../../../apis/openapi/mention.net/main) |
+| [menuplanner.ru](../../../../apis/openapi/menuplanner.ru) | [main](../../../../apis/openapi/menuplanner.ru/main) |
 | [meraki.com](../../../../apis/openapi/meraki.com) | [main](../../../../apis/openapi/meraki.com/main) |
 | [mercantilbanco.com](../../../../apis/openapi/mercantilbanco.com) | [main](../../../../apis/openapi/mercantilbanco.com/main) |
 | [mercedes-benz.com](../../../../apis/openapi/mercedes-benz.com) | [12 APIs](../../../../apis/openapi/mercedes-benz.com) |
@@ -124,6 +125,7 @@ Browsing 239 APIs starting with **M**.
 | [microlink.io](../../../../apis/openapi/microlink.io) | [main](../../../../apis/openapi/microlink.io/main) |
 | [microsoft.com](../../../../apis/openapi/microsoft.com) | [clarity](../../../../apis/openapi/microsoft.com/clarity) · [microsoft-teams-events-api](../../../../apis/openapi/microsoft.com/microsoft-teams-events-api) · [microsoft-todo-api](../../../../apis/openapi/microsoft.com/microsoft-todo-api) |
 | [microsofttranslator.com](../../../../apis/openapi/microsofttranslator.com) | [main](../../../../apis/openapi/microsofttranslator.com/main) |
+| [mighty-office.com](../../../../apis/openapi/mighty-office.com) | [main](../../../../apis/openapi/mighty-office.com/main) |
 | [mightynetworks.com](../../../../apis/openapi/mightynetworks.com) | [main](../../../../apis/openapi/mightynetworks.com/main) |
 | [mightyrep.com](../../../../apis/openapi/mightyrep.com) | [main](../../../../apis/openapi/mightyrep.com/main) |
 | [miholearn.com](../../../../apis/openapi/miholearn.com) | [main](../../../../apis/openapi/miholearn.com/main) |
