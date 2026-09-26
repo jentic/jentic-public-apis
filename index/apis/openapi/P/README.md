@@ -1,6 +1,6 @@
 # APIs — P
 
-Browsing 312 APIs starting with **P**.
+Browsing 313 APIs starting with **P**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · **P** · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -36,6 +36,7 @@ Browsing 312 APIs starting with **P**.
 | [paradigmvendo.com](../../../../apis/openapi/paradigmvendo.com) | [main](../../../../apis/openapi/paradigmvendo.com/main) |
 | [paraio.com](../../../../apis/openapi/paraio.com) | [main](../../../../apis/openapi/paraio.com/main) |
 | [paraio.org](../../../../apis/openapi/paraio.org) | [main](../../../../apis/openapi/paraio.org/main) |
+| [paraspot.ai](../../../../apis/openapi/paraspot.ai) | [main](../../../../apis/openapi/paraspot.ai/main) |
 | [parcelparcel.com](../../../../apis/openapi/parcelparcel.com) | [api](../../../../apis/openapi/parcelparcel.com/api) |
 | [parim.co](../../../../apis/openapi/parim.co) | [main](../../../../apis/openapi/parim.co/main) |
 | [parkalot.io](../../../../apis/openapi/parkalot.io) | [main](../../../../apis/openapi/parkalot.io/main) |
