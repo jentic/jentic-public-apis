@@ -1,6 +1,6 @@
 # APIs — P
 
-Browsing 315 APIs starting with **P**.
+Browsing 316 APIs starting with **P**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · **P** · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -192,6 +192,7 @@ Browsing 315 APIs starting with **P**.
 | [platerecognizer.com](../../../../apis/openapi/platerecognizer.com) | [plate-recognizer-api](../../../../apis/openapi/platerecognizer.com/plate-recognizer-api) |
 | [platform.climate.com](../../../../apis/openapi/platform.climate.com) | [main](../../../../apis/openapi/platform.climate.com/main) |
 | [platform.dealpath.com](../../../../apis/openapi/platform.dealpath.com) | [main](../../../../apis/openapi/platform.dealpath.com/main) |
+| [platform.mattel](../../../../apis/openapi/platform.mattel) | [main](../../../../apis/openapi/platform.mattel/main) |
 | [plaud.ai](../../../../apis/openapi/plaud.ai) | [main](../../../../apis/openapi/plaud.ai/main) |
 | [plausible.io](../../../../apis/openapi/plausible.io) | [main](../../../../apis/openapi/plausible.io/main) |
 | [playcanvas.com](../../../../apis/openapi/playcanvas.com) | [main](../../../../apis/openapi/playcanvas.com/main) |
