@@ -1,12 +1,13 @@
 # APIs — Y
 
-Browsing 16 APIs starting with **Y**.
+Browsing 17 APIs starting with **Y**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · **Y** · [Z](../Z) · [~rest](../~rest)
 
 | Vendor | APIs |
 |--------|------|
 | [yandex.com](../../../../apis/openapi/yandex.com) | [main](../../../../apis/openapi/yandex.com/main) · [yandex-maps-geocoder](../../../../apis/openapi/yandex.com/yandex-maps-geocoder) |
+| [yapily.com](../../../../apis/openapi/yapily.com) | [main](../../../../apis/openapi/yapily.com/main) |
 | [yapla.com](../../../../apis/openapi/yapla.com) | [main](../../../../apis/openapi/yapla.com/main) |
 | [yelp.com](../../../../apis/openapi/yelp.com) | [main](../../../../apis/openapi/yelp.com/main) |
 | [yepcode.io](../../../../apis/openapi/yepcode.io) | [main](../../../../apis/openapi/yepcode.io/main) |
