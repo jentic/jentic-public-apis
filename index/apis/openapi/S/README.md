@@ -1,6 +1,6 @@
 # APIs — S
 
-Browsing 680 APIs starting with **S**.
+Browsing 681 APIs starting with **S**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · **S** · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -431,6 +431,7 @@ Browsing 680 APIs starting with **S**.
 | [superheroapi.com](../../../../apis/openapi/superheroapi.com) | [main](../../../../apis/openapi/superheroapi.com/main) · [superheroes](../../../../apis/openapi/superheroapi.com/superheroes) |
 | [supportbox.cz](../../../../apis/openapi/supportbox.cz) | [supportbox](../../../../apis/openapi/supportbox.cz/supportbox) |
 | [supportivekoala.com](../../../../apis/openapi/supportivekoala.com) | [main](../../../../apis/openapi/supportivekoala.com/main) |
+| [suqoof.com](../../../../apis/openapi/suqoof.com) | [main](../../../../apis/openapi/suqoof.com/main) |
 | [surecart.com](../../../../apis/openapi/surecart.com) | [main](../../../../apis/openapi/surecart.com/main) |
 | [suresend.ai](../../../../apis/openapi/suresend.ai) | [main](../../../../apis/openapi/suresend.ai/main) |
 | [surevoip.co.uk](../../../../apis/openapi/surevoip.co.uk) | [main](../../../../apis/openapi/surevoip.co.uk/main) · [the-surevoip-restful-api](../../../../apis/openapi/surevoip.co.uk/the-surevoip-restful-api) |
