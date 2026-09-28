@@ -1,6 +1,6 @@
 # APIs — J
 
-Browsing 34 APIs starting with **J**.
+Browsing 35 APIs starting with **J**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · **J** · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -38,6 +38,7 @@ Browsing 34 APIs starting with **J**.
 | [junglescout.com](../../../../apis/openapi/junglescout.com) | [main](../../../../apis/openapi/junglescout.com/main) |
 | [jurny.com](../../../../apis/openapi/jurny.com) | [main](../../../../apis/openapi/jurny.com/main) |
 | [juro.com](../../../../apis/openapi/juro.com) | [main](../../../../apis/openapi/juro.com/main) |
+| [juspay.in](../../../../apis/openapi/juspay.in) | [main](../../../../apis/openapi/juspay.in/main) |
 | [just-eat.co.uk](../../../../apis/openapi/just-eat.co.uk) | [just-eat-uk](../../../../apis/openapi/just-eat.co.uk/just-eat-uk) · [main](../../../../apis/openapi/just-eat.co.uk/main) |
 | [jvzoo.com](../../../../apis/openapi/jvzoo.com) | [main](../../../../apis/openapi/jvzoo.com/main) |
 
