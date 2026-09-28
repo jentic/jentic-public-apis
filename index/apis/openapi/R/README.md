@@ -1,6 +1,6 @@
 # APIs — R
 
-Browsing 239 APIs starting with **R**.
+Browsing 240 APIs starting with **R**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · **R** · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -36,6 +36,7 @@ Browsing 239 APIs starting with **R**.
 | [ratemyagent.com](../../../../apis/openapi/ratemyagent.com) | [main](../../../../apis/openapi/ratemyagent.com/main) |
 | [rawg.io](../../../../apis/openapi/rawg.io) | [main](../../../../apis/openapi/rawg.io/main) |
 | [raygun.com](../../../../apis/openapi/raygun.com) | [main](../../../../apis/openapi/raygun.com/main) |
+| [razorpay.com](../../../../apis/openapi/razorpay.com) | [main](../../../../apis/openapi/razorpay.com/main) |
 | [rbaskets.in](../../../../apis/openapi/rbaskets.in) | [main](../../../../apis/openapi/rbaskets.in/main) |
 | [rd.services](../../../../apis/openapi/rd.services) | [main](../../../../apis/openapi/rd.services/main) |
 | [re-leased.com](../../../../apis/openapi/re-leased.com) | [main](../../../../apis/openapi/re-leased.com/main) |
