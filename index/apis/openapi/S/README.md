@@ -1,6 +1,6 @@
 # APIs — S
 
-Browsing 684 APIs starting with **S**.
+Browsing 685 APIs starting with **S**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · **S** · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -19,6 +19,7 @@ Browsing 684 APIs starting with **S**.
 | [sailpoint.com](../../../../apis/openapi/sailpoint.com) | [main](../../../../apis/openapi/sailpoint.com/main) |
 | [sailthru.com](../../../../apis/openapi/sailthru.com) | [main](../../../../apis/openapi/sailthru.com/main) |
 | [sakari.io](../../../../apis/openapi/sakari.io) | [main](../../../../apis/openapi/sakari.io/main) |
+| [salad.cloud](../../../../apis/openapi/salad.cloud) | [main](../../../../apis/openapi/salad.cloud/main) |
 | [sales-api.postoo.io](../../../../apis/openapi/sales-api.postoo.io) | [pluuug](../../../../apis/openapi/sales-api.postoo.io/pluuug) |
 | [sales.app.redkik.com](../../../../apis/openapi/sales.app.redkik.com) | [main](../../../../apis/openapi/sales.app.redkik.com/main) |
 | [salesflare.com](../../../../apis/openapi/salesflare.com) | [salesflare](../../../../apis/openapi/salesflare.com/salesflare) |
