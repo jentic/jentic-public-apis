@@ -1,6 +1,6 @@
 # APIs — C
 
-Browsing 422 APIs starting with **C**.
+Browsing 423 APIs starting with **C**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · **C** · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -236,6 +236,7 @@ Browsing 422 APIs starting with **C**.
 | [codeforces.com](../../../../apis/openapi/codeforces.com) | [main](../../../../apis/openapi/codeforces.com/main) |
 | [codegpt.co](../../../../apis/openapi/codegpt.co) | [codegpt-api](../../../../apis/openapi/codegpt.co/codegpt-api) |
 | [codehooks.io](../../../../apis/openapi/codehooks.io) | [main](../../../../apis/openapi/codehooks.io/main) |
+| [coderabbit.ai](../../../../apis/openapi/coderabbit.ai) | [main](../../../../apis/openapi/coderabbit.ai/main) |
 | [codescene.io](../../../../apis/openapi/codescene.io) | [main](../../../../apis/openapi/codescene.io/main) |
 | [codesearch.debian.net](../../../../apis/openapi/codesearch.debian.net) | [main](../../../../apis/openapi/codesearch.debian.net/main) |
 | [codestats.net](../../../../apis/openapi/codestats.net) | [main](../../../../apis/openapi/codestats.net/main) |
