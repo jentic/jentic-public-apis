@@ -1,6 +1,6 @@
 # APIs — B
 
-Browsing 214 APIs starting with **B**.
+Browsing 215 APIs starting with **B**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · **B** · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -55,6 +55,7 @@ Browsing 214 APIs starting with **B**.
 | [beetribe.io](../../../../apis/openapi/beetribe.io) | [main](../../../../apis/openapi/beetribe.io/main) |
 | [beezup.com](../../../../apis/openapi/beezup.com) | [main](../../../../apis/openapi/beezup.com/main) |
 | [benetics.io](../../../../apis/openapi/benetics.io) | [main](../../../../apis/openapi/benetics.io/main) |
+| [bentoml.com](../../../../apis/openapi/bentoml.com) | [main](../../../../apis/openapi/bentoml.com/main) |
 | [besmartee.com](../../../../apis/openapi/besmartee.com) | [main](../../../../apis/openapi/besmartee.com/main) |
 | [bestbuy.com](../../../../apis/openapi/bestbuy.com) | [main](../../../../apis/openapi/bestbuy.com/main) |
 | [betfair.com](../../../../apis/openapi/betfair.com) | [main](../../../../apis/openapi/betfair.com/main) |
