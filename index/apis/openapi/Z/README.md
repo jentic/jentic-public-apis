@@ -1,6 +1,6 @@
 # APIs — Z
 
-Browsing 41 APIs starting with **Z**.
+Browsing 43 APIs starting with **Z**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · **Z** · [~rest](../~rest)
 
@@ -8,8 +8,10 @@ Browsing 41 APIs starting with **Z**.
 |--------|------|
 | [zalando.com](../../../../apis/openapi/zalando.com) | [main](../../../../apis/openapi/zalando.com/main) · [zalando-shop](../../../../apis/openapi/zalando.com/zalando-shop) |
 | [zalopay.vn](../../../../apis/openapi/zalopay.vn) | [main](../../../../apis/openapi/zalopay.vn/main) |
+| [zap-map.io](../../../../apis/openapi/zap-map.io) | [main](../../../../apis/openapi/zap-map.io/main) |
 | [zapcap.ai](../../../../apis/openapi/zapcap.ai) | [main](../../../../apis/openapi/zapcap.ai/main) |
 | [zapier.com](../../../../apis/openapi/zapier.com) | [nla](../../../../apis/openapi/zapier.com/nla) |
+| [zapkeller.com.br](../../../../apis/openapi/zapkeller.com.br) | [main](../../../../apis/openapi/zapkeller.com.br/main) |
 | [zapnito.com](../../../../apis/openapi/zapnito.com) | [main](../../../../apis/openapi/zapnito.com/main) |
 | [zeevou.com](../../../../apis/openapi/zeevou.com) | [main](../../../../apis/openapi/zeevou.com/main) |
 | [zeit.co](../../../../apis/openapi/zeit.co) | [main](../../../../apis/openapi/zeit.co/main) |
