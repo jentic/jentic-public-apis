@@ -1,6 +1,6 @@
 # APIs — B
 
-Browsing 212 APIs starting with **B**.
+Browsing 213 APIs starting with **B**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · **B** · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -175,6 +175,7 @@ Browsing 212 APIs starting with **B**.
 | [broadcast.threema.ch](../../../../apis/openapi/broadcast.threema.ch) | [main](../../../../apis/openapi/broadcast.threema.ch/main) |
 | [broadcom.com](../../../../apis/openapi/broadcom.com) | [main](../../../../apis/openapi/broadcom.com/main) |
 | [browse.ai](../../../../apis/openapi/browse.ai) | [main](../../../../apis/openapi/browse.ai/main) |
+| [browserbase.com](../../../../apis/openapi/browserbase.com) | [main](../../../../apis/openapi/browserbase.com/main) |
 | [browsercat.com](../../../../apis/openapi/browsercat.com) | [main](../../../../apis/openapi/browsercat.com/main) |
 | [browserless.io](../../../../apis/openapi/browserless.io) | [main](../../../../apis/openapi/browserless.io/main) |
 | [browserstack.com](../../../../apis/openapi/browserstack.com) | [main](../../../../apis/openapi/browserstack.com/main) |
