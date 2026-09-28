@@ -97,7 +97,7 @@ Browsing 242 APIs starting with **M**.
 | [menuplanner.ru](../../../../apis/openapi/menuplanner.ru) | [main](../../../../apis/openapi/menuplanner.ru/main) |
 | [meraki.com](../../../../apis/openapi/meraki.com) | [main](../../../../apis/openapi/meraki.com/main) |
 | [mercantilbanco.com](../../../../apis/openapi/mercantilbanco.com) | [main](../../../../apis/openapi/mercantilbanco.com/main) |
-| [mercedes-benz.com](../../../../apis/openapi/mercedes-benz.com) | [12 APIs](../../../../apis/openapi/mercedes-benz.com) |
+| [mercedes-benz.com](../../../../apis/openapi/mercedes-benz.com) | [13 APIs](../../../../apis/openapi/mercedes-benz.com) |
 | [merchantsafeunipay.com](../../../../apis/openapi/merchantsafeunipay.com) | [main](../../../../apis/openapi/merchantsafeunipay.com/main) |
 | [mercure.local](../../../../apis/openapi/mercure.local) | [main](../../../../apis/openapi/mercure.local/main) |
 | [mercury.com](../../../../apis/openapi/mercury.com) | [main](../../../../apis/openapi/mercury.com/main) |
