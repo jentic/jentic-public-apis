@@ -102,6 +102,17 @@ jobs:
             exit 1
           fi
           
+          # Close rebuild PRs left open by earlier runs (e.g. a run cancelled by a
+          # newer push mid-merge). This run rebuilt from current main, so they are
+          # superseded either way, and leaving them open would conflict with ours.
+          gh pr list --state open --limit 200 --json number,headRefName \
+            --jq '.[] | select(.headRefName | startswith("auto/rebuild-indexes-")) | .number' |
+            while read -r OLD_PR; do
+              echo "Closing superseded rebuild PR #$OLD_PR"
+              gh pr close "$OLD_PR" --delete-branch \
+                --comment "Superseded by a newer rebuild of current \`main\`." || true
+            done
+
           # Exit early if nothing actually changed (idempotent rebuild).
           if git diff --cached --quiet; then
             echo "Index files are already up to date — nothing to commit."
@@ -123,13 +134,26 @@ jobs:
 
           echo "Created PR: $PR_URL"
 
-          # No checks are required on main, so GitHub may already report the PR
-          # as "clean" by the time we get here, and enabling auto-merge on a
-          # clean PR is rejected ("Pull request is in clean status"). Fall back
-          # to a direct merge in that case instead of failing and orphaning the PR.
-          if gh pr merge "$PR_URL" --squash --auto --delete-branch; then
-            echo "Auto-merge enabled on $PR_URL"
-          else
-            echo "Auto-merge not available; merging $PR_URL directly"
-            gh pr merge "$PR_URL" --squash --delete-branch
+          # Merge directly when GitHub already reports the PR as mergeable. With
+          # no required checks this is the common case, and `--auto` is rejected
+          # on such PRs ("Pull request is in clean status"). If GitHub is still
+          # computing mergeability, fall back to auto-merge.
+          if ! gh pr merge "$PR_URL" --squash --delete-branch; then
+            gh pr merge "$PR_URL" --squash --auto --delete-branch || true
           fi
+
+          # Never leave this run's PR open: wait for it to merge, otherwise close
+          # it and fail so the run shows red. The next run rebuilds from main.
+          for _ in $(seq 1 18); do
+            STATE="$(gh pr view "$PR_URL" --json state --jq .state || true)"
+            if [ "$STATE" = "MERGED" ]; then
+              echo "Merged $PR_URL"
+              exit 0
+            fi
+            sleep 10
+          done
+
+          echo "::error::$PR_URL did not merge within 3 minutes; closing it"
+          gh pr close "$PR_URL" --delete-branch \
+            --comment "Closed by the rebuild workflow: the PR did not merge. The next rebuild will regenerate these indexes from \`main\`."
+          exit 1
