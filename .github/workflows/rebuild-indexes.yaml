@@ -6,8 +6,9 @@ name: Rebuild indexes
 # (which sees ALL merged changes) actually executes — no wasted compute.
 #
 # Because main requires a PR to merge, the workflow creates a temporary branch,
-# opens a PR, and auto-merges it. Merges performed via GITHUB_TOKEN do not
-# trigger further workflow runs, so there is no infinite-loop risk.
+# opens a PR, and merges it with the GitHub App token. App-token merges do
+# trigger further push runs; the job-level `github.actor` check skips runs
+# started by the automation bot, which is what prevents an infinite loop.
 
 on:
   push:
@@ -134,26 +135,22 @@ jobs:
 
           echo "Created PR: $PR_URL"
 
-          # Merge directly when GitHub already reports the PR as mergeable. With
-          # no required checks this is the common case, and `--auto` is rejected
-          # on such PRs ("Pull request is in clean status"). If GitHub is still
-          # computing mergeability, fall back to auto-merge.
-          if ! gh pr merge "$PR_URL" --squash --delete-branch; then
-            gh pr merge "$PR_URL" --squash --auto --delete-branch || true
-          fi
-
-          # Never leave this run's PR open: wait for it to merge, otherwise close
-          # it and fail so the run shows red. The next run rebuilds from main.
+          # Retry a direct merge until it lands. With no required checks the PR
+          # becomes mergeable within seconds; `--auto` isn't needed and is
+          # rejected once the PR is clean ("Pull request is in clean status").
+          # Never leave this run's PR open: if it hasn't merged within 3 minutes,
+          # close it and fail so the run shows red. The next run rebuilds from main.
           for _ in $(seq 1 18); do
             STATE="$(gh pr view "$PR_URL" --json state --jq .state || true)"
-            if [ "$STATE" = "MERGED" ]; then
-              echo "Merged $PR_URL"
-              exit 0
-            fi
+            case "$STATE" in
+              MERGED) echo "Merged $PR_URL"; exit 0 ;;
+              CLOSED) break ;;
+            esac
+            gh pr merge "$PR_URL" --squash --delete-branch || true
             sleep 10
           done
 
-          echo "::error::$PR_URL did not merge within 3 minutes; closing it"
+          echo "::error::$PR_URL did not merge; closing it"
           gh pr close "$PR_URL" --delete-branch \
             --comment "Closed by the rebuild workflow: the PR did not merge. The next rebuild will regenerate these indexes from \`main\`."
           exit 1
