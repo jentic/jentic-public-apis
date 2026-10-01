@@ -1,6 +1,6 @@
 # APIs — E
 
-Browsing 161 APIs starting with **E**.
+Browsing 162 APIs starting with **E**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · **E** · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -39,6 +39,7 @@ Browsing 161 APIs starting with **E**.
 | [eduzz.com](../../../../apis/openapi/eduzz.com) | [main](../../../../apis/openapi/eduzz.com/main) |
 | [efbin.org](../../../../apis/openapi/efbin.org) | [main](../../../../apis/openapi/efbin.org/main) |
 | [efekta.cz](../../../../apis/openapi/efekta.cz) | [main](../../../../apis/openapi/efekta.cz/main) |
+| [eia.gov](../../../../apis/openapi/eia.gov) | [main](../../../../apis/openapi/eia.gov/main) |
 | [elai.io](../../../../apis/openapi/elai.io) | [elai](../../../../apis/openapi/elai.io/elai) |
 | [elastic.co](../../../../apis/openapi/elastic.co) | [kibana](../../../../apis/openapi/elastic.co/kibana) |
 | [elasticemail.com](../../../../apis/openapi/elasticemail.com) | [main](../../../../apis/openapi/elasticemail.com/main) |
