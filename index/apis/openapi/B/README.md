@@ -1,6 +1,6 @@
 # APIs — B
 
-Browsing 217 APIs starting with **B**.
+Browsing 218 APIs starting with **B**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · **B** · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -74,6 +74,7 @@ Browsing 217 APIs starting with **B**.
 | [bic-boxtech.org](../../../../apis/openapi/bic-boxtech.org) | [main](../../../../apis/openapi/bic-boxtech.org/main) |
 | [bidbuild.net](../../../../apis/openapi/bidbuild.net) | [main](../../../../apis/openapi/bidbuild.net/main) |
 | [bidsketch.com](../../../../apis/openapi/bidsketch.com) | [main](../../../../apis/openapi/bidsketch.com/main) |
+| [bifrost.cyble.ai](../../../../apis/openapi/bifrost.cyble.ai) | [main](../../../../apis/openapi/bifrost.cyble.ai/main) |
 | [bigbluebutton.org](../../../../apis/openapi/bigbluebutton.org) | [main](../../../../apis/openapi/bigbluebutton.org/main) |
 | [bigdatacloud.net](../../../../apis/openapi/bigdatacloud.net) | [main](../../../../apis/openapi/bigdatacloud.net/main) |
 | [bigoven.com](../../../../apis/openapi/bigoven.com) | [main](../../../../apis/openapi/bigoven.com/main) |
