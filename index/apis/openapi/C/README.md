@@ -1,6 +1,6 @@
 # APIs — C
 
-Browsing 431 APIs starting with **C**.
+Browsing 432 APIs starting with **C**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · **C** · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -351,6 +351,7 @@ Browsing 431 APIs starting with **C**.
 | [countrystatecity.in](../../../../apis/openapi/countrystatecity.in) | [countrystatecity](../../../../apis/openapi/countrystatecity.in/countrystatecity) · [main](../../../../apis/openapi/countrystatecity.in/main) |
 | [coupontools.com](../../../../apis/openapi/coupontools.com) | [main](../../../../apis/openapi/coupontools.com/main) |
 | [coursesight.com](../../../../apis/openapi/coursesight.com) | [main](../../../../apis/openapi/coursesight.com/main) |
+| [courtrules.app](../../../../apis/openapi/courtrules.app) | [main](../../../../apis/openapi/courtrules.app/main) |
 | [cov-spectrum.org](../../../../apis/openapi/cov-spectrum.org) | [main](../../../../apis/openapi/cov-spectrum.org/main) |
 | [covalenthq.com](../../../../apis/openapi/covalenthq.com) | [goldrush-api](../../../../apis/openapi/covalenthq.com/goldrush-api) |
 | [coveralls.io](../../../../apis/openapi/coveralls.io) | [main](../../../../apis/openapi/coveralls.io/main) |
