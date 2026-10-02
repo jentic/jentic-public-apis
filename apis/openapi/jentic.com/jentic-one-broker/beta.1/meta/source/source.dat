@@ -1,0 +1,1165 @@
+openapi: 3.1.0
+info:
+  title: Broker API
+  version: beta.1
+  summary: Secure execution proxy for upstream APIs — credentials never leave the Broker.
+  contact:
+    name: Jentic Platform Team
+    url: https://jentic.com
+    email: support@jentic.com
+  description: |
+    ## Overview
+
+    The Broker is the platform's stateless data plane. Send it any
+    HTTP request with the upstream URL as the path; it injects the
+    caller's stored credentials, forwards method/headers/body as-is,
+    and returns the upstream response.
+
+    ```
+    POST https://broker.your-instance.example/petstore.swagger.io/v2/pet
+    ```
+
+    Secrets stay off agents and end-user devices, outbound traffic
+    has one auditable choke-point, and credentials rotate centrally
+    without redeploying callers. Sync responses return `200` with the
+    upstream body; long calls fall back to `202` with a polling link
+    into the control plane (see `Prefer` on `/{upstream_url}`).
+
+    Auth: every operation expects `Authorization: Bearer <token>` except
+    `GET /health`. Broker-added metadata is confined to the `Jentic-*`
+    header namespace — anything else on a response belongs to the
+    upstream.
+
+    Credential, agent-binding, and API-revision management live on the
+    [control plane](https://control-plane.example.com), not here.
+
+    ## Path format
+
+    The request path **is** the upstream URL. The broker reconstructs the
+    full target from your path, adding `https://` when no scheme is present:
+
+    | You send | Broker proxies to |
+    |----------|-------------------|
+    | `GET /api.example.com/v1/users` | `https://api.example.com/v1/users` |
+    | `POST /petstore.swagger.io/v2/pet` | `https://petstore.swagger.io/v2/pet` |
+    | `GET /http://127.0.0.1:8080/get` | `http://127.0.0.1:8080/get` |
+    | `GET /https://api.example.com/v1/users` | `https://api.example.com/v1/users` |
+
+    For HTTPS upstream targets (the common case), omit the scheme — just use
+    `/{host}/{path}`. For plain HTTP targets (e.g. local development), include
+    the full `http://` scheme in the path so the broker doesn't upgrade to HTTPS.
+
+    Query strings pass through as-is: `/api.example.com/search?q=foo` works.
+
+    ## Tracing and audit
+
+    Every brokered response carries W3C trace context (`traceparent`,
+    `tracestate`) and a `Jentic-*` header layer with the execution ID
+    (`exec_…`), the credential used (`Jentic-Credential-Id` /
+    `Jentic-Credential-Name`), and the upstream API reference
+    (`vendor:name:version`). OpenTelemetry clients pick this up
+    automatically; nothing else needs to parse `tracestate`.
+
+    To see what happened, ask the control plane:
+
+    - `GET /executions/{exec_id}` — full execution metadata (latency,
+      status, pinned revisions, caller).
+    - `GET /executions` — list and filter recent executions.
+    - `GET /executions/{exec_id}/steps` — per-step trace for workflow
+      executions.
+    - `GET /jobs/{job_id}` and `GET /jobs/{job_id}/result` — async
+      job status and pickup of the upstream body.
+    - `GET /events` / `GET /events/stream` — audit event feed.
+
+    Request and response bodies are not persisted by default. Execution
+    metadata is retained for 30 days (configurable). Body capture is
+    explicit opt-in. Async response bodies live in a short-lived
+    pickup buffer collected via `/jobs/{id}/result`, not in the audit
+    store.
+
+servers:
+  - url: https://broker.your-instance.example
+    description: Production (placeholder — set to your deployment's Broker host)
+  - url: https://broker-dev.your-instance.example
+    description: Development (placeholder — set to your deployment's Broker host)
+tags:
+  - name: Executions
+    description: |
+      Proxy upstream API operations through the Broker, and inspect the
+      metadata records they leave behind for audit, latency analysis,
+      and failure diagnosis.
+  - name: System
+    description: |
+      Operational endpoints for liveness, readiness, and platform
+      observability — not part of the brokered execution surface.
+security:
+  - BearerAuth: []
+paths:
+  /health:
+    get:
+      tags: [System]
+      operationId: getHealth
+      summary: Service health probe
+      description: |
+        Liveness / readiness probe for the Broker service. Returns `200`
+        with a small `application/health+json` body (IETF Health Check
+        Response Format draft) when the broker can accept traffic.
+        Intended for load balancers, container orchestrators, and uptime
+        monitors — not for human or agent consumption beyond green/red
+        signalling.
+      security: []
+      responses:
+        "200":
+          description: Service is healthy and ready to accept traffic.
+          content:
+            application/health+json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+              examples:
+                healthy:
+                  summary: Broker reporting healthy.
+                  value:
+                    status: pass
+                    version: beta.1
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/ServerError"
+        default:
+          $ref: "#/components/responses/Default"
+  /ready:
+    get:
+      tags: [System]
+      operationId: getReady
+      summary: Saturation-aware readiness probe
+      description: |
+        Readiness probe distinct from liveness (`/health`). Returns `200`
+        while the instance can accept traffic and `503` once sustained
+        in-flight load nears the admission cap, so a load balancer drains
+        *this* instance before it begins shedding requests itself — without
+        the pod being restarted (liveness stays green). Intended for the
+        orchestrator `readinessProbe`, not for human or agent consumption.
+      security: []
+      responses:
+        "200":
+          description: Instance is ready to accept traffic.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReadinessResponse"
+              examples:
+                ready:
+                  summary: Below the saturation threshold.
+                  value:
+                    status: ready
+                    saturation: 0.12
+        "503":
+          description: Instance is saturated and should be drained.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReadinessResponse"
+              examples:
+                unready:
+                  summary: At/above the saturation threshold.
+                  value:
+                    status: unready
+                    reason: saturated
+                    saturation: 0.95
+        "500":
+          $ref: "#/components/responses/ServerError"
+        default:
+          $ref: "#/components/responses/Default"
+  /{upstream_url}:
+    description: |
+      Forward a request to the upstream API URL specified in the path. The
+      HTTP method you use on this endpoint is the method the broker sends to
+      the upstream service — every standard method (`GET`, `POST`, `PUT`,
+      `PATCH`, `DELETE`, `HEAD`, `OPTIONS`) is supported.
+
+      Request headers and body are forwarded as-is. The broker injects the
+      caller's stored credentials for the target API.
+
+      The path, query, and header parameters listed below apply to every
+      method. Per-method operations only differ in semantic intent and (for
+      methods that conventionally carry a body) in `requestBody` shape.
+
+      ### Sync vs async
+
+      By default, the broker waits up to 30 seconds for the upstream
+      response. Control this with the `Prefer` header:
+
+      - `Prefer: wait=30` — wait up to 30 seconds, then fall back to async.
+      - `Prefer: respond-async` — always queue and return `202` immediately.
+
+      Async executions return a `202` with a polling link into the control plane.
+
+      ### Error handling
+
+      Platform-level errors (auth failures, missing credentials) return an
+      RFC 9457 Problem Details (`application/problem+json`) body using the
+      shared `ProblemDetails` schema from
+      [jentic/api-problem-details](https://github.com/jentic/api-problem-details).
+      Field-level validation failures populate the `errors[]` extension.
+
+      ### Idempotency
+
+      Optional `Idempotency-Key` request header (IETF
+      draft-ietf-httpapi-idempotency-key). If present, the broker
+      records the key for 24 hours and replays the original response
+      for any subsequent request that reuses it — including `202`
+      handles, so retrying a queued async request returns the *same*
+      `job_id` instead of double-queueing the upstream call. Keys are
+      scoped per-caller and should be unique per logical operation
+      (UUIDv4 recommended, max 255 chars).
+
+      Replays are signalled with `Idempotent-Replayed: true` on the
+      response. If the same key is reused with a different request
+      body or upstream URL, the broker returns `409 Conflict`.
+
+      ### Proxied upstream headers
+
+      On synchronous `200` responses, upstream API response headers are
+      forwarded as-is. Hop-by-hop headers (RFC 7230 §6.1) and the
+      broker's own trace/metadata headers are not proxied — every
+      broker-added header lives under the `Jentic-*` namespace, so
+      `Jentic-*` is unambiguously the broker's and anything else
+      belongs to the upstream.
+
+      ### Security
+
+      The Broker validates every `upstream_url` against the set of
+      registered APIs before forwarding. Arbitrary URLs that do not
+      resolve to a known, registered API endpoint are rejected with
+      `404` — the Broker is **not** an open proxy. This allowlist
+      check is the spec's primary SSRF mitigation boundary:
+      credentials are never injected into requests targeting
+      unregistered hosts.
+
+      ### Revision pinning
+
+      By default the Broker resolves the upstream URL against the
+      target API's `current_revision_id` (the `published` revision
+      registered on the control plane). To test a `draft` revision
+      with real credentials before promoting it, attach the
+      `Jentic-Revision` request header. The header is
+      multi-valued — repeat it (or comma-separate) once per API
+      you want to pin, with each value of the form
+      `vendor:name:version=rev_…`.
+
+      The Broker forwards the pin into the control-plane
+      `POST /lookup/operation` call so URL → `operation_id`
+      resolution sees the requested spec. When the header is
+      absent or the URL doesn't match a pinned API, the Broker
+      resolves against `current_revision_id` as today.
+
+      Pinning a `draft` revision the caller doesn't have access to
+      returns `403`. Pinning an unknown or `archived` revision
+      returns `422` — `archived` revisions are deliberately not
+      pinnable from the hot path; resurrect them by re-promoting
+      instead. The chosen revisions are recorded on the resulting
+      `ExecutionRecord` (`pinned_revisions` field on the control
+      plane) so audit can answer "did this execution use a pinned
+      revision?" without parsing headers.
+    parameters:
+      - $ref: "#/components/parameters/UpstreamUrl"
+      - $ref: "#/components/parameters/Prefer"
+      - $ref: "#/components/parameters/IdempotencyKey"
+      - $ref: "#/components/parameters/JenticRevision"
+      - $ref: "#/components/parameters/JenticCredentialName"
+      - $ref: "#/components/parameters/JenticCredentialId"
+    get:
+      operationId: executeGet
+      summary: Execute a `GET` against an upstream API
+      description: |
+        Forward a `GET` to the upstream service. No request body. Typically
+        used for resource reads and listings; the upstream response is
+        returned verbatim on `200`, or queued and surfaced via `202` when
+        the wait window is exceeded or `Prefer: respond-async` is set.
+      tags: [Executions]
+      responses:
+        "200":
+          $ref: "#/components/responses/ExecuteSync"
+        "202":
+          $ref: "#/components/responses/ExecuteAsync"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+        "424":
+          $ref: "#/components/responses/CredentialNotProvisioned"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/ServerError"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+        default:
+          $ref: "#/components/responses/Default"
+    post:
+      operationId: executePost
+      summary: Execute a `POST` against an upstream API
+      description: |
+        Forward a `POST` to the upstream service. Request body is forwarded
+        verbatim — the Broker does not inspect or transform it. The upstream
+        response is returned on `200`, or queued and surfaced via `202` when
+        the wait window is exceeded or `Prefer: respond-async` is set.
+      tags: [Executions]
+      requestBody:
+        required: false
+        description: Request body forwarded verbatim to the upstream service.
+        content:
+          "*/*":
+            schema: {}
+      responses:
+        "200":
+          $ref: "#/components/responses/ExecuteSync"
+        "202":
+          $ref: "#/components/responses/ExecuteAsync"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+        "424":
+          $ref: "#/components/responses/CredentialNotProvisioned"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/ServerError"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+        default:
+          $ref: "#/components/responses/Default"
+    put:
+      operationId: executePut
+      summary: Execute a `PUT` against an upstream API
+      description: |
+        Forward a `PUT` to the upstream service. Request body is forwarded
+        verbatim. Same response semantics as `POST`.
+      tags: [Executions]
+      requestBody:
+        required: false
+        description: Request body forwarded verbatim to the upstream service.
+        content:
+          "*/*":
+            schema: {}
+      responses:
+        "200":
+          $ref: "#/components/responses/ExecuteSync"
+        "202":
+          $ref: "#/components/responses/ExecuteAsync"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+        "424":
+          $ref: "#/components/responses/CredentialNotProvisioned"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/ServerError"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+        default:
+          $ref: "#/components/responses/Default"
+    patch:
+      operationId: executePatch
+      summary: Execute a `PATCH` against an upstream API
+      description: |
+        Forward a `PATCH` to the upstream service. Request body is forwarded
+        verbatim. Same response semantics as `POST`.
+      tags: [Executions]
+      requestBody:
+        required: false
+        description: Request body forwarded verbatim to the upstream service.
+        content:
+          "*/*":
+            schema: {}
+      responses:
+        "200":
+          $ref: "#/components/responses/ExecuteSync"
+        "202":
+          $ref: "#/components/responses/ExecuteAsync"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+        "424":
+          $ref: "#/components/responses/CredentialNotProvisioned"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/ServerError"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+        default:
+          $ref: "#/components/responses/Default"
+    delete:
+      operationId: executeDelete
+      summary: Execute a `DELETE` against an upstream API
+      description: |
+        Forward a `DELETE` to the upstream service. A request body is
+        permitted (RFC 7231 does not forbid one) and forwarded verbatim if
+        present, but most upstreams ignore it. Same response semantics as
+        `POST`.
+      tags: [Executions]
+      requestBody:
+        required: false
+        description: Request body forwarded verbatim to the upstream service.
+        content:
+          "*/*":
+            schema: {}
+      responses:
+        "200":
+          $ref: "#/components/responses/ExecuteSync"
+        "202":
+          $ref: "#/components/responses/ExecuteAsync"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+        "424":
+          $ref: "#/components/responses/CredentialNotProvisioned"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/ServerError"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+        default:
+          $ref: "#/components/responses/Default"
+    head:
+      operationId: executeHead
+      summary: Execute a `HEAD` against an upstream API
+      description: |
+        Forward a `HEAD` to the upstream service. No request body, no
+        response body — only headers. Useful for cheap existence /
+        last-modified checks. Async (`202`) is unusual for `HEAD` but
+        permitted for parity with the other methods.
+      tags: [Executions]
+      responses:
+        "200":
+          $ref: "#/components/responses/ExecuteSync"
+        "202":
+          $ref: "#/components/responses/ExecuteAsync"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+        "424":
+          $ref: "#/components/responses/CredentialNotProvisioned"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/ServerError"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+        default:
+          $ref: "#/components/responses/Default"
+    options:
+      operationId: executeOptions
+      summary: Execute an `OPTIONS` against an upstream API
+      description: |
+        Forward an `OPTIONS` to the upstream service. Typically used for
+        CORS preflight discovery and capability probing. Same response
+        semantics as `GET`.
+      tags: [Executions]
+      responses:
+        "200":
+          $ref: "#/components/responses/ExecuteSync"
+        "202":
+          $ref: "#/components/responses/ExecuteAsync"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+        "424":
+          $ref: "#/components/responses/CredentialNotProvisioned"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/ServerError"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+        default:
+          $ref: "#/components/responses/Default"
+components:
+  headers:
+    Traceparent:
+      description: |
+        W3C Trace Context — `00-{trace-id}-{parent-id}-01`. The
+        `parent-id` is the broker span; downstream services use this to
+        link their own spans into the same distributed trace. Version
+        `00` is current; flags `01` = sampled.
+      schema:
+        type: string
+        examples:
+          - 00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01
+    Tracestate:
+      description: |
+        W3C Trace Context vendor extensions. Jentic packs a fixed
+        five-field value under the `jentic` vendor key:
+        `jentic=<exec_id>:<toolkit_id>:<vendor>:<name>:<version>`, e.g.
+        `jentic=exec_xyz789:_:stripe:payments:2023-10-16`. The
+        first two segments answer *who is calling*; the trailing
+        segments answer *what is being called*. Missing segments are
+        emitted as `_` so the shape stays positionally parseable — the
+        second segment is a legacy slot (toolkit attribution on the
+        pre-theme-5 path, whose tables were dropped in Phase 6b) and is
+        always `_` on current executions. Composable with other vendors
+        (`jentic=...,datadog=...`).
+      schema:
+        type: string
+        examples:
+          - jentic=exec_xyz789:_:stripe:payments:2023-10-16
+    JenticExecutionId:
+      description: Execution ID — unique identifier for this brokered request.
+      schema:
+        type: string
+        examples:
+          - exec_xyz789
+    JenticCredentialId:
+      description: |
+        ID of the stored credential the broker resolved and used to sign
+        this execution. Present only when a stored credential was actually
+        used — a missing header unambiguously means no credential (inline
+        auth, a credential-less API, or a failure before resolution).
+      schema:
+        type: string
+        examples:
+          - cred_abc123
+    JenticCredentialName:
+      description: |
+        Human-readable label of the credential in `Jentic-Credential-Id`,
+        sanitized to printable ASCII (unsafe characters replaced with `?`).
+        Present under the same condition as the id header. The same header
+        name is also accepted on requests to disambiguate credential
+        resolution.
+      schema:
+        type: string
+        examples:
+          - Stripe prod key
+  parameters:
+    UpstreamUrl:
+      name: upstream_url
+      in: path
+      required: true
+      description: The URL of the upstream service to execute the request to.
+      example: api.spotify.com/v1/tracks/3n3Ppam7vgaVa1iaRUc9Lp
+      schema:
+        type: string
+        title: Upstream Url
+        description: The URL of the upstream service to execute the request to.
+        examples:
+          - api.spotify.com/v1/tracks/3n3Ppam7vgaVa1iaRUc9Lp
+          - petstore.swagger.io/v2/pet/12345
+    Prefer:
+      name: Prefer
+      in: header
+      required: false
+      description: |
+        RFC 7240 processing preference. `wait={seconds}` — maximum time
+        to wait for a synchronous response before falling back to async.
+        `respond-async` — always queue and return `202` immediately.
+      example: wait=30
+      schema:
+        type: string
+        examples:
+          - wait=30
+          - respond-async
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: false
+      description: |
+        Optional caller-supplied key to make this request idempotent.
+        If present, the broker dedupes against the key for 24 hours
+        and replays the original response on retry. UUIDv4 recommended.
+        See the `Idempotency` section above for full semantics.
+      example: 5f9c8b2e-7a4d-4e1f-9c3a-1b2d3e4f5a6b
+      schema:
+        type: string
+        maxLength: 255
+        examples:
+          - 5f9c8b2e-7a4d-4e1f-9c3a-1b2d3e4f5a6b
+    JenticRevision:
+      name: Jentic-Revision
+      in: header
+      required: false
+      description: |
+        Pin upstream-API resolution to a specific `ApiRevision`
+        instead of the API's `current_revision_id`. Multi-valued —
+        repeat the header (or comma-separate) once per API you
+        want to pin. Each value is `vendor:name:version=rev_…`.
+
+        Use cases:
+
+        - Test a `draft` revision against existing credentials
+          before promoting it.
+        - Reproduce a historical execution against an `archived`
+          spec for diagnostic purposes (refused by default;
+          archived revisions are not pinnable from the hot path).
+
+        The Broker forwards the pin into the control-plane
+        `POST /lookup/operation` call so URL → `operation_id`
+        resolution sees the requested spec. When the header is
+        absent or the URL doesn't match a pinned API, the Broker
+        resolves against `current_revision_id` as today.
+
+        Pinning a `draft` revision the caller doesn't have
+        access to returns `403`. Pinning an unknown or
+        `archived` revision returns `422`. The chosen revisions
+        are recorded on the resulting `ExecutionRecord`
+        (`pinned_revisions` field on the control plane).
+      example:
+        - stripe:payments:2023-10-16=rev_01HMY1Q0AB
+      schema:
+        type: array
+        items:
+          type: string
+          pattern: ^[a-z0-9-]+:[^=:]+:[^=]+=rev_[A-Za-z0-9]+$
+        examples:
+          - - stripe:payments:2023-10-16=rev_01HMY1Q0AB
+          - - stripe:payments:2023-10-16=rev_01HMY1Q0AB
+            - shopify:admin:2024-01=rev_01HMY7B3QN
+      style: simple
+      explode: false
+    JenticCredentialName:
+      name: Jentic-Credential-Name
+      in: header
+      required: false
+      description: |
+        Disambiguate credential resolution by the credential's
+        human-readable name. When several bound credentials cover the
+        target API at the same specificity (a multi-account setup), the
+        broker refuses with `409 ambiguous_credential_binding` and lists
+        the candidates; resend with this header naming the one to use. A
+        name that matches no covering candidate is rejected with
+        `400 credential_name_not_found` (candidates listed). Consumed by
+        the broker — never forwarded upstream. The same header name is
+        also emitted on responses to attribute the credential used.
+      example: Stripe prod key
+      schema:
+        type: string
+        examples:
+          - Stripe prod key
+    JenticCredentialId:
+      name: Jentic-Credential-Id
+      in: header
+      required: false
+      description: |
+        Disambiguate credential resolution by exact credential id — the
+        authoritative signal, applied before the name filter and
+        specificity narrowing. Ids are stable and non-secret
+        (`cred_`-prefixed); the `409 ambiguous_credential_binding`
+        candidate list carries them. An id that matches no covering,
+        bound candidate is rejected with `400 credential_id_not_found`
+        (candidates listed). Consumed by the broker — never forwarded
+        upstream. The same header name is also emitted on responses to
+        attribute the credential used.
+      example: cred_abc123
+      schema:
+        type: string
+        examples:
+          - cred_abc123
+  schemas:
+    AsyncQueuedResponse:
+      type: object
+      title: AsyncQueuedResponse
+      summary: Handle returned when the Broker queues an upstream call for async execution.
+      description: |
+        Returned as the `202` body on async executions. The Broker
+        does not expose a polling surface of its own; `_links.self`
+        is an absolute URL into the platform's control plane, where
+        the queued work surfaces as a `kind: execution` job. Poll
+        that URL for status, and follow its `_links.result` to
+        collect the upstream response body once `status` is
+        `completed`.
+      required:
+        - job_id
+        - _links
+      properties:
+        job_id:
+          type: string
+          title: Job Id
+          description: Unique identifier for the queued job. Matches the `job_id` reported by the control plane.
+          examples:
+            - job_abc123
+        _links:
+          type: object
+          title: AsyncQueuedResponseLinks
+          summary: HAL-style links pointing into the control-plane job record.
+          description: |
+            HAL-style link relations for the queued job. `self` always
+            points at the control-plane job record; the broker does
+            not expose its own polling surface.
+          required:
+            - self
+          properties:
+            self:
+              type: string
+              format: uri
+              description: Absolute URL of the control-plane job record. Poll this for status and result links.
+              examples:
+                - https://control-plane.example.com/jobs/job_abc123
+    HealthResponse:
+      type: object
+      title: HealthResponse
+      summary: Service health probe response.
+      description: |
+        Body returned by `GET /health` when the Broker is ready to
+        accept traffic. Shape follows the IETF [Health Check Response
+        Format for HTTP APIs](https://datatracker.ietf.org/doc/html/draft-inadarei-api-health-check)
+        draft (`application/health+json`). Intentionally minimal —
+        clients treat `200` + `status: pass` as the green signal; the
+        body is informational.
+      required:
+        - status
+      properties:
+        status:
+          type: string
+          description: |
+            Health indicator per the IETF Health Check draft.
+            `pass` — service is healthy. `fail` — service is unhealthy.
+            `warn` — service is healthy but with concerns. The Broker
+            returns `pass` on every `200`; `fail` / `warn` are reserved
+            for future degraded-mode reporting.
+          enum: [pass, fail, warn]
+          examples:
+            - pass
+        version:
+          type: string
+          description: Service build version, mirrors `info.version` in this spec.
+          examples:
+            - beta.1
+    ReadinessResponse:
+      type: object
+      title: ReadinessResponse
+      summary: Saturation-aware readiness probe response.
+      description: |
+        Body returned by `GET /ready`. `status: ready` (HTTP `200`) means the
+        instance is below the saturation threshold; `status: unready` (HTTP
+        `503`) means in-flight load is at/near the admission cap and the load
+        balancer should drain this instance. `saturation` is the current
+        in-flight count as a fraction of the configured cap.
+      required:
+        - status
+      properties:
+        status:
+          type: string
+          enum: [ready, unready]
+          examples:
+            - ready
+        reason:
+          type: string
+          description: Why the instance is unready (present only on `unready`).
+          examples:
+            - saturated
+        saturation:
+          type: number
+          format: float
+          description: In-flight requests as a fraction of the admission cap.
+          examples:
+            - 0.12
+  responses:
+    ExecuteSync:
+      description: |
+        Synchronous success — upstream responded within the wait window.
+        The response body and status code are forwarded from the upstream
+        API.
+
+        Upstream response headers are forwarded as-is; broker-added
+        metadata is confined to the `Jentic-*` namespace.
+      headers:
+        Preference-Applied:
+          description: RFC 7240 — confirms which processing preference was applied.
+          schema:
+            type: string
+            examples:
+              - wait=30
+        Idempotent-Replayed:
+          description: |
+            Present and `true` when this response was replayed from a
+            stored `Idempotency-Key` rather than freshly executed.
+            Absent on first execution.
+          schema:
+            type: string
+            enum: ["true"]
+        Jentic-Api-Vendor:
+          description: API vendor hostname that was called.
+          schema:
+            type: string
+            examples:
+              - api.spotify.com
+        traceparent:
+          $ref: "#/components/headers/Traceparent"
+        tracestate:
+          $ref: "#/components/headers/Tracestate"
+        Jentic-Execution-Id:
+          $ref: "#/components/headers/JenticExecutionId"
+        Jentic-Operation:
+          description: Name of the operation that was executed.
+          schema:
+            type: string
+            examples:
+              - getTrack
+        Jentic-Upstream-Status:
+          description: HTTP status code returned by the upstream API.
+          schema:
+            type: integer
+            examples:
+              - 200
+        Jentic-Credential-Id:
+          $ref: "#/components/headers/JenticCredentialId"
+        Jentic-Credential-Name:
+          $ref: "#/components/headers/JenticCredentialName"
+      content:
+        "*/*":
+          schema:
+            title: UpstreamBody
+            description: |
+              Upstream response body, forwarded verbatim. Content type
+              varies by upstream API — may be JSON, XML, binary, or any
+              other media type. The `Content-Type` header on the response
+              reflects what the upstream returned.
+            summary: Upstream response body forwarded by the Broker.
+          examples:
+            spotify_track:
+              summary: Forwarded `200` body from Spotify's `getTrack` (JSON).
+              value:
+                id: 3n3Ppam7vgaVa1iaRUc9Lp
+                name: Mr. Brightside
+                duration_ms: 222200
+                explicit: false
+    ExecuteAsync:
+      description: |
+        Execution queued. Follow `_links.self` to the control plane
+        to poll the job and collect the upstream response body once
+        `status` is `completed`. The body is delivered once and then
+        evicted from the platform's pickup buffer.
+      headers:
+        Preference-Applied:
+          description: RFC 7240 — confirms which processing preference was applied.
+          schema:
+            type: string
+            examples:
+              - respond-async
+        Idempotent-Replayed:
+          description: |
+            Present and `true` when this `202` is a replay of a
+            previously-queued job under the same `Idempotency-Key`.
+            The `job_id` will match the original.
+          schema:
+            type: string
+            enum: ["true"]
+        Jentic-Api-Vendor:
+          description: API vendor hostname that was called.
+          schema:
+            type: string
+            examples:
+              - api.spotify.com
+        traceparent:
+          $ref: "#/components/headers/Traceparent"
+        tracestate:
+          $ref: "#/components/headers/Tracestate"
+        Jentic-Execution-Id:
+          $ref: "#/components/headers/JenticExecutionId"
+        Jentic-Operation:
+          description: Name of the operation that was executed.
+          schema:
+            type: string
+            examples:
+              - getTrack
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/AsyncQueuedResponse"
+          examples:
+            queued:
+              summary: Freshly queued async execution.
+              value:
+                job_id: job_abc123
+                _links:
+                  self: https://control-plane.example.com/jobs/job_abc123
+    BadRequest:
+      description: |
+        Request rejected before reaching the upstream — malformed JSON,
+        missing required field, or schema-validation failure on the
+        broker side. Body is RFC 9457 `application/problem+json` using
+        the shared `ProblemDetails` schema.
+      content:
+        application/problem+json:
+          schema:
+            $ref: 'https://raw.githubusercontent.com/jentic/api-problem-details/c741877182d2deea2bb38859e3df4caa76265d98/schemas/problem-details.yaml'
+    Unauthorized:
+      description: |
+        Authentication missing or invalid — the `Authorization: Bearer
+        <token>` credential is absent, malformed, expired, revoked, or
+        (for JWTs) signed by an issuer the Broker doesn't trust. Body is
+        RFC 9457 `application/problem+json`.
+      content:
+        application/problem+json:
+          schema:
+            $ref: 'https://raw.githubusercontent.com/jentic/api-problem-details/c741877182d2deea2bb38859e3df4caa76265d98/schemas/problem-details.yaml'
+    Forbidden:
+      description: |
+        Caller authenticated but not entitled to execute — most often a
+        token lacking the required `capabilities:execute` scope
+        (`type: insufficient_scope`), attempting to pin a `draft`
+        revision they don't own, using a credential they aren't bound to
+        (`no_credential_binding`), or being denied by a binding's
+        permission rules. Body is RFC 9457 `application/problem+json`.
+      content:
+        application/problem+json:
+          schema:
+            $ref: 'https://raw.githubusercontent.com/jentic/api-problem-details/c741877182d2deea2bb38859e3df4caa76265d98/schemas/problem-details.yaml'
+    NotFound:
+      description: |
+        Upstream URL doesn't resolve to a registered API operation, or
+        the path component refers to a resource the upstream itself
+        doesn't recognise. Body is RFC 9457
+        `application/problem+json`.
+      content:
+        application/problem+json:
+          schema:
+            $ref: 'https://raw.githubusercontent.com/jentic/api-problem-details/c741877182d2deea2bb38859e3df4caa76265d98/schemas/problem-details.yaml'
+    Conflict:
+      description: |
+        Conflict (RFC 9457 `application/problem+json`), distinguished by
+        the problem `type`:
+
+        - `ambiguous_credential_binding` — several credentials the caller
+          is bound to cover the target API at the same specificity. The
+          body lists the candidates (`id`, `name`, `last4`, `created_at`);
+          resend with the `Jentic-Credential-Name` or `Jentic-Credential-Id`
+          request header to pick one.
+        - `idempotency_conflict` — the same `Idempotency-Key` was already
+          used with a different request (method, upstream URL, resolved
+          credential, or body). Reusing a key for a different request is
+          rejected; pick a new key.
+        - `idempotency_in_progress` — a request with this `Idempotency-Key`
+          is still being processed. The response carries a `Retry-After`
+          header; retry after that delay to obtain the replayed result.
+      content:
+        application/problem+json:
+          schema:
+            $ref: 'https://raw.githubusercontent.com/jentic/api-problem-details/c741877182d2deea2bb38859e3df4caa76265d98/schemas/problem-details.yaml'
+    CredentialNotProvisioned:
+      description: |
+        A bound credential is an unusable dependency, so the broker cannot
+        sign the upstream call. Body is RFC 9457
+        `application/problem+json`; the `type` discriminates two cases with
+        opposite recovery paths:
+        - `credential_not_provisioned` — no credential is connected for the
+          resolved upstream API. The `agent_directive` is a `prompt_human`
+          instruction carrying a non-secret `provisioning_url` (when
+          account-linking is configured) and an `intent_id` correlation id,
+          so an autonomous agent stops and asks the user to connect the
+          account rather than retrying or guessing the credential.
+        - `credential_undecryptable` — a credential is connected but its
+          stored secret can no longer be decrypted (typically the
+          deployment's encryption key rotated underneath it, e.g. a
+          reinstall over existing data). The caller cannot self-provision
+          and retrying will not help; the `prompt_human` directive tells
+          the agent to ask an operator to remove and re-add the credential.
+      content:
+        application/problem+json:
+          schema:
+            $ref: 'https://raw.githubusercontent.com/jentic/api-problem-details/c741877182d2deea2bb38859e3df4caa76265d98/schemas/problem-details.yaml'
+    ValidationError:
+      description: |
+        Request well-formed but semantically invalid — e.g. unknown
+        revision pin, archived revision pin, or a request body that
+        fails the upstream operation's schema. Field-level details
+        live in the `errors[]` extension of the
+        `application/problem+json` body.
+      content:
+        application/problem+json:
+          schema:
+            $ref: 'https://raw.githubusercontent.com/jentic/api-problem-details/c741877182d2deea2bb38859e3df4caa76265d98/schemas/problem-details.yaml'
+    TooManyRequests:
+      description: |
+        Caller exceeded their rate-limit window. Retry after the
+        interval indicated by `Retry-After`; the
+        `RateLimit-*` headers describe the current quota and
+        remaining budget per RFC 6648 / `draft-ietf-httpapi-ratelimit-headers`.
+        Body is RFC 9457 `application/problem+json`.
+      headers:
+        RateLimit-Limit:
+          description: Total number of requests allowed in the current window.
+          schema:
+            type: integer
+            examples:
+              - 100
+        RateLimit-Remaining:
+          description: Requests remaining in the current window.
+          schema:
+            type: integer
+            examples:
+              - 0
+        Retry-After:
+          description: |
+            Seconds to wait before retrying, per RFC 7231 §7.1.3.
+            May also be sent as an HTTP-date.
+          schema:
+            type: string
+            examples:
+              - "30"
+      content:
+        application/problem+json:
+          schema:
+            $ref: 'https://raw.githubusercontent.com/jentic/api-problem-details/c741877182d2deea2bb38859e3df4caa76265d98/schemas/problem-details.yaml'
+    ServerError:
+      description: |
+        Unexpected broker-side failure — bug, panic, or unhandled
+        upstream exception bubble. Should be rare; report with the
+        `traceparent` header for triage. Body is RFC 9457
+        `application/problem+json`.
+      content:
+        application/problem+json:
+          schema:
+            $ref: 'https://raw.githubusercontent.com/jentic/api-problem-details/c741877182d2deea2bb38859e3df4caa76265d98/schemas/problem-details.yaml'
+    ServiceUnavailable:
+      description: |
+        Broker temporarily unable to serve traffic — startup,
+        shutdown, dependency outage, or a deliberate maintenance
+        window. Retry after the interval indicated by `Retry-After`.
+        Body is RFC 9457 `application/problem+json`.
+      headers:
+        Retry-After:
+          description: |
+            Seconds to wait before retrying, per RFC 7231 §7.1.3.
+            May also be sent as an HTTP-date.
+          schema:
+            type: string
+            examples:
+              - "60"
+      content:
+        application/problem+json:
+          schema:
+            $ref: 'https://raw.githubusercontent.com/jentic/api-problem-details/c741877182d2deea2bb38859e3df4caa76265d98/schemas/problem-details.yaml'
+    PayloadTooLarge:
+      description: |
+        Request body exceeded the broker's per-`Content-Type` size cap
+        (`max_request_bytes_by_type`, falling back to `max_request_bytes`).
+        The cap is resolved from the request `Content-Type` before the body is
+        read, so an over-cap upload fails fast. Body is RFC 9457
+        `application/problem+json`.
+      content:
+        application/problem+json:
+          schema:
+            $ref: 'https://raw.githubusercontent.com/jentic/api-problem-details/c741877182d2deea2bb38859e3df4caa76265d98/schemas/problem-details.yaml'
+    Default:
+      description: Catch-all problem+json response for any status not enumerated on this operation.
+      content:
+        application/problem+json:
+          schema:
+            $ref: 'https://raw.githubusercontent.com/jentic/api-problem-details/c741877182d2deea2bb38859e3df4caa76265d98/schemas/problem-details.yaml'
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      # bearerFormat is intentionally omitted: the Broker accepts several
+      # interchangeable credential formats (opaque access tokens, API keys,
+      # and self-contained JWTs) — not JWTs alone — so pinning
+      # `bearerFormat: JWT` would misrepresent the contract.
+      description: |
+        Credential authorizing a Broker call, sent as
+        `Authorization: Bearer <token>`. The Broker accepts several
+        interchangeable credential formats, dispatched by prefix/shape:
+
+        - **Opaque access tokens** (`at_…`) — the *same* tokens the control
+          plane issues from `POST /oauth/token`. A random string validated by
+          server-side lookup (it is **not** a JWT and cannot be decoded by the
+          client). Broker and control plane share one token store, so a token
+          minted for the control plane authenticates here too.
+        - **API keys** — agent (`jak_…`) keys.
+          May alternatively be sent in the `x-jentic-api-key` header. The
+          `jntc_live_…` toolkit-key form is **retired** (theme-5): a value
+          migrated before the toolkit tables were dropped still authenticates
+          as its successor agent until the deprecation window closes (no
+          earlier than 2026-12-01); rotate holders to that agent's `jak_` key.
+          The `sak_…` service-account-key form is retired the same way
+          (theme-8): a migrated value authenticates as its successor agent
+          until its deprecation window closes.
+        - **Self-contained JWTs** — verified by signature (a dev HS256 shared
+          secret or a configured trusted issuer with JWKS rotation). The Broker
+          is identity-provider-agnostic: the IdP, federation strategy, and
+          token-issuance flow are deployment concerns outside this spec.
+
+        Every protected operation requires the `capabilities:execute` scope,
+        whatever the credential format. Authorization beyond "may execute"
+        (agent-credential bindings, permission rules, revision pinning) is
+        enforced per-request and is not modelled here.
