@@ -6,8 +6,9 @@ name: Rebuild indexes
 # (which sees ALL merged changes) actually executes — no wasted compute.
 #
 # Because main requires a PR to merge, the workflow creates a temporary branch,
-# opens a PR, and auto-merges it. Merges performed via GITHUB_TOKEN do not
-# trigger further workflow runs, so there is no infinite-loop risk.
+# opens a PR, and merges it with the GitHub App token. App-token merges do
+# trigger further push runs; the job-level `github.actor` check skips runs
+# started by the automation bot, which is what prevents an infinite loop.
 
 on:
   push:
@@ -102,6 +103,17 @@ jobs:
             exit 1
           fi
           
+          # Close rebuild PRs left open by earlier runs (e.g. a run cancelled by a
+          # newer push mid-merge). This run rebuilt from current main, so they are
+          # superseded either way, and leaving them open would conflict with ours.
+          gh pr list --state open --limit 200 --json number,headRefName \
+            --jq '.[] | select(.headRefName | startswith("auto/rebuild-indexes-")) | .number' |
+            while read -r OLD_PR; do
+              echo "Closing superseded rebuild PR #$OLD_PR"
+              gh pr close "$OLD_PR" --delete-branch \
+                --comment "Superseded by a newer rebuild of current \`main\`." || true
+            done
+
           # Exit early if nothing actually changed (idempotent rebuild).
           if git diff --cached --quiet; then
             echo "Index files are already up to date — nothing to commit."
@@ -123,6 +135,22 @@ jobs:
 
           echo "Created PR: $PR_URL"
 
-          gh pr merge "$PR_URL" --squash --auto --delete-branch
+          # Retry a direct merge until it lands. With no required checks the PR
+          # becomes mergeable within seconds; `--auto` isn't needed and is
+          # rejected once the PR is clean ("Pull request is in clean status").
+          # Never leave this run's PR open: if it hasn't merged within 3 minutes,
+          # close it and fail so the run shows red. The next run rebuilds from main.
+          for _ in $(seq 1 18); do
+            STATE="$(gh pr view "$PR_URL" --json state --jq .state || true)"
+            case "$STATE" in
+              MERGED) echo "Merged $PR_URL"; exit 0 ;;
+              CLOSED) break ;;
+            esac
+            gh pr merge "$PR_URL" --squash --delete-branch || true
+            sleep 10
+          done
 
-          echo "Auto-merge enabled on $PR_URL"
+          echo "::error::$PR_URL did not merge; closing it"
+          gh pr close "$PR_URL" --delete-branch \
+            --comment "Closed by the rebuild workflow: the PR did not merge. The next rebuild will regenerate these indexes from \`main\`."
+          exit 1
