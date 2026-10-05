@@ -1,6 +1,6 @@
 # APIs — R
 
-Browsing 240 APIs starting with **R**.
+Browsing 241 APIs starting with **R**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · **R** · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -208,6 +208,7 @@ Browsing 240 APIs starting with **R**.
 | [rook-connect.com](../../../../apis/openapi/rook-connect.com) | [main](../../../../apis/openapi/rook-connect.com/main) |
 | [roomkeypms.com](../../../../apis/openapi/roomkeypms.com) | [main](../../../../apis/openapi/roomkeypms.com/main) |
 | [roor.app](../../../../apis/openapi/roor.app) | [main](../../../../apis/openapi/roor.app/main) |
+| [roote.ai](../../../../apis/openapi/roote.ai) | [main](../../../../apis/openapi/roote.ai/main) |
 | [rootly.com](../../../../apis/openapi/rootly.com) | [main](../../../../apis/openapi/rootly.com/main) |
 | [rootplatform.com](../../../../apis/openapi/rootplatform.com) | [main](../../../../apis/openapi/rootplatform.com/main) |
 | [roserocket.com](../../../../apis/openapi/roserocket.com) | [main](../../../../apis/openapi/roserocket.com/main) |
