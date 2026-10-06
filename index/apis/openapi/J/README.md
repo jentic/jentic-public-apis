@@ -13,7 +13,7 @@ Browsing 35 APIs starting with **J**.
 | [jazzhr.com](../../../../apis/openapi/jazzhr.com) | [main](../../../../apis/openapi/jazzhr.com/main) |
 | [jcdecaux.com](../../../../apis/openapi/jcdecaux.com) | [main](../../../../apis/openapi/jcdecaux.com/main) |
 | [jellyfin.local](../../../../apis/openapi/jellyfin.local) | [main](../../../../apis/openapi/jellyfin.local/main) |
-| [jentic.com](../../../../apis/openapi/jentic.com) | [main](../../../../apis/openapi/jentic.com/main) |
+| [jentic.com](../../../../apis/openapi/jentic.com) | [jentic-one-broker](../../../../apis/openapi/jentic.com/jentic-one-broker) |
 | [jetbrains.com](../../../../apis/openapi/jetbrains.com) | [main](../../../../apis/openapi/jetbrains.com/main) |
 | [jibble.io](../../../../apis/openapi/jibble.io) | [main](../../../../apis/openapi/jibble.io/main) |
 | [jina.ai](../../../../apis/openapi/jina.ai) | [jina-ai](../../../../apis/openapi/jina.ai/jina-ai) |
