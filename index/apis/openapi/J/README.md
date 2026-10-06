@@ -1,6 +1,6 @@
 # APIs — J
 
-Browsing 35 APIs starting with **J**.
+Browsing 34 APIs starting with **J**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · **J** · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -13,7 +13,6 @@ Browsing 35 APIs starting with **J**.
 | [jazzhr.com](../../../../apis/openapi/jazzhr.com) | [main](../../../../apis/openapi/jazzhr.com/main) |
 | [jcdecaux.com](../../../../apis/openapi/jcdecaux.com) | [main](../../../../apis/openapi/jcdecaux.com/main) |
 | [jellyfin.local](../../../../apis/openapi/jellyfin.local) | [main](../../../../apis/openapi/jellyfin.local/main) |
-| [jentic.com](../../../../apis/openapi/jentic.com) | [main](../../../../apis/openapi/jentic.com/main) |
 | [jetbrains.com](../../../../apis/openapi/jetbrains.com) | [main](../../../../apis/openapi/jetbrains.com/main) |
 | [jibble.io](../../../../apis/openapi/jibble.io) | [main](../../../../apis/openapi/jibble.io/main) |
 | [jina.ai](../../../../apis/openapi/jina.ai) | [jina-ai](../../../../apis/openapi/jina.ai/jina-ai) |
