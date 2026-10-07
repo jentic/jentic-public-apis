@@ -247,13 +247,72 @@ jobs:
       - name: Install jentic-apitools-cli
         run: pip install --quiet jentic-apitools-cli
 
+      - name: Fetch import spec
+        id: fetch_spec
+        env:
+          # Untrusted: originates from the issue body. Quote it; never interpolate into run:.
+          IMPORT_URL: ${{ steps.extract_info.outputs.import_oas_url }}
+          # Read-only use only. The jentic staging repo is private and is NOT served by
+          # raw.githubusercontent.com, so the CLI's anonymous fetch 404s against it. We
+          # download the spec here with a token and hand the CLI a local file instead.
+          STAGING_TOKEN: ${{ secrets.STAGING_REPO_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          # The ONLY private source permitted is the jentic staging repo. The token is
+          # sent exclusively to api.github.com for that repo and to no other host; every
+          # other source must be a public GitHub repo or a public host and is fetched
+          # anonymously so the token can never leak to a third party.
+          STAGING_OWNER="jentic"
+          STAGING_REPO="jentic-public-apis-staging"
+
+          LOCAL_SPEC="$RUNNER_TEMP/import-spec"
+
+          if [[ "$IMPORT_URL" =~ ^https://raw\.githubusercontent\.com/([^/]+)/([^/]+)/(refs/heads/)?([^/]+)/(.+)$ ]]; then
+            OWNER="${BASH_REMATCH[1]}"; REPO="${BASH_REMATCH[2]}"
+            REF="${BASH_REMATCH[4]}";  FPATH="${BASH_REMATCH[5]}"
+
+            if [ "$OWNER" = "$STAGING_OWNER" ] && [ "$REPO" = "$STAGING_REPO" ]; then
+              # Private staging repo: authenticated API fetch; token stays with api.github.com.
+              echo "Fetching from private staging repo via authenticated GitHub API."
+              HTTP_CODE=$(curl -sS -w '%{http_code}' -o "$LOCAL_SPEC" \
+                -H "Authorization: Bearer ${STAGING_TOKEN}" \
+                -H "Accept: application/vnd.github.raw+json" \
+                -H "X-GitHub-Api-Version: 2022-11-28" \
+                "https://api.github.com/repos/${OWNER}/${REPO}/contents/${FPATH}?ref=${REF}")
+            else
+              # Any other GitHub repo must be public: fetch WITHOUT the token.
+              echo "Fetching from public GitHub repo (no token)."
+              HTTP_CODE=$(curl -sSL -w '%{http_code}' -o "$LOCAL_SPEC" "$IMPORT_URL")
+            fi
+          else
+            # Non-GitHub host: must be a public URL. Never send the token.
+            echo "Fetching from public host (no token)."
+            HTTP_CODE=$(curl -sSL -w '%{http_code}' -o "$LOCAL_SPEC" "$IMPORT_URL")
+          fi
+
+          if [ "$HTTP_CODE" != "200" ]; then
+            echo "::error::Failed to fetch import spec (HTTP $HTTP_CODE). The URL may be invalid, inaccessible, or (for the staging repo) the STAGING_REPO_TOKEN may lack contents:read."
+            exit 1
+          fi
+          if [ ! -s "$LOCAL_SPEC" ]; then
+            echo "::error::Fetched import spec is empty."
+            exit 1
+          fi
+
+          echo "Fetched spec ($(stat -c%s "$LOCAL_SPEC") bytes) to $LOCAL_SPEC"
+          echo "local_spec_path=$LOCAL_SPEC" >> "$GITHUB_OUTPUT"
+
       - name: Run Apitools Import CLI and Produce ZIP
         id: call_apitools
         env:
           # Untrusted inputs (label/URL originate from the issue body) are passed
           # via env and quoted in the script — never interpolated into run: directly.
           LABEL: ${{ steps.extract_info.outputs.apitools_label }}
+          # IMPORT_URL is kept for provenance (--canonical-source-url) and logging only;
+          # the spec itself is imported from the local file fetched in the previous step.
           IMPORT_URL: ${{ steps.extract_info.outputs.import_oas_url }}
+          LOCAL_SPEC_PATH: ${{ steps.fetch_spec.outputs.local_spec_path }}
           REJECT_INVALID_SERVER_URLS: ${{ steps.extract_info.outputs.reject_invalid_server_urls }}
           REJECT_INVALID_SECURITY: ${{ steps.extract_info.outputs.reject_invalid_security }}
           GITHUB_REPOSITORY_SLUG: ${{ github.repository }}
@@ -296,7 +355,7 @@ jobs:
           set +e
           CLI_STDOUT_FILE=$(mktemp)
           CLI_STDERR_FILE=$(mktemp)
-          jentic-apitools import "$IMPORT_URL" \
+          jentic-apitools import "$LOCAL_SPEC_PATH" \
             --archive "$OUTPUT_ZIP" \
             --label "$LABEL" \
             --skip-bundle \
