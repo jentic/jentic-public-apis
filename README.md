@@ -38,81 +38,123 @@ The repository focuses on:
 4. Evaluations and scorecards to measure API knowledge completeness, accuracy and AI-readiness
 5. RFCs for extensions to open formats used in the repository, and any other proposals.
 
-## Popular APIs
+## Explore the API Directory
 
-A sample of widely-used APIs in the directory. Each has a machine-readable OpenAPI spec in this repository and a human-readable, AI-readiness–scored page on [jentic.com/apis](https://jentic.com/apis). Browse the [full API Directory](https://jentic.com/apis) for 10,000+ more.
+[![Browse the API Directory](https://img.shields.io/badge/🔎_Browse_the_full_API_Directory-jentic.com%2Fapis-6C47FF?style=for-the-badge)](https://jentic.com/apis)
 
-| API | Category | OpenAPI spec (this repo) | API page on jentic.com |
-|-----|----------|--------------------------|-------------------------|
-| Stripe | Payments | [spec](apis/openapi/stripe.com/stripe/2026-03-25.dahlia/openapi.json) | [jentic.com/apis/stripe.com/stripe](https://jentic.com/apis/stripe.com/stripe) |
-| OpenAI | AI/ML | [spec](apis/openapi/openai.com/main/2.3.0/openapi.json) | [jentic.com/apis/openai.com/main](https://jentic.com/apis/openai.com/main) |
-| Anthropic (Messages) | AI/ML | [spec](apis/openapi/anthropic.com/messages/1.0.0/openapi.json) | [jentic.com/apis/anthropic.com/messages](https://jentic.com/apis/anthropic.com/messages) |
-| GitHub REST | Developer Tools | [spec](apis/openapi/api.github.com/main/1.1.4/openapi.json) | [jentic.com/apis/api.github.com/main](https://jentic.com/apis/api.github.com/main) |
-| Slack Web API | Communications | [spec](apis/openapi/slack.com/main/1.7.0/openapi.json) | [jentic.com/apis/slack.com/main](https://jentic.com/apis/slack.com/main) |
-| Gmail | Productivity | [spec](apis/openapi/googleapis.com/gmail/v1/openapi.json) | [jentic.com/apis/googleapis.com/gmail](https://jentic.com/apis/googleapis.com/gmail) |
-| Notion | Productivity | [spec](apis/openapi/notion.com/notion-api/2026-03-11/openapi.json) | [jentic.com/apis/notion.com/notion-api](https://jentic.com/apis/notion.com/notion-api) |
-| Shopify Admin | E-Commerce | [spec](apis/openapi/shopify.com/main/2025-01/openapi.json) | [jentic.com/apis/shopify.com/main](https://jentic.com/apis/shopify.com/main) |
-| Plaid | Finance | [spec](apis/openapi/plaid.com/main/2020-09-14_1.631.0/openapi.json) | [jentic.com/apis/plaid.com/main](https://jentic.com/apis/plaid.com/main) |
-| Discord | Communications | [spec](apis/openapi/discord.com/main/10/openapi.json) | [jentic.com/apis/discord.com/main](https://jentic.com/apis/discord.com/main) |
-| Linear | Developer Tools | [spec](apis/openapi/linear.app/main/1.0/openapi.json) | [jentic.com/apis/linear.app/main](https://jentic.com/apis/linear.app/main) |
+[![Categories](https://img.shields.io/badge/categories-22-6C47FF?style=flat-square)](https://jentic.com/apis)
+[![AI-Readiness scored](https://img.shields.io/badge/AI--readiness-scored-40c463?style=flat-square)](https://github.com/jentic/jentic-api-scorecard)
+[![OpenAPI](https://img.shields.io/badge/format-OpenAPI_%2B_Arazzo-85EA2D?style=flat-square&logo=openapiinitiative&logoColor=black)](https://www.openapis.org/)
+[![License: CC0-1.0](https://img.shields.io/badge/license-CC0_1.0-blue?style=flat-square)](LICENSE.md)
+[![Discord](https://img.shields.io/badge/Discord-community-7289DA?style=flat-square&logo=discord&logoColor=white)](https://discord.gg/yrxmDZWMqB)
 
-## Browse APIs by category
+Every API has a machine-readable **OpenAPI spec** in this repository and a human-readable, **AI-readiness–scored** page on [jentic.com/apis](https://jentic.com/apis).
 
-The directory is organized into categories. Below is a small sample from a few of them — follow the **View all** link for every API in that category on [jentic.com/apis](https://jentic.com/apis).
+### Popular APIs
 
-### Payments & Finance
+| API | Category | OpenAPI spec | jentic.com page |
+|-----|----------|:------------:|-----------------|
+| <img src="https://www.google.com/s2/favicons?domain=stripe.com&sz=32" width="16" height="16" align="top" /> **Stripe** | Payments | [📄 spec](apis/openapi/stripe.com/stripe/2026-03-25.dahlia/openapi.json) | [🔗 stripe.com/stripe](https://jentic.com/apis/stripe.com/stripe) |
+| <img src="https://www.google.com/s2/favicons?domain=openai.com&sz=32" width="16" height="16" align="top" /> **OpenAI** | AI/ML | [📄 spec](apis/openapi/openai.com/main/2.3.0/openapi.json) | [🔗 openai.com/main](https://jentic.com/apis/openai.com/main) |
+| <img src="https://www.google.com/s2/favicons?domain=anthropic.com&sz=32" width="16" height="16" align="top" /> **Anthropic** (Messages) | AI/ML | [📄 spec](apis/openapi/anthropic.com/messages/1.0.0/openapi.json) | [🔗 anthropic.com/messages](https://jentic.com/apis/anthropic.com/messages) |
+| <img src="https://www.google.com/s2/favicons?domain=github.com&sz=32" width="16" height="16" align="top" /> **GitHub** REST | Developer Tools | [📄 spec](apis/openapi/api.github.com/main/1.1.4/openapi.json) | [🔗 api.github.com/main](https://jentic.com/apis/api.github.com/main) |
+| <img src="https://www.google.com/s2/favicons?domain=slack.com&sz=32" width="16" height="16" align="top" /> **Slack** Web API | Communications | [📄 spec](apis/openapi/slack.com/main/1.7.0/openapi.json) | [🔗 slack.com/main](https://jentic.com/apis/slack.com/main) |
+| <img src="https://www.google.com/s2/favicons?domain=google.com&sz=32" width="16" height="16" align="top" /> **Gmail** | Productivity | [📄 spec](apis/openapi/googleapis.com/gmail/v1/openapi.json) | [🔗 googleapis.com/gmail](https://jentic.com/apis/googleapis.com/gmail) |
+| <img src="https://www.google.com/s2/favicons?domain=notion.so&sz=32" width="16" height="16" align="top" /> **Notion** | Productivity | [📄 spec](apis/openapi/notion.com/notion-api/2026-03-11/openapi.json) | [🔗 notion.com/notion-api](https://jentic.com/apis/notion.com/notion-api) |
+| <img src="https://www.google.com/s2/favicons?domain=shopify.com&sz=32" width="16" height="16" align="top" /> **Shopify** Admin | E-Commerce | [📄 spec](apis/openapi/shopify.com/main/2025-01/openapi.json) | [🔗 shopify.com/main](https://jentic.com/apis/shopify.com/main) |
+| <img src="https://www.google.com/s2/favicons?domain=plaid.com&sz=32" width="16" height="16" align="top" /> **Plaid** | Finance | [📄 spec](apis/openapi/plaid.com/main/2020-09-14_1.631.0/openapi.json) | [🔗 plaid.com/main](https://jentic.com/apis/plaid.com/main) |
+| <img src="https://www.google.com/s2/favicons?domain=discord.com&sz=32" width="16" height="16" align="top" /> **Discord** | Communications | [📄 spec](apis/openapi/discord.com/main/10/openapi.json) | [🔗 discord.com/main](https://jentic.com/apis/discord.com/main) |
+| <img src="https://www.google.com/s2/favicons?domain=linear.app&sz=32" width="16" height="16" align="top" /> **Linear** | Developer Tools | [📄 spec](apis/openapi/linear.app/main/1.0/openapi.json) | [🔗 linear.app/main](https://jentic.com/apis/linear.app/main) |
 
-| API | OpenAPI spec | jentic.com page |
-|-----|--------------|-----------------|
-| Stripe | [spec](apis/openapi/stripe.com/stripe/2026-03-25.dahlia/openapi.json) | [page](https://jentic.com/apis/stripe.com/stripe) |
-| Plaid | [spec](apis/openapi/plaid.com/main/2020-09-14_1.631.0/openapi.json) | [page](https://jentic.com/apis/plaid.com/main) |
-| Xero Accounting | [spec](apis/openapi/xero.com/xero_accounting/7.0.0/openapi.json) | [page](https://jentic.com/apis/xero.com/xero_accounting) |
+### Browse by category
 
-➡️ View all in [Payments](https://jentic.com/apis?category=payments) and [Finance](https://jentic.com/apis?category=finance).
+The directory is organized into 22 categories. Below is a small sample from a few — expand a section, then follow **View all** for every API in that category on [jentic.com/apis](https://jentic.com/apis).
 
-### AI/ML
-
-| API | OpenAPI spec | jentic.com page |
-|-----|--------------|-----------------|
-| OpenAI | [spec](apis/openapi/openai.com/main/2.3.0/openapi.json) | [page](https://jentic.com/apis/openai.com/main) |
-| Anthropic (Messages) | [spec](apis/openapi/anthropic.com/messages/1.0.0/openapi.json) | [page](https://jentic.com/apis/anthropic.com/messages) |
-
-➡️ View all in [AI/ML](https://jentic.com/apis?category=ai-ml).
-
-### Developer Tools
+<details>
+<summary><b>🛠️ Developer Tools</b></summary>
 
 | API | OpenAPI spec | jentic.com page |
-|-----|--------------|-----------------|
-| GitHub REST | [spec](apis/openapi/api.github.com/main/1.1.4/openapi.json) | [page](https://jentic.com/apis/api.github.com/main) |
-| Linear | [spec](apis/openapi/linear.app/main/1.0/openapi.json) | [page](https://jentic.com/apis/linear.app/main) |
-| Cloudflare | [spec](apis/openapi/cloudflare.com/main/4.0.0/openapi.json) | [page](https://jentic.com/apis/cloudflare.com/main) |
-| DigitalOcean | [spec](apis/openapi/digitalocean.com/main/2.0/openapi.json) | [page](https://jentic.com/apis/digitalocean.com/main) |
+|-----|:------------:|-----------------|
+| <img src="https://www.google.com/s2/favicons?domain=github.com&sz=32" width="16" height="16" align="top" /> **GitHub** REST | [📄 spec](apis/openapi/api.github.com/main/1.1.4/openapi.json) | [🔗 page](https://jentic.com/apis/api.github.com/main) |
+| <img src="https://www.google.com/s2/favicons?domain=linear.app&sz=32" width="16" height="16" align="top" /> **Linear** | [📄 spec](apis/openapi/linear.app/main/1.0/openapi.json) | [🔗 page](https://jentic.com/apis/linear.app/main) |
+| <img src="https://www.google.com/s2/favicons?domain=cloudflare.com&sz=32" width="16" height="16" align="top" /> **Cloudflare** | [📄 spec](apis/openapi/cloudflare.com/main/4.0.0/openapi.json) | [🔗 page](https://jentic.com/apis/cloudflare.com/main) |
+| <img src="https://www.google.com/s2/favicons?domain=digitalocean.com&sz=32" width="16" height="16" align="top" /> **DigitalOcean** | [📄 spec](apis/openapi/digitalocean.com/main/2.0/openapi.json) | [🔗 page](https://jentic.com/apis/digitalocean.com/main) |
 
-➡️ View all in [Developer Tools](https://jentic.com/apis?category=developer-tools).
+➡️ **[View all Developer Tools APIs →](https://jentic.com/apis?category=developer-tools)**
 
-### Communications
+</details>
 
-| API | OpenAPI spec | jentic.com page |
-|-----|--------------|-----------------|
-| Slack Web API | [spec](apis/openapi/slack.com/main/1.7.0/openapi.json) | [page](https://jentic.com/apis/slack.com/main) |
-| Discord | [spec](apis/openapi/discord.com/main/10/openapi.json) | [page](https://jentic.com/apis/discord.com/main) |
-| Twilio Messaging | [spec](apis/openapi/twilio.com/twilio_messaging_v1/1.0.0/openapi.json) | [page](https://jentic.com/apis/twilio.com/twilio_messaging_v1) |
-| SendGrid Mail | [spec](apis/openapi/sendgrid.com/mail/1.0.0/openapi.json) | [page](https://jentic.com/apis/sendgrid.com/mail) |
-
-➡️ View all in [Communications](https://jentic.com/apis?category=communications).
-
-### Productivity
+<details>
+<summary><b>🤖 AI/ML</b></summary>
 
 | API | OpenAPI spec | jentic.com page |
-|-----|--------------|-----------------|
-| Gmail | [spec](apis/openapi/googleapis.com/gmail/v1/openapi.json) | [page](https://jentic.com/apis/googleapis.com/gmail) |
-| Google Calendar | [spec](apis/openapi/googleapis.com/calendar/v3/openapi.json) | [page](https://jentic.com/apis/googleapis.com/calendar) |
-| Google Sheets | [spec](apis/openapi/googleapis.com/sheets/v4/openapi.json) | [page](https://jentic.com/apis/googleapis.com/sheets) |
-| Notion | [spec](apis/openapi/notion.com/notion-api/2026-03-11/openapi.json) | [page](https://jentic.com/apis/notion.com/notion-api) |
+|-----|:------------:|-----------------|
+| <img src="https://www.google.com/s2/favicons?domain=openai.com&sz=32" width="16" height="16" align="top" /> **OpenAI** | [📄 spec](apis/openapi/openai.com/main/2.3.0/openapi.json) | [🔗 page](https://jentic.com/apis/openai.com/main) |
+| <img src="https://www.google.com/s2/favicons?domain=anthropic.com&sz=32" width="16" height="16" align="top" /> **Anthropic** (Messages) | [📄 spec](apis/openapi/anthropic.com/messages/1.0.0/openapi.json) | [🔗 page](https://jentic.com/apis/anthropic.com/messages) |
 
-➡️ View all in [Productivity](https://jentic.com/apis?category=productivity).
+➡️ **[View all AI/ML APIs →](https://jentic.com/apis?category=ai-ml)**
 
-> Looking for something else? Search the complete catalog of **10,000+ APIs** at **[jentic.com/apis](https://jentic.com/apis)**, or jump into the raw specs via the [Quick access API Index](#jentic-public-apis) above.
+</details>
+
+<details>
+<summary><b>💳 Payments &amp; Finance</b></summary>
+
+| API | OpenAPI spec | jentic.com page |
+|-----|:------------:|-----------------|
+| <img src="https://www.google.com/s2/favicons?domain=stripe.com&sz=32" width="16" height="16" align="top" /> **Stripe** | [📄 spec](apis/openapi/stripe.com/stripe/2026-03-25.dahlia/openapi.json) | [🔗 page](https://jentic.com/apis/stripe.com/stripe) |
+| <img src="https://www.google.com/s2/favicons?domain=plaid.com&sz=32" width="16" height="16" align="top" /> **Plaid** | [📄 spec](apis/openapi/plaid.com/main/2020-09-14_1.631.0/openapi.json) | [🔗 page](https://jentic.com/apis/plaid.com/main) |
+| <img src="https://www.google.com/s2/favicons?domain=xero.com&sz=32" width="16" height="16" align="top" /> **Xero** Accounting | [📄 spec](apis/openapi/xero.com/xero_accounting/7.0.0/openapi.json) | [🔗 page](https://jentic.com/apis/xero.com/xero_accounting) |
+
+➡️ **[View all Payments](https://jentic.com/apis?category=payments)** · **[Finance APIs →](https://jentic.com/apis?category=finance)**
+
+</details>
+
+<details>
+<summary><b>💬 Communications</b></summary>
+
+| API | OpenAPI spec | jentic.com page |
+|-----|:------------:|-----------------|
+| <img src="https://www.google.com/s2/favicons?domain=slack.com&sz=32" width="16" height="16" align="top" /> **Slack** Web API | [📄 spec](apis/openapi/slack.com/main/1.7.0/openapi.json) | [🔗 page](https://jentic.com/apis/slack.com/main) |
+| <img src="https://www.google.com/s2/favicons?domain=discord.com&sz=32" width="16" height="16" align="top" /> **Discord** | [📄 spec](apis/openapi/discord.com/main/10/openapi.json) | [🔗 page](https://jentic.com/apis/discord.com/main) |
+| <img src="https://www.google.com/s2/favicons?domain=twilio.com&sz=32" width="16" height="16" align="top" /> **Twilio** Messaging | [📄 spec](apis/openapi/twilio.com/twilio_messaging_v1/1.0.0/openapi.json) | [🔗 page](https://jentic.com/apis/twilio.com/twilio_messaging_v1) |
+| <img src="https://www.google.com/s2/favicons?domain=sendgrid.com&sz=32" width="16" height="16" align="top" /> **SendGrid** Mail | [📄 spec](apis/openapi/sendgrid.com/mail/1.0.0/openapi.json) | [🔗 page](https://jentic.com/apis/sendgrid.com/mail) |
+
+➡️ **[View all Communications APIs →](https://jentic.com/apis?category=communications)**
+
+</details>
+
+<details>
+<summary><b>📋 Productivity</b></summary>
+
+| API | OpenAPI spec | jentic.com page |
+|-----|:------------:|-----------------|
+| <img src="https://www.google.com/s2/favicons?domain=google.com&sz=32" width="16" height="16" align="top" /> **Gmail** | [📄 spec](apis/openapi/googleapis.com/gmail/v1/openapi.json) | [🔗 page](https://jentic.com/apis/googleapis.com/gmail) |
+| <img src="https://www.google.com/s2/favicons?domain=google.com&sz=32" width="16" height="16" align="top" /> **Google Calendar** | [📄 spec](apis/openapi/googleapis.com/calendar/v3/openapi.json) | [🔗 page](https://jentic.com/apis/googleapis.com/calendar) |
+| <img src="https://www.google.com/s2/favicons?domain=google.com&sz=32" width="16" height="16" align="top" /> **Google Sheets** | [📄 spec](apis/openapi/googleapis.com/sheets/v4/openapi.json) | [🔗 page](https://jentic.com/apis/googleapis.com/sheets) |
+| <img src="https://www.google.com/s2/favicons?domain=notion.so&sz=32" width="16" height="16" align="top" /> **Notion** | [📄 spec](apis/openapi/notion.com/notion-api/2026-03-11/openapi.json) | [🔗 page](https://jentic.com/apis/notion.com/notion-api) |
+
+➡️ **[View all Productivity APIs →](https://jentic.com/apis?category=productivity)**
+
+</details>
+
+### Fun &amp; niche APIs
+
+The directory goes well beyond the usual suspects — a taste of the long tail:
+
+| API | What it's for | OpenAPI spec | jentic.com page |
+|-----|---------------|:------------:|-----------------|
+| <img src="https://www.google.com/s2/favicons?domain=facecheck.id&sz=32" width="16" height="16" align="top" /> **FaceCheck.ID** | Reverse face search | [📄 spec](apis/openapi/facecheck.id/main/v1.02/openapi.json) | [🔗 page](https://jentic.com/apis/facecheck.id/main) |
+| <img src="https://www.google.com/s2/favicons?domain=beatport.com&sz=32" width="16" height="16" align="top" /> **Beatport** | Electronic music catalog | [📄 spec](apis/openapi/beatport.com/main/4.0.0/openapi.json) | [🔗 page](https://jentic.com/apis/beatport.com/main) |
+| <img src="https://www.google.com/s2/favicons?domain=untappd.com&sz=32" width="16" height="16" align="top" /> **Untappd** | Beer check-ins &amp; ratings | [📄 spec](apis/openapi/untappd.com/main/4.0.0/openapi.json) | [🔗 page](https://jentic.com/apis/untappd.com/main) |
+| <img src="https://www.google.com/s2/favicons?domain=pokeapi.co&sz=32" width="16" height="16" align="top" /> **PokéAPI** | Pokémon data | [📄 spec](apis/openapi/pokeapi.co/main/2.7.0/openapi.json) | [🔗 page](https://jentic.com/apis/pokeapi.co/main) |
+| <img src="https://www.google.com/s2/favicons?domain=nasa.gov&sz=32" width="16" height="16" align="top" /> **NASA APOD** | Astronomy Picture of the Day | [📄 spec](apis/openapi/nasa.gov/apod/1.0.0/openapi.json) | [🔗 page](https://jentic.com/apis/nasa.gov/apod) |
+| <img src="https://www.google.com/s2/favicons?domain=musicbrainz.org&sz=32" width="16" height="16" align="top" /> **MusicBrainz** | Open music metadata | [📄 spec](apis/openapi/musicbrainz.org/main/2.0/openapi.json) | [🔗 page](https://jentic.com/apis/musicbrainz.org/main) |
+| <img src="https://www.google.com/s2/favicons?domain=openbrewerydb.org&sz=32" width="16" height="16" align="top" /> **Open Brewery DB** | Brewery directory | [📄 spec](apis/openapi/openbrewerydb.org/main/1.0/openapi.json) | [🔗 page](https://jentic.com/apis/openbrewerydb.org/main) |
+| <img src="https://www.google.com/s2/favicons?domain=tvmaze.com&sz=32" width="16" height="16" align="top" /> **TVmaze** | TV show schedules &amp; data | [📄 spec](apis/openapi/tvmaze.com/main/1.0/openapi.json) | [🔗 page](https://jentic.com/apis/tvmaze.com/main) |
+| <img src="https://www.google.com/s2/favicons?domain=chess.com&sz=32" width="16" height="16" align="top" /> **Chess.com** | Players, games &amp; stats | [📄 spec](apis/openapi/chess.com/main/1.0.0/openapi.json) | [🔗 page](https://jentic.com/apis/chess.com/main) |
+| <img src="https://www.google.com/s2/favicons?domain=lichess.org&sz=32" width="16" height="16" align="top" /> **Lichess** | Open chess platform | [📄 spec](apis/openapi/lichess.org/main/2.0.130/openapi.json) | [🔗 page](https://jentic.com/apis/lichess.org/main) |
+
+> Looking for something else? Search the **[full API Directory →](https://jentic.com/apis)**, or jump into the raw specs via the [Quick access API Index](#jentic-public-apis) above.
 
 ## Project Stage
 
