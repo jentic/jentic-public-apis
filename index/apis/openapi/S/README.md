@@ -1,6 +1,6 @@
 # APIs — S
 
-Browsing 687 APIs starting with **S**.
+Browsing 688 APIs starting with **S**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · **S** · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -395,6 +395,7 @@ Browsing 687 APIs starting with **S**.
 | [stellastra.com](../../../../apis/openapi/stellastra.com) | [main](../../../../apis/openapi/stellastra.com/main) · [stellastra](../../../../apis/openapi/stellastra.com/stellastra) · [stellastra-api](../../../../apis/openapi/stellastra.com/stellastra-api) |
 | [stitchdata.com](../../../../apis/openapi/stitchdata.com) | [stitch-data-api](../../../../apis/openapi/stitchdata.com/stitch-data-api) |
 | [stlouisfed.org](../../../../apis/openapi/stlouisfed.org) | [fred-api](../../../../apis/openapi/stlouisfed.org/fred-api) |
+| [stockfit.io](../../../../apis/openapi/stockfit.io) | [main](../../../../apis/openapi/stockfit.io/main) |
 | [stocktwits.com](../../../../apis/openapi/stocktwits.com) | [main](../../../../apis/openapi/stocktwits.com/main) |
 | [stoplight.io](../../../../apis/openapi/stoplight.io) | [main](../../../../apis/openapi/stoplight.io/main) · [stoplight](../../../../apis/openapi/stoplight.io/stoplight) |
 | [storecove.com](../../../../apis/openapi/storecove.com) | [main](../../../../apis/openapi/storecove.com/main) |
