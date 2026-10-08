@@ -1,6 +1,6 @@
 # APIs — W
 
-Browsing 78 APIs starting with **W**.
+Browsing 79 APIs starting with **W**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · **W** · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -48,6 +48,7 @@ Browsing 78 APIs starting with **W**.
 | [whatsapp.local](../../../../apis/openapi/whatsapp.local) | [main](../../../../apis/openapi/whatsapp.local/main) |
 | [whereby.com](../../../../apis/openapi/whereby.com) | [main](../../../../apis/openapi/whereby.com/main) |
 | [wheretocredit.com](../../../../apis/openapi/wheretocredit.com) | [main](../../../../apis/openapi/wheretocredit.com/main) |
+| [whichtrim.com](../../../../apis/openapi/whichtrim.com) | [main](../../../../apis/openapi/whichtrim.com/main) |
 | [whmcs.com](../../../../apis/openapi/whmcs.com) | [main](../../../../apis/openapi/whmcs.com/main) |
 | [who-hosts-this.com](../../../../apis/openapi/who-hosts-this.com) | [main](../../../../apis/openapi/who-hosts-this.com/main) |
 | [whoisxmlapi.com](../../../../apis/openapi/whoisxmlapi.com) | [main](../../../../apis/openapi/whoisxmlapi.com/main) |
