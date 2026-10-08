@@ -18,7 +18,7 @@
 [![License: CC0-1.0](https://img.shields.io/badge/license-CC0_1.0-blue?style=flat-square)](LICENSE.md)
 [![Contributor Covenant](https://img.shields.io/badge/Contributor%20Covenant-3.0-40c463?style=flat-square)](CODE_OF_CONDUCT.md)
 
-Every API has a machine-readable **OpenAPI spec** in this repository and a human-readable, **AI-readiness–scored** page on [jentic.com/apis](https://jentic.com/apis).
+Every API has a machine-readable **OpenAPI spec** in this repository, most carry an **AI-readiness score** right alongside it (a `scorecard.json` next to the spec — see [AI-Readiness Scoring](#ai-readiness-scoring) below), and each also has a human-readable page on [jentic.com/apis](https://jentic.com/apis).
 
 ### Popular APIs
 
