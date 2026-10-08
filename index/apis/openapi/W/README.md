@@ -1,6 +1,6 @@
 # APIs — W
 
-Browsing 77 APIs starting with **W**.
+Browsing 78 APIs starting with **W**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · **W** · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -24,6 +24,7 @@ Browsing 77 APIs starting with **W**.
 | [wealthapi.eu](../../../../apis/openapi/wealthapi.eu) | [main](../../../../apis/openapi/wealthapi.eu/main) |
 | [wealthos.com](../../../../apis/openapi/wealthos.com) | [main](../../../../apis/openapi/wealthos.com/main) |
 | [wealthreader.com](../../../../apis/openapi/wealthreader.com) | [main](../../../../apis/openapi/wealthreader.com/main) |
+| [weather.gov](../../../../apis/openapi/weather.gov) | [main](../../../../apis/openapi/weather.gov/main) |
 | [weatherapi.com](../../../../apis/openapi/weatherapi.com) | [main](../../../../apis/openapi/weatherapi.com/main) |
 | [weatherbit.io](../../../../apis/openapi/weatherbit.io) | [weatherbit](../../../../apis/openapi/weatherbit.io/weatherbit) |
 | [weavy.com](../../../../apis/openapi/weavy.com) | [main](../../../../apis/openapi/weavy.com/main) |
