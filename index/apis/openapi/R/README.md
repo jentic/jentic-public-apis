@@ -1,6 +1,6 @@
 # APIs — R
 
-Browsing 243 APIs starting with **R**.
+Browsing 244 APIs starting with **R**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · **R** · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -110,6 +110,7 @@ Browsing 243 APIs starting with **R**.
 | [remote.com](../../../../apis/openapi/remote.com) | [main](../../../../apis/openapi/remote.com/main) |
 | [remove.bg](../../../../apis/openapi/remove.bg) | [main](../../../../apis/openapi/remove.bg/main) · [remove-bg-api](../../../../apis/openapi/remove.bg/remove-bg-api) |
 | [render.com](../../../../apis/openapi/render.com) | [main](../../../../apis/openapi/render.com/main) · [render-api](../../../../apis/openapi/render.com/render-api) |
+| [rendex.dev](../../../../apis/openapi/rendex.dev) | [main](../../../../apis/openapi/rendex.dev/main) |
 | [rendi.dev](../../../../apis/openapi/rendi.dev) | [main](../../../../apis/openapi/rendi.dev/main) |
 | [rentcast.io](../../../../apis/openapi/rentcast.io) | [main](../../../../apis/openapi/rentcast.io/main) |
 | [rentometer.com](../../../../apis/openapi/rentometer.com) | [main](../../../../apis/openapi/rentometer.com/main) |
