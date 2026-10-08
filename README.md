@@ -38,6 +38,82 @@ The repository focuses on:
 4. Evaluations and scorecards to measure API knowledge completeness, accuracy and AI-readiness
 5. RFCs for extensions to open formats used in the repository, and any other proposals.
 
+## Popular APIs
+
+A sample of widely-used APIs in the directory. Each has a machine-readable OpenAPI spec in this repository and a human-readable, AI-readiness–scored page on [jentic.com/apis](https://jentic.com/apis). Browse the [full API Directory](https://jentic.com/apis) for 10,000+ more.
+
+| API | Category | OpenAPI spec (this repo) | API page on jentic.com |
+|-----|----------|--------------------------|-------------------------|
+| Stripe | Payments | [spec](apis/openapi/stripe.com/stripe/2026-03-25.dahlia/openapi.json) | [jentic.com/apis/stripe.com/stripe](https://jentic.com/apis/stripe.com/stripe) |
+| OpenAI | AI/ML | [spec](apis/openapi/openai.com/main/2.3.0/openapi.json) | [jentic.com/apis/openai.com/main](https://jentic.com/apis/openai.com/main) |
+| Anthropic (Messages) | AI/ML | [spec](apis/openapi/anthropic.com/messages/1.0.0/openapi.json) | [jentic.com/apis/anthropic.com/messages](https://jentic.com/apis/anthropic.com/messages) |
+| GitHub REST | Developer Tools | [spec](apis/openapi/api.github.com/main/1.1.4/openapi.json) | [jentic.com/apis/api.github.com/main](https://jentic.com/apis/api.github.com/main) |
+| Slack Web API | Communications | [spec](apis/openapi/slack.com/main/1.7.0/openapi.json) | [jentic.com/apis/slack.com/main](https://jentic.com/apis/slack.com/main) |
+| Gmail | Productivity | [spec](apis/openapi/googleapis.com/gmail/v1/openapi.json) | [jentic.com/apis/googleapis.com/gmail](https://jentic.com/apis/googleapis.com/gmail) |
+| Notion | Productivity | [spec](apis/openapi/notion.com/notion-api/2026-03-11/openapi.json) | [jentic.com/apis/notion.com/notion-api](https://jentic.com/apis/notion.com/notion-api) |
+| Shopify Admin | E-Commerce | [spec](apis/openapi/shopify.com/main/2025-01/openapi.json) | [jentic.com/apis/shopify.com/main](https://jentic.com/apis/shopify.com/main) |
+| Plaid | Finance | [spec](apis/openapi/plaid.com/main/2020-09-14_1.631.0/openapi.json) | [jentic.com/apis/plaid.com/main](https://jentic.com/apis/plaid.com/main) |
+| Discord | Communications | [spec](apis/openapi/discord.com/main/10/openapi.json) | [jentic.com/apis/discord.com/main](https://jentic.com/apis/discord.com/main) |
+| Linear | Developer Tools | [spec](apis/openapi/linear.app/main/1.0/openapi.json) | [jentic.com/apis/linear.app/main](https://jentic.com/apis/linear.app/main) |
+
+## Browse APIs by category
+
+The directory is organized into categories. Below is a small sample from a few of them — follow the **View all** link for every API in that category on [jentic.com/apis](https://jentic.com/apis).
+
+### Payments & Finance
+
+| API | OpenAPI spec | jentic.com page |
+|-----|--------------|-----------------|
+| Stripe | [spec](apis/openapi/stripe.com/stripe/2026-03-25.dahlia/openapi.json) | [page](https://jentic.com/apis/stripe.com/stripe) |
+| Plaid | [spec](apis/openapi/plaid.com/main/2020-09-14_1.631.0/openapi.json) | [page](https://jentic.com/apis/plaid.com/main) |
+| Xero Accounting | [spec](apis/openapi/xero.com/xero_accounting/7.0.0/openapi.json) | [page](https://jentic.com/apis/xero.com/xero_accounting) |
+
+➡️ View all in [Payments](https://jentic.com/apis?category=payments) and [Finance](https://jentic.com/apis?category=finance).
+
+### AI/ML
+
+| API | OpenAPI spec | jentic.com page |
+|-----|--------------|-----------------|
+| OpenAI | [spec](apis/openapi/openai.com/main/2.3.0/openapi.json) | [page](https://jentic.com/apis/openai.com/main) |
+| Anthropic (Messages) | [spec](apis/openapi/anthropic.com/messages/1.0.0/openapi.json) | [page](https://jentic.com/apis/anthropic.com/messages) |
+
+➡️ View all in [AI/ML](https://jentic.com/apis?category=ai-ml).
+
+### Developer Tools
+
+| API | OpenAPI spec | jentic.com page |
+|-----|--------------|-----------------|
+| GitHub REST | [spec](apis/openapi/api.github.com/main/1.1.4/openapi.json) | [page](https://jentic.com/apis/api.github.com/main) |
+| Linear | [spec](apis/openapi/linear.app/main/1.0/openapi.json) | [page](https://jentic.com/apis/linear.app/main) |
+| Cloudflare | [spec](apis/openapi/cloudflare.com/main/4.0.0/openapi.json) | [page](https://jentic.com/apis/cloudflare.com/main) |
+| DigitalOcean | [spec](apis/openapi/digitalocean.com/main/2.0/openapi.json) | [page](https://jentic.com/apis/digitalocean.com/main) |
+
+➡️ View all in [Developer Tools](https://jentic.com/apis?category=developer-tools).
+
+### Communications
+
+| API | OpenAPI spec | jentic.com page |
+|-----|--------------|-----------------|
+| Slack Web API | [spec](apis/openapi/slack.com/main/1.7.0/openapi.json) | [page](https://jentic.com/apis/slack.com/main) |
+| Discord | [spec](apis/openapi/discord.com/main/10/openapi.json) | [page](https://jentic.com/apis/discord.com/main) |
+| Twilio Messaging | [spec](apis/openapi/twilio.com/twilio_messaging_v1/1.0.0/openapi.json) | [page](https://jentic.com/apis/twilio.com/twilio_messaging_v1) |
+| SendGrid Mail | [spec](apis/openapi/sendgrid.com/mail/1.0.0/openapi.json) | [page](https://jentic.com/apis/sendgrid.com/mail) |
+
+➡️ View all in [Communications](https://jentic.com/apis?category=communications).
+
+### Productivity
+
+| API | OpenAPI spec | jentic.com page |
+|-----|--------------|-----------------|
+| Gmail | [spec](apis/openapi/googleapis.com/gmail/v1/openapi.json) | [page](https://jentic.com/apis/googleapis.com/gmail) |
+| Google Calendar | [spec](apis/openapi/googleapis.com/calendar/v3/openapi.json) | [page](https://jentic.com/apis/googleapis.com/calendar) |
+| Google Sheets | [spec](apis/openapi/googleapis.com/sheets/v4/openapi.json) | [page](https://jentic.com/apis/googleapis.com/sheets) |
+| Notion | [spec](apis/openapi/notion.com/notion-api/2026-03-11/openapi.json) | [page](https://jentic.com/apis/notion.com/notion-api) |
+
+➡️ View all in [Productivity](https://jentic.com/apis?category=productivity).
+
+> Looking for something else? Search the complete catalog of **10,000+ APIs** at **[jentic.com/apis](https://jentic.com/apis)**, or jump into the raw specs via the [Quick access API Index](#jentic-public-apis) above.
+
 ## Project Stage
 
 > **Note:** This project is currently in ALPHA.
