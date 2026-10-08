@@ -18,7 +18,7 @@
 [![License: CC0-1.0](https://img.shields.io/badge/license-CC0_1.0-blue?style=flat-square)](LICENSE.md)
 [![Contributor Covenant](https://img.shields.io/badge/Contributor%20Covenant-3.0-40c463?style=flat-square)](CODE_OF_CONDUCT.md)
 
-Every API has a machine-readable **OpenAPI spec** in this repository, most carry an **AI-readiness score** right alongside it (a `scorecard.json` next to the spec — see [AI-Readiness Scoring](#ai-readiness-scoring) below), and each also has a human-readable page on [jentic.com/apis](https://jentic.com/apis).
+Every API has a machine-readable **OpenAPI spec** in this repository, most carry an **AI-readiness score** right alongside it (a `scorecard.json` next to the spec; see [AI-Readiness Scoring](#ai-readiness-scoring) below), and each also has a human-readable page on [jentic.com/apis](https://jentic.com/apis).
 
 ### Popular APIs
 
@@ -38,7 +38,7 @@ Every API has a machine-readable **OpenAPI spec** in this repository, most carry
 
 ### Browse by category
 
-The directory is organized into 22 categories. Below is a small sample from a few — expand a section, then follow **View all** for every API in that category on [jentic.com/apis](https://jentic.com/apis).
+The directory is organized into 22 categories. Below is a small sample from a few. Expand a section, then follow **View all** for every API in that category on [jentic.com/apis](https://jentic.com/apis).
 
 <details>
 <summary><b>🛠️ Developer Tools</b></summary>
@@ -109,7 +109,7 @@ The directory is organized into 22 categories. Below is a small sample from a fe
 
 ### Fun &amp; niche APIs
 
-The directory goes well beyond the usual suspects — a taste of the long tail:
+The directory goes well beyond the usual suspects. Here's a taste of the long tail:
 
 | API | What it's for | OpenAPI spec | jentic.com page |
 |-----|---------------|:------------:|-----------------|
@@ -177,7 +177,7 @@ For detailed information, please refer to the [structure documentation](STRUCTUR
 
 ## AI-Readiness Scoring
 
-OpenAPI documents in this repository can be scored for AI-readiness using the **Jentic API Scorecard CLI** — no signup, no API key, and no configuration needed.
+OpenAPI documents in this repository can be scored for AI-readiness using the **Jentic API Scorecard CLI**, with no signup, no API key, and no configuration needed.
 
 ### URL format
 
