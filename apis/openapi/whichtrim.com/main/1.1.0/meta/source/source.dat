@@ -1,0 +1,317 @@
+openapi: 3.0.3
+info:
+  title: WhichTrim Vehicle Data API
+  version: "1.1.0"
+  summary: Specs, recalls, complaints, crash ratings and Safety Signal grades for every U.S. vehicle model-year.
+  description: |
+    One record per nameplate-year for every car, truck and SUV sold in the U.S. (model years 2016–2027), joined from
+    public-domain federal sources and manufacturers' official press kits:
+
+    * **EPA** fueleconomy.gov certification records — every configuration, MPG/MPGe, range, charge time, motor, class
+    * **NHTSA** recall campaigns with severity, `park_outside` / `do_not_drive` flags and remedy text
+    * **NHTSA** owner-complaint aggregates (counts, crash/fire/injury tallies, top components, recent excerpts)
+    * **NHTSA** defect investigations and NCAP 5-Star crash ratings
+    * **Manufacturer press kits** — trims, MSRP, specifications and standard/optional equipment where published
+    * a **Safety Signal grade (A–F) and score** per model-year derived from the recall record
+
+    Identifiers: `<year>_<make>_<model>` (e.g. `2026_kia_sportage`). Trim ids are prefixed with the vehicle id.
+    Attribution ("Data: WhichTrim, from EPA and NHTSA public records") is required on the Free plan.
+  contact: { name: WhichTrim, url: https://whichtrim.com/developers/, email: data@whichtrim.com }
+  termsOfService: https://whichtrim.com/terms/
+servers:
+  - url: https://api.whichtrim.com/v1
+    description: Production
+security: [{ ApiKeyAuth: [] }]
+tags: [{ name: Vehicles }, { name: Recalls }, { name: Grades }, { name: Advisories }, { name: Meta }]
+paths:
+  /:
+    get: { tags: [Meta], summary: API index, operationId: getIndex, responses: { "200": { description: Endpoint list and dataset metadata } } }
+  /health:
+    get: { tags: [Meta], summary: Liveness, operationId: getHealth, responses: { "200": { description: OK } } }
+  /meta:
+    get: { tags: [Meta], summary: Dataset metadata, operationId: getMeta, responses: { "200": { description: Metadata, content: { application/json: { schema: { $ref: "#/components/schemas/Meta" } } } } } }
+  /vehicles:
+    get:
+      tags: [Vehicles]
+      summary: List model-years with headline figures
+      operationId: listVehicles
+      parameters:
+        - { name: make, in: query, schema: { type: string }, example: kia }
+        - { name: model, in: query, schema: { type: string }, example: sportage }
+        - { name: year, in: query, schema: { type: integer }, example: 2026 }
+        - { name: grade, in: query, schema: { type: string, enum: [A, B, C, D, F] } }
+        - { name: min_score, in: query, schema: { type: integer, minimum: 0, maximum: 100 } }
+        - { name: advisory, in: query, schema: { type: boolean }, description: "true = only vehicles with an active park-outside / do-not-drive advisory" }
+        - { name: limit, in: query, schema: { type: integer, default: 100, maximum: 500 } }
+        - { name: offset, in: query, schema: { type: integer, default: 0 } }
+      responses:
+        "200": { description: Matching vehicles, content: { application/json: { schema: { type: object, properties: { meta: { $ref: "#/components/schemas/Meta" }, count: { type: integer }, vehicles: { type: array, items: { $ref: "#/components/schemas/Vehicle" } } } } } } }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "429": { $ref: "#/components/responses/TooMany" }
+  /vehicles/{id}:
+    get:
+      tags: [Vehicles]
+      summary: Full record for one model-year
+      description: "EPA configurations, every recall with severity and advisory flags, complaint aggregates and excerpts, NCAP ratings, ODI investigations, press-kit trims/specs/features where published, and `bulletins` — the manufacturer communications filed with NHTSA for that model year (service bulletins, service campaigns, warranty extensions, over-the-air updates) with counts by kind and component plus the most recent document numbers, dates and summaries. A bulletin is a repair procedure the manufacturer sent its dealers, not a defect finding."
+      operationId: getVehicleById
+      parameters: [{ name: id, in: path, required: true, schema: { type: string }, example: 2026_kia_sportage }]
+      responses: { "200": { description: Full record, content: { application/json: { schema: { $ref: "#/components/schemas/VehicleFull" } } } }, "404": { $ref: "#/components/responses/NotFound" } }
+  /vehicles/{make}/{model}/{year}:
+    get:
+      tags: [Vehicles]
+      summary: Full record by make / model / year
+      operationId: getVehicle
+      parameters:
+        - { name: make, in: path, required: true, schema: { type: string }, example: toyota }
+        - { name: model, in: path, required: true, schema: { type: string }, example: rav4 }
+        - { name: year, in: path, required: true, schema: { type: integer }, example: 2026 }
+      responses: { "200": { description: Full record, content: { application/json: { schema: { $ref: "#/components/schemas/VehicleFull" } } } }, "404": { $ref: "#/components/responses/NotFound" } }
+  /compare:
+    get:
+      tags: [Compare]
+      summary: Score two or three vehicles against each other with your own category weights
+      description: >-
+        The same engine that powers whichtrim.com/compare. Seven categories (price, fuel & range, safety, space & cargo, performance,
+        tech & comfort, warranty) scored 0-100 from EPA, NHTSA and manufacturer press-kit data; a metric missing for any contender is
+        dropped for all; overall = weighted mean. Returns the verdict, every category and metric value behind it, the categories that
+        decide it, and the weight change that would flip it. Trim-level where press-kit data exists (append :<trim_id suffix>), model-level otherwise.
+      operationId: compare
+      parameters:
+        - { name: a, in: query, required: true, schema: { type: string }, example: "2026_kia_sportage:lx_fwd" }
+        - { name: b, in: query, required: true, schema: { type: string }, example: "2024_mazda_cx_90:3_3_turbo_select_awd" }
+        - { name: c, in: query, required: false, schema: { type: string } }
+        - { name: weights, in: query, required: false, description: "0-5 per category in order budget-fuel-safety-space-performance-tech-warranty, or budget:5,safety:4", schema: { type: string }, example: "4-3-4-2-2-3-2" }
+        - { name: detail, in: query, required: false, description: "1 adds detail: specs by family (best/worst flags), equipment matrix by system (differences flagged), safety record (NCAP, Safety Signal, recalls with remedy status, complaints) and ownership (price range, fuel cost, warranty). A contender without :trim uses its base trim where a press kit is on file (contenders[].trim_auto).", schema: { type: string, enum: ["1"] } }
+        - { name: narrative, in: query, required: false, description: "1 adds narrative: the plain-English take WhichTrim publishes for this pair (summary, pick_a_if, pick_b_if, basis) — written from the default-weight verdict on the base trims and cached, so it exists for the pre-computed head-to-heads only; null for other pairs.", schema: { type: string, enum: ["1"] } }
+      responses:
+        "200": { description: Verdict with scores, metrics, reasons and flips }
+        "400": { description: Fewer than two vehicles }
+        "404": { description: Unknown vehicle id }
+  /vin/{vin}:
+    get:
+      tags: [Vehicles]
+      summary: Decode a VIN and join it to the dataset
+      description: "Decodes a 17-character VIN against NHTSA's public vPIC database and returns it joined to this dataset: the matching model-year record with its Safety Signal grade, every recall campaign, complaint aggregates, crash ratings and published trims. `matched.exact_year` is false when only a neighbouring model year is held. `decode.equipment` maps the driver-assist equipment the manufacturer filed for that configuration — forward collision warning, automatic emergency braking, lane keeping, blind-spot monitoring, adaptive cruise and the rest — to `standard` or `optional`; a system the manufacturer did not file is absent rather than false."
+      operationId: decodeVin
+      parameters:
+        - { name: vin, in: path, required: true, schema: { type: string, minLength: 17, maxLength: 17 }, example: "5XYP3DHC8NG123456" }
+      responses:
+        "200": { description: Decode plus the matched vehicle record (vehicle is null when the model year is not held) }
+        "400": { description: Not a 17-character VIN }
+        "502": { description: NHTSA vPIC did not answer }
+  /grades:
+    get: { tags: [Grades], summary: Safety Signal grade + score for every model-year, operationId: listGrades, responses: { "200": { description: Grades } } }
+  /advisories:
+    get: { tags: [Advisories], summary: Every model-year with an active park-outside or do-not-drive advisory, operationId: listAdvisories, responses: { "200": { description: Advisories } } }
+  /recalls:
+    get:
+      tags: [Recalls]
+      summary: Recall campaigns across the catalog, newest first
+      operationId: listRecalls
+      parameters:
+        - { name: since, in: query, schema: { type: string, example: "2026-01" }, description: "Only campaigns reported on/after this YYYY-MM" }
+        - { name: limit, in: query, schema: { type: integer, default: 100, maximum: 500 } }
+        - { name: offset, in: query, schema: { type: integer, default: 0 } }
+      responses: { "200": { description: Campaigns with the vehicle ids each covers } }
+  /recalls/{campaign}:
+    get:
+      tags: [Recalls]
+      summary: One campaign and the model-years it covers
+      operationId: getRecall
+      parameters: [{ name: campaign, in: path, required: true, schema: { type: string }, example: 26V431000 }]
+      responses: { "200": { description: Campaign }, "404": { $ref: "#/components/responses/NotFound" } }
+  /bulletins:
+    get:
+      tags: [Bulletins]
+      summary: Manufacturer communications with a page on the site — service campaigns, warranty extensions, over-the-air and emissions notices, and the service bulletins the model-year pages list
+      description: >-
+        NHTSA's manufacturer-communication files (49 CFR 579.5), keyed on the number on the letter: the manufacturer's
+        campaign id where the filing carries one, otherwise the bulletin number with its document-type suffix removed.
+        Every document number filed under a record is an alias, so a document number resolves to its campaign.
+        These are not safety recalls: no NHTSA campaign number, no federal duty to repair.
+      operationId: listBulletins
+      parameters:
+        - { name: make, in: query, schema: { type: string, example: hyundai } }
+        - { name: kind, in: query, schema: { type: string, example: service campaign }, description: "service campaign, warranty extension, over the air, emissions, service bulletin (prefix match)" }
+        - { name: letter, in: query, schema: { type: string, enum: ["true"] }, description: "Only the kinds an owner is written to about" }
+        - { name: since, in: query, schema: { type: string, example: "2026-01" }, description: "Only communications dated (or, failing a date, received) on/after this YYYY-MM" }
+        - { name: number, in: query, schema: { type: string, example: 26-01-068H }, description: "A number or document number, matched the way the site's search box matches it" }
+        - { name: limit, in: query, schema: { type: integer, default: 100, maximum: 500 } }
+        - { name: offset, in: query, schema: { type: integer, default: 0 } }
+      responses: { "200": { description: Bulletins, newest first, each with its page and API URLs } }
+  /bulletins/{make}/{number}:
+    get:
+      tags: [Bulletins]
+      summary: One communication by the number on the letter or any document number filed under it
+      operationId: getBulletin
+      parameters:
+        - { name: make, in: path, required: true, schema: { type: string }, example: hyundai }
+        - { name: number, in: path, required: true, schema: { type: string }, example: 9d6, description: "A campaign id (9D6, SC199) or a document number (26-01-068H); both find the same record" }
+      responses: { "200": { description: "The record: NHTSA's summary, model years named (with vehicle ids where the site has the page), every document with a PDF link only where NHTSA's server has been seen to serve it" }, "404": { $ref: "#/components/responses/NotFound" } }
+  /dtc:
+    get:
+      tags: [Trouble codes]
+      summary: Diagnostic trouble codes joined to the vehicles whose federal record names them
+      description: >-
+        Mined from the summaries of NHTSA manufacturer communications and from owner complaint narratives. A match is
+        only counted where the surrounding text is discussing a diagnostic result, so hyphenated part numbers and
+        document references are not returned as codes. `defined_by` is `standard` (generic OBD-II, and a `meaning` is
+        returned), `manufacturer` (second character 1 or 3 — the automaker owns the meaning and no definition is
+        returned for it) or `undefined`. Counts are mentions in the federal files, never failure rates.
+      operationId: listDtc
+      parameters:
+        - { name: vehicle, in: query, schema: { type: string, example: 2015_honda_accord }, description: "Only codes on file for this model year" }
+        - { name: system, in: query, schema: { type: string, enum: [P, B, C, U] }, description: "Powertrain, Body, Chassis or Network" }
+        - { name: limit, in: query, schema: { type: integer, default: 100, maximum: 500 } }
+        - { name: offset, in: query, schema: { type: integer, default: 0 } }
+      responses: { "200": { description: Codes with the model years, bulletins and owner reports behind each } }
+  /dtc/{code}:
+    get:
+      tags: [Trouble codes]
+      summary: One trouble code and the model years whose record names it
+      operationId: getDtc
+      parameters: [{ name: code, in: path, required: true, schema: { type: string }, example: P0420 }]
+      responses: { "200": { description: Code }, "404": { $ref: "#/components/responses/NotFound" } }
+components:
+  securitySchemes:
+    ApiKeyAuth: { type: apiKey, in: header, name: x-api-key, description: "Create keys at https://whichtrim.com/dashboard/. RapidAPI users send X-RapidAPI-Key instead." }
+  responses:
+    NotFound: { description: Not found, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+    Forbidden: { description: Missing / invalid key, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+    TooMany: { description: Plan quota or rate limit exceeded, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+  schemas:
+    Error: { type: object, properties: { error: { type: string }, hint: { type: string }, docs: { type: string, format: uri } } }
+    Meta:
+      type: object
+      properties:
+        generated_at: { type: string, format: date-time }
+        vehicles: { type: integer }
+        makes: { type: integer }
+        recalls: { type: integer }
+        years: { type: array, items: { type: integer } }
+        source: { type: string }
+        grade_method: { type: string }
+    Vehicle:
+      type: object
+      properties:
+        id: { type: string, example: 2026_kia_sportage }
+        make: { type: string, example: Kia }
+        model: { type: string, example: Sportage }
+        year: { type: integer, example: 2026 }
+        segment: { type: string, example: Compact SUV }
+        powertrains: { type: array, items: { type: string }, example: [Plug-in hybrid, Hybrid, Gas] }
+        grade: { type: string, enum: [A, B, C, D, F] }
+        score: { type: integer, minimum: 35, maximum: 100 }
+        recall_count: { type: integer }
+        critical_count: { type: integer }
+        active_advisory: { type: boolean }
+        complaints: { type: integer, description: "Unique NHTSA complaints on file for the model year" }
+        ncap_overall: { type: integer, nullable: true, minimum: 1, maximum: 5 }
+        best_mpg: { type: integer, nullable: true }
+        best_range_mi: { type: integer, nullable: true }
+        msrp_from: { type: number, nullable: true, description: "Lowest trim MSRP from the manufacturer press kit, when published" }
+        page: { type: string, format: uri }
+    Config:
+      type: object
+      description: One EPA-certified configuration
+      properties:
+        id: { type: integer, description: fueleconomy.gov record id }
+        model: { type: string, example: Sportage Hybrid FWD }
+        pt: { type: string, enum: [bev, phev, hev, gas, diesel, cng, fcev] }
+        drive: { type: string }
+        trany: { type: string }
+        cyl: { type: integer, nullable: true }
+        displ: { type: number, nullable: true }
+        turbo: { type: boolean }
+        city: { type: integer, nullable: true }
+        hwy: { type: integer, nullable: true }
+        comb: { type: integer, nullable: true, description: "MPG, or MPGe for electric" }
+        kwh100: { type: number, nullable: true }
+        range: { type: integer, nullable: true, description: EPA range (BEV) }
+        erange: { type: number, nullable: true, description: Electric range (PHEV) }
+        charge240: { type: number, nullable: true, description: Hours at 240 V }
+        motor: { type: string }
+        vclass: { type: string }
+        co2: { type: integer, nullable: true }
+        fuel_cost: { type: integer, nullable: true, description: EPA annual fuel cost estimate (USD) }
+    Recall:
+      type: object
+      properties:
+        campaign: { type: string, example: 26V431000 }
+        component: { type: string }
+        mfr: { type: string }
+        reported: { type: string, format: date }
+        owner_notified: { type: string, format: date }
+        units: { type: integer, nullable: true }
+        summary: { type: string }
+        consequence: { type: string }
+        remedy: { type: string }
+        park_outside: { type: boolean }
+        do_not_drive: { type: boolean }
+        severity: { type: string, enum: [critical, high, moderate, minor] }
+        variants: { type: array, items: { type: string }, description: "Powertrains the campaign is limited to; empty = all" }
+    Complaints:
+      type: object
+      nullable: true
+      properties:
+        count: { type: integer }
+        crash: { type: integer }
+        fire: { type: integer }
+        injured: { type: integer }
+        deaths: { type: integer }
+        comps: { type: array, items: { type: array, items: {} }, description: "[component, count] pairs, most-cited first" }
+        by_year: { type: object, additionalProperties: { type: integer } }
+        excerpts: { type: array, items: { type: array, items: { type: string } }, description: "[date, component, text] — up to three recent owner reports" }
+    Ncap:
+      type: object
+      properties:
+        desc: { type: string, example: SUV AWD }
+        overall: { type: integer, nullable: true }
+        frontal: { type: integer, nullable: true }
+        side: { type: integer, nullable: true }
+        rollover: { type: integer, nullable: true }
+        rollover_risk: { type: number, nullable: true }
+        seats: { type: integer, nullable: true }
+    Trim:
+      type: object
+      properties:
+        trim_id: { type: string, example: 2026_kia_sportage_sx_prestige_awd }
+        trim_name: { type: string, example: SX Prestige }
+        drivetrain: { type: string, example: AWD }
+        powertrain: { type: string, example: ice }
+        msrp_base: { type: number, nullable: true }
+        sort_order: { type: integer }
+    Spec:
+      type: object
+      properties:
+        trim_id: { type: string }
+        spec_id: { type: string, example: engine_horsepower_hp }
+        canonical_name: { type: string }
+        spec_family: { type: string }
+        unit: { type: string, nullable: true }
+        value_numeric: { type: number, nullable: true }
+        value_text: { type: string, nullable: true }
+        source_url: { type: string, format: uri }
+        confidence: { type: number }
+    Feature:
+      type: object
+      properties:
+        trim_id: { type: string }
+        feature_id: { type: string }
+        canonical_name: { type: string }
+        feature_system: { type: string }
+        availability: { type: string, enum: [standard, optional, not_available] }
+    VehicleFull:
+      allOf:
+        - $ref: "#/components/schemas/Vehicle"
+        - type: object
+          properties:
+            configs: { type: array, items: { $ref: "#/components/schemas/Config" } }
+            recalls: { type: array, items: { $ref: "#/components/schemas/Recall" } }
+            complaints: { $ref: "#/components/schemas/Complaints" }
+            investigations: { type: array, items: { type: object } }
+            ncap: { type: array, items: { $ref: "#/components/schemas/Ncap" } }
+            trims: { type: array, items: { $ref: "#/components/schemas/Trim" } }
+            specs: { type: array, items: { $ref: "#/components/schemas/Spec" } }
+            features: { type: array, items: { $ref: "#/components/schemas/Feature" } }
+            generated_at: { type: string, format: date-time }
