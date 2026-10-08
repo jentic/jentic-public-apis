@@ -1,6 +1,6 @@
 # APIs — R
 
-Browsing 241 APIs starting with **R**.
+Browsing 242 APIs starting with **R**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · **R** · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -51,6 +51,7 @@ Browsing 241 APIs starting with **R**.
 | [realpage.com](../../../../apis/openapi/realpage.com) | [main](../../../../apis/openapi/realpage.com/main) |
 | [realscout.com](../../../../apis/openapi/realscout.com) | [main](../../../../apis/openapi/realscout.com/main) |
 | [realtyapi.io](../../../../apis/openapi/realtyapi.io) | [realty-api](../../../../apis/openapi/realtyapi.io/realty-api) |
+| [realuptime.io](../../../../apis/openapi/realuptime.io) | [main](../../../../apis/openapi/realuptime.io/main) |
 | [realwork-labs.stoplight.io](../../../../apis/openapi/realwork-labs.stoplight.io) | [realwork](../../../../apis/openapi/realwork-labs.stoplight.io/realwork) |
 | [realworld-docs.netlify.app](../../../../apis/openapi/realworld-docs.netlify.app) | [main](../../../../apis/openapi/realworld-docs.netlify.app/main) |
 | [reamaze.com](../../../../apis/openapi/reamaze.com) | [reamaze-api](../../../../apis/openapi/reamaze.com/reamaze-api) |

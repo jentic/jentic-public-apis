@@ -1,6 +1,6 @@
 # APIs — S
 
-Browsing 688 APIs starting with **S**.
+Browsing 689 APIs starting with **S**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · **S** · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -270,6 +270,7 @@ Browsing 688 APIs starting with **S**.
 | [smore.com](../../../../apis/openapi/smore.com) | [main](../../../../apis/openapi/smore.com/main) |
 | [sms77.io](../../../../apis/openapi/sms77.io) | [main](../../../../apis/openapi/sms77.io/main) |
 | [smsapi.telintel.net](../../../../apis/openapi/smsapi.telintel.net) | [main](../../../../apis/openapi/smsapi.telintel.net/main) |
+| [smtpfa.st](../../../../apis/openapi/smtpfa.st) | [main](../../../../apis/openapi/smtpfa.st/main) |
 | [snackeet.com](../../../../apis/openapi/snackeet.com) | [main](../../../../apis/openapi/snackeet.com/main) |
 | [snapapi.pics](../../../../apis/openapi/snapapi.pics) | [main](../../../../apis/openapi/snapapi.pics/main) |
 | [snapengage.com](../../../../apis/openapi/snapengage.com) | [main](../../../../apis/openapi/snapengage.com/main) |
