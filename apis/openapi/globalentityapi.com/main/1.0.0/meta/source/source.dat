@@ -1,0 +1,709 @@
+openapi: 3.0.3
+info:
+  title: GlobalEntity API
+  description: >-
+    One REST API for official company data across 50+ European business
+    registers (Brønnøysund, Companies House, CVR, Handelsregister and more)
+    plus the global GLEIF LEI index. Send a company name and country, or a
+    registration number, and get back a single normalized company object —
+    legal name, registration number, address, legal form, status, industry
+    (NACE), VAT and LEI — regardless of which country the data comes from. One
+    integration replaces dozens of per-country connections: we handle registry
+    access, normalization, deduplication and LEI/VAT/EORI resolution, and keep
+    it maintained as registers change. Responses are cached for speed and
+    reliability.
+  version: "1.0.0"
+  termsOfService: https://www.globalentityapi.com/#legal
+  contact:
+    name: Intermediary AS
+    url: https://www.globalentityapi.com/docs
+    email: contact@intermediary.no
+  license:
+    name: Proprietary
+    url: https://www.globalentityapi.com/#legal
+externalDocs:
+  description: Developer documentation
+  url: https://www.globalentityapi.com/docs
+servers:
+  - url: https://www.globalentityapi.com
+    description: Production
+security:
+  - ApiKeyAuth: []
+tags:
+  - name: Registry
+    description: Search national business registers and the GLEIF LEI index.
+  - name: Verify
+    description: Validate VAT (VIES), EORI (EU customs) and resolve LEI.
+  - name: Company
+    description: Company identity, golden record and deduplication.
+paths:
+  /api/registry/search:
+    get:
+      tags: [Registry]
+      summary: Search a company register
+      description: >-
+        Search a national register by company name, browse by industry code /
+        postcode / city, or resolve/search the global LEI index. A 20-character
+        LEI supplied in `q` is auto-detected and resolved globally.
+      operationId: searchCompanies
+      parameters:
+        - name: country
+          in: query
+          required: true
+          description: Country label, e.g. Norway, Danmark, Storbritannia, Tyskland.
+          schema:
+            type: string
+          example: Norway
+        - name: q
+          in: query
+          required: false
+          description: >-
+            Company name or registration number. Required unless nace, postnr or
+            city is supplied.
+          schema:
+            type: string
+          example: Intermediary
+        - name: active
+          in: query
+          required: false
+          description: When 1, return only active companies.
+          schema:
+            type: integer
+            enum: [0, 1]
+        - name: nace
+          in: query
+          required: false
+          description: Industry (NACE) code to browse by, register-dependent.
+          schema:
+            type: string
+          example: "70.220"
+        - name: postnr
+          in: query
+          required: false
+          description: Postcode filter, where supported.
+          schema:
+            type: string
+        - name: city
+          in: query
+          required: false
+          description: City / place filter, where supported.
+          schema:
+            type: string
+        - name: lei
+          in: query
+          required: false
+          description: When 1, search the GLEIF LEI index for the country.
+          schema:
+            type: integer
+            enum: [0, 1]
+        - name: limit
+          in: query
+          required: false
+          description: Maximum number of results to return.
+          schema:
+            type: integer
+            default: 50
+      responses:
+        "200":
+          description: Search results
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SearchResponse"
+        "401":
+          description: Missing or invalid API key
+        "429":
+          description: Monthly lookup quota exceeded
+  /api/verify:
+    get:
+      tags: [Verify]
+      summary: Verify VAT / EORI / LEI
+      description: >-
+        Validate an EU VAT number (VIES), an EORI number (EU customs), or
+        resolve a company's LEI.
+      operationId: verifyIdentifier
+      parameters:
+        - name: type
+          in: query
+          required: true
+          description: One of vat, eori or lei.
+          schema:
+            type: string
+            enum: [vat, eori, lei]
+        - name: country
+          in: query
+          required: false
+          description: ISO country code for VAT (e.g. IE), or the country for a LEI lookup.
+          schema:
+            type: string
+        - name: number
+          in: query
+          required: false
+          description: >-
+            The VAT / EORI number to check (include the country prefix for EORI,
+            e.g. DK32345794).
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Verification result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VerifyResponse"
+        "401":
+          description: Missing or invalid API key
+  /api/company/resolve:
+    post:
+      tags: [Company]
+      summary: Resolve a company to a golden record + Trust Score
+      description: >-
+        Turn a company into a single golden record: resolves the LEI (GLEIF),
+        validates VAT (VIES) and EORI (EU customs), unifies every identifier,
+        seeds the corporate graph with parent companies, and returns a
+        transparent identity Trust Score (0–100 — not a credit rating). The
+        record is stored under a stable id (COM-XXXXXXXXXX). Accepts a JSON body
+        (POST) or query parameters (GET).
+      operationId: resolveCompany
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ResolveRequest"
+      responses:
+        "200":
+          description: Golden record with Trust Score
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResolveResponse"
+        "401":
+          description: Missing or invalid API key
+  /api/company/match:
+    post:
+      tags: [Company]
+      summary: Deduplicate a list of company names
+      description: >-
+        Give it a messy list of company names and it groups the ones that are
+        likely the same real-world company. Normalizes legal forms, country
+        tokens, punctuation and accents, scores name similarity and clusters
+        duplicates; identical registration numbers or LEIs are certain matches.
+      operationId: matchCompanies
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MatchRequest"
+      responses:
+        "200":
+          description: Clustered duplicate groups
+          content:
+            application/json:
+              schema:
+                type: object
+        "401":
+          description: Missing or invalid API key
+  /api/company/ownership:
+    get:
+      tags: [Company]
+      summary: Ownership graph & UBO candidates
+      description: >-
+        The UBO / Ownership Explorer. Returns one consolidated ownership object:
+        the control chain (ultimate parent → parent → company → subsidiaries)
+        from official GLEIF relationship data, the registered shareholders
+        (Norway — Aksjonærregisteret, and Estonia — e-Business Register) with each holder's ownership percentage,
+        persons with significant control (United Kingdom — Companies House PSC
+        register), beneficial owners (Denmark — CVR reelle ejere, via Virk; Estonia — e-Business Register; Latvia — Enterprise Register), the
+        official board/roles (Norway — Enhetsregisteret), and a
+        derived list of UBO candidates. UBO candidates are flagged when a
+        shareholder or PSC holds ≥ 25% (the EU AMLD threshold) or as the ultimate
+        controlling entity from the GLEIF chain. This is a screening signal —
+        NOT every country's official beneficial-ownership register. Accepts query
+        parameters (GET) or a JSON body (POST). Not metered.
+      operationId: companyOwnership
+      parameters:
+        - name: country
+          in: query
+          required: false
+          description: Country label, e.g. Norway. Required unless a lei is given.
+          schema:
+            type: string
+          example: Norway
+        - name: orgNr
+          in: query
+          required: false
+          description: National registration number.
+          schema:
+            type: string
+          example: "925615471"
+        - name: name
+          in: query
+          required: false
+          description: Company name (used to resolve the LEI when no number is given).
+          schema:
+            type: string
+        - name: lei
+          in: query
+          required: false
+          description: 20-character LEI; resolves the GLEIF corporate graph directly.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Consolidated ownership object with UBO candidates
+          content:
+            application/json:
+              schema:
+                type: object
+        "401":
+          description: Missing or invalid API key
+  /api/company/report:
+    get:
+      tags: [Company]
+      summary: Exportable KYB report
+      description: >-
+        One consolidated KYB report composed from the identity resolver (golden
+        record, Trust Score, identifiers), sanctions screening, the corporate
+        graph and the full ownership/UBO object. Returns a structured report with
+        sections, a report id and a generatedAt timestamp — the console turns it
+        into a printable, exportable PDF. Accepts query parameters (GET) or a JSON
+        body (POST). Not metered.
+      operationId: companyReport
+      parameters:
+        - name: country
+          in: query
+          required: false
+          description: ISO alpha-2 (e.g. "NO") or register label. Required unless a lei is given.
+          schema:
+            type: string
+          example: "NO"
+        - name: orgNr
+          in: query
+          required: false
+          description: National registration number.
+          schema:
+            type: string
+          example: "925615471"
+        - name: name
+          in: query
+          required: false
+          description: Company name (helps resolve the entity).
+          schema:
+            type: string
+        - name: lei
+          in: query
+          required: false
+          description: 20-character LEI (alternative to orgNr).
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Consolidated KYB report
+          content:
+            application/json:
+              schema:
+                type: object
+        "401":
+          description: Missing or invalid API key
+  /api/company/insolvency:
+    get:
+      tags: [Company]
+      summary: Bankruptcy & insolvency state
+      description: >-
+        Returns a company's official insolvency / distress state from the
+        national register: bankruptcy (with opening date), compulsory dissolution
+        (with date) and voluntary liquidation. Authoritative register state, not a
+        derived guess. Coverage today is Norway (Enhetsregisteret, open/keyless,
+        NLOD 2.0); other countries return supported=false until their open
+        insolvency source is wired in. Accepts query parameters (GET) or a JSON
+        body (POST). Not metered.
+      operationId: companyInsolvency
+      parameters:
+        - name: country
+          in: query
+          required: true
+          description: ISO alpha-2 (e.g. "NO") or register label.
+          schema:
+            type: string
+          example: "NO"
+        - name: orgNr
+          in: query
+          required: true
+          description: National registration number.
+          schema:
+            type: string
+          example: "925615471"
+      responses:
+        "200":
+          description: Insolvency / distress state
+          content:
+            application/json:
+              schema:
+                type: object
+        "401":
+          description: Missing or invalid API key
+  /api/company/iban:
+    get:
+      tags: [Company]
+      summary: Bank / IBAN verification
+      description: >-
+        Validate an IBAN's structure + checksum, and (for BE, DE, NL, LU, CH, AT,
+        LI) resolve the bank code to the bank name and BIC. Same spirit as the
+        VAT (VIES) and EORI checks. Confirms the IBAN is well-formed and which
+        bank it belongs to — NOT that the account belongs to a company (no name
+        match). Powered by openIBAN (keyless). Not metered.
+      operationId: companyIban
+      parameters:
+        - name: iban
+          in: query
+          required: true
+          description: The IBAN to verify (spaces are ignored).
+          schema:
+            type: string
+          example: "DE89370400440532013000"
+      responses:
+        "200":
+          description: IBAN validity + resolved bank data
+          content:
+            application/json:
+              schema:
+                type: object
+        "401":
+          description: Missing or invalid API key
+  /api/monitor/subscriptions:
+    get:
+      tags: [Monitoring]
+      summary: List entity-monitoring subscriptions
+      description: >-
+        Entity Monitoring. Lists the subscriptions created with the caller's API
+        key. Each subscription watches one company and POSTs a signed webhook when
+        its official state changes. Not metered.
+      operationId: monitorListSubscriptions
+      responses:
+        "200":
+          description: The caller's subscriptions
+          content:
+            application/json:
+              schema:
+                type: object
+        "401":
+          description: Missing or invalid API key
+    post:
+      tags: [Monitoring]
+      summary: Create an entity-monitoring subscription
+      description: >-
+        Subscribe to a company. GlobalEntity re-reads its official state on a
+        schedule and delivers a signed webhook (HMAC-SHA256 over the body) on any
+        change to legal status, name, LEI, the GLEIF control chain, and — for
+        Norway — board/roles and registered owners. The signing secret is returned
+        once on creation. The webhookUrl must be a public https:// endpoint.
+      operationId: monitorCreateSubscription
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [country, webhookUrl]
+              properties:
+                country:
+                  type: string
+                  description: ISO alpha-2 (e.g. "NO") or register label (e.g. "Norway").
+                  example: "NO"
+                orgNr:
+                  type: string
+                  example: "925615471"
+                lei:
+                  type: string
+                  description: 20-character LEI (alternative to orgNr).
+                name:
+                  type: string
+                webhookUrl:
+                  type: string
+                  format: uri
+                  example: "https://your-app.example.com/hooks/gea"
+                events:
+                  type: array
+                  description: Optional filter; omit for all event types.
+                  items:
+                    type: string
+                    enum:
+                      - entity.status_changed
+                      - entity.name_changed
+                      - entity.lei_changed
+                      - ownership.control_changed
+                      - ownership.owners_changed
+                      - board.roles_changed
+      responses:
+        "201":
+          description: Subscription created (signing secret shown once)
+          content:
+            application/json:
+              schema:
+                type: object
+        "400":
+          description: Missing/invalid fields, or webhookUrl not a public https URL
+        "401":
+          description: Missing or invalid API key
+  /api/monitor/subscriptions/{id}:
+    get:
+      tags: [Monitoring]
+      summary: Get a subscription and its recent events
+      operationId: monitorGetSubscription
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          example: "MON-E4331D2CB4"
+      responses:
+        "200":
+          description: Subscription + recent change events
+          content:
+            application/json:
+              schema:
+                type: object
+        "404":
+          description: Not found
+    patch:
+      tags: [Monitoring]
+      summary: Update a subscription (pause/resume, webhook, events)
+      operationId: monitorUpdateSubscription
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                status:
+                  type: string
+                  enum: [active, paused]
+                webhookUrl:
+                  type: string
+                  format: uri
+                events:
+                  type: array
+                  items:
+                    type: string
+      responses:
+        "200":
+          description: Updated subscription
+        "404":
+          description: Not found
+    delete:
+      tags: [Monitoring]
+      summary: Delete a subscription
+      operationId: monitorDeleteSubscription
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Deleted
+        "404":
+          description: Not found
+  /api/monitor/test:
+    post:
+      tags: [Monitoring]
+      summary: Send a test ping to a subscription's webhook
+      description: >-
+        Delivers a signed monitor.ping event to the subscription's webhook so you
+        can verify your endpoint and signature handling before any real change.
+      operationId: monitorTest
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [id]
+              properties:
+                id:
+                  type: string
+                  example: "MON-E4331D2CB4"
+      responses:
+        "200":
+          description: Delivery result (status + attempts)
+        "404":
+          description: Subscription not found
+  /api/company/{id}:
+    get:
+      tags: [Company]
+      summary: Fetch a stored golden record
+      description: Retrieve a previously resolved company golden record by its stable id.
+      operationId: getCompany
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Stable company id, e.g. COM-1567B4077A.
+          schema:
+            type: string
+          example: COM-1567B4077A
+      responses:
+        "200":
+          description: Stored golden record
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResolveResponse"
+        "404":
+          description: Record not found
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: x-api-key
+      description: >-
+        Secret key in the form gea_live_…, created automatically on the
+        Enterprise or Partner plan. Keep it server-side.
+  schemas:
+    CompanyResult:
+      type: object
+      properties:
+        name:
+          type: string
+          example: Intermediary AS
+        orgNr:
+          type: string
+          example: "925615471"
+        status:
+          type: string
+          example: Active
+        orgForm:
+          type: string
+          example: AS
+        industry:
+          type: string
+          example: Bedriftsrådgivning (70.220)
+        address:
+          type: string
+          example: Bryggerikaien 24, 4014 Stavanger
+        registered:
+          type: string
+          format: date
+          example: "2020-09-03"
+        vat:
+          type: boolean
+        lei:
+          type: string
+          example: OW6OFBNCKXC4US5C7523
+        country:
+          type: string
+          example: Norway
+    SearchResponse:
+      type: object
+      properties:
+        mode:
+          type: string
+          example: live
+        country:
+          type: string
+          example: Norway
+        source:
+          type: string
+          example: brreg
+        results:
+          type: array
+          items:
+            $ref: "#/components/schemas/CompanyResult"
+    VerifyResponse:
+      type: object
+      properties:
+        valid:
+          type: boolean
+        name:
+          type: string
+        address:
+          type: string
+    ResolveRequest:
+      type: object
+      required: [country]
+      properties:
+        country:
+          type: string
+          description: Country name or ISO code (e.g. Danmark / DK).
+          example: Danmark
+        orgNr:
+          type: string
+          description: National registration number (required unless lei or name is given).
+          example: "22756214"
+        name:
+          type: string
+          example: A.P. Moller - Maersk A/S
+        lei:
+          type: string
+          description: Optional known LEI to anchor the record.
+        status:
+          type: string
+        address:
+          type: string
+        registered:
+          type: string
+        website:
+          type: string
+        source:
+          type: string
+    ResolveResponse:
+      type: object
+      properties:
+        entityId:
+          type: string
+          example: COM-1567B4077A
+        trust:
+          type: object
+          properties:
+            score:
+              type: integer
+              example: 95
+            band:
+              type: string
+              example: high
+            factors:
+              type: array
+              items:
+                type: object
+        identifiers:
+          type: array
+          items:
+            type: object
+        names:
+          type: array
+          items:
+            type: object
+        relationships:
+          type: array
+          items:
+            type: object
+    MatchRequest:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          maxItems: 200
+          description: Company names, or objects { name, orgNr?, lei? }.
+          items:
+            type: object
+        threshold:
+          type: number
+          minimum: 0.4
+          maximum: 0.99
+          default: 0.72
+        ai:
+          type: boolean
+          default: false
