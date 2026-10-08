@@ -1,6 +1,6 @@
 # APIs — C
 
-Browsing 433 APIs starting with **C**.
+Browsing 434 APIs starting with **C**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · **C** · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -388,6 +388,7 @@ Browsing 433 APIs starting with **C**.
 | [crowdsignal.com](../../../../apis/openapi/crowdsignal.com) | [main](../../../../apis/openapi/crowdsignal.com/main) |
 | [crowdstrike.com](../../../../apis/openapi/crowdstrike.com) | [main](../../../../apis/openapi/crowdstrike.com/main) |
 | [crucible.local](../../../../apis/openapi/crucible.local) | [main](../../../../apis/openapi/crucible.local/main) |
+| [cruise-itinerary.com](../../../../apis/openapi/cruise-itinerary.com) | [main](../../../../apis/openapi/cruise-itinerary.com/main) |
 | [cruisecontrol.ai](../../../../apis/openapi/cruisecontrol.ai) | [main](../../../../apis/openapi/cruisecontrol.ai/main) |
 | [cruisen-production.web.app](../../../../apis/openapi/cruisen-production.web.app) | [main](../../../../apis/openapi/cruisen-production.web.app/main) |
 | [cruisen.com](../../../../apis/openapi/cruisen.com) | [main](../../../../apis/openapi/cruisen.com/main) |

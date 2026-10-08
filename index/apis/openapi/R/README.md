@@ -1,6 +1,6 @@
 # APIs — R
 
-Browsing 242 APIs starting with **R**.
+Browsing 243 APIs starting with **R**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · **R** · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -92,6 +92,7 @@ Browsing 242 APIs starting with **R**.
 | [regal.io](../../../../apis/openapi/regal.io) | [main](../../../../apis/openapi/regal.io/main) |
 | [regcheck.org.uk](../../../../apis/openapi/regcheck.org.uk) | [main](../../../../apis/openapi/regcheck.org.uk/main) |
 | [regiondo.com](../../../../apis/openapi/regiondo.com) | [main](../../../../apis/openapi/regiondo.com/main) |
+| [registrum.co.uk](../../../../apis/openapi/registrum.co.uk) | [main](../../../../apis/openapi/registrum.co.uk/main) |
 | [registry.npmjs.org](../../../../apis/openapi/registry.npmjs.org) | [main](../../../../apis/openapi/registry.npmjs.org/main) |
 | [regrid.com](../../../../apis/openapi/regrid.com) | [main](../../../../apis/openapi/regrid.com/main) |
 | [rejax.io](../../../../apis/openapi/rejax.io) | [main](../../../../apis/openapi/rejax.io/main) |
