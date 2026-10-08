@@ -2,6 +2,8 @@
 
 <a href="https://www.producthunt.com/products/jentic-mini?embed=true&utm_source=badge-featured&utm_medium=badge&utm_campaign=badge-jentic-mini" target="_blank"><img src="https://api.producthunt.com/widgets/embed-image/v1/featured.svg?post_id=1107386&theme=light&t=1775041287603" alt="Jentic&#0032;Mini - Give&#0032;your&#0032;AI&#0032;agents&#0032;safe&#0032;access&#0032;to&#0032;10&#0044;000&#0043;&#0032;APIs | Product Hunt" style="width: 250px; height: 54px;" width="250" height="54" /></a>
 
+[![Discord](https://img.shields.io/badge/JOIN%20OUR%20DISCORD-COMMUNITY-7289DA?style=plastic&logo=discord&logoColor=white)](https://discord.gg/yrxmDZWMqB)
+
 > **Join our community!** Connect with contributors and users on [Discord](https://discord.gg/yrxmDZWMqB) to discuss ideas, ask questions, and collaborate on the Jentic Public APIs repository.
 >
 > **Quick access API Index:** [0](index/apis/openapi/0) · [1](index/apis/openapi/1) · [2](index/apis/openapi/2) · [3](index/apis/openapi/3) · [4](index/apis/openapi/4) · [5](index/apis/openapi/5) · [6](index/apis/openapi/6) · [7](index/apis/openapi/7) · [8](index/apis/openapi/8) · [9](index/apis/openapi/9) · [A](index/apis/openapi/A) · [B](index/apis/openapi/B) · [C](index/apis/openapi/C) · [D](index/apis/openapi/D) · [E](index/apis/openapi/E) · [F](index/apis/openapi/F) · [G](index/apis/openapi/G) · [H](index/apis/openapi/H) · [I](index/apis/openapi/I) · [J](index/apis/openapi/J) · [K](index/apis/openapi/K) · [L](index/apis/openapi/L) · [M](index/apis/openapi/M) · [N](index/apis/openapi/N) · [O](index/apis/openapi/O) · [P](index/apis/openapi/P) · [Q](index/apis/openapi/Q) · [R](index/apis/openapi/R) · [S](index/apis/openapi/S) · [T](index/apis/openapi/T) · [U](index/apis/openapi/U) · [V](index/apis/openapi/V) · [W](index/apis/openapi/W) · [X](index/apis/openapi/X) · [Y](index/apis/openapi/Y) · [Z](index/apis/openapi/Z)
@@ -14,7 +16,6 @@
 [![AI-Readiness scored](https://img.shields.io/badge/AI--readiness-scored-40c463?style=flat-square)](https://github.com/jentic/jentic-api-scorecard)
 [![OpenAPI](https://img.shields.io/badge/format-OpenAPI_%2B_Arazzo-85EA2D?style=flat-square&logo=openapiinitiative&logoColor=black)](https://www.openapis.org/)
 [![License: CC0-1.0](https://img.shields.io/badge/license-CC0_1.0-blue?style=flat-square)](LICENSE.md)
-[![Discord](https://img.shields.io/badge/Discord-community-7289DA?style=flat-square&logo=discord&logoColor=white)](https://discord.gg/yrxmDZWMqB)
 [![Contributor Covenant](https://img.shields.io/badge/Contributor%20Covenant-3.0-40c463?style=flat-square)](CODE_OF_CONDUCT.md)
 
 Every API has a machine-readable **OpenAPI spec** in this repository and a human-readable, **AI-readiness–scored** page on [jentic.com/apis](https://jentic.com/apis).
