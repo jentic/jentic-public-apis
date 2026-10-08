@@ -2,41 +2,9 @@
 
 <a href="https://www.producthunt.com/products/jentic-mini?embed=true&utm_source=badge-featured&utm_medium=badge&utm_campaign=badge-jentic-mini" target="_blank"><img src="https://api.producthunt.com/widgets/embed-image/v1/featured.svg?post_id=1107386&theme=light&t=1775041287603" alt="Jentic&#0032;Mini - Give&#0032;your&#0032;AI&#0032;agents&#0032;safe&#0032;access&#0032;to&#0032;10&#0044;000&#0043;&#0032;APIs | Product Hunt" style="width: 250px; height: 54px;" width="250" height="54" /></a>
 
-[![Discord](https://img.shields.io/badge/JOIN%20OUR%20DISCORD-COMMUNITY-7289DA?style=plastic&logo=discord&logoColor=white)](https://discord.gg/yrxmDZWMqB)
-
 > **Join our community!** Connect with contributors and users on [Discord](https://discord.gg/yrxmDZWMqB) to discuss ideas, ask questions, and collaborate on the Jentic Public APIs repository.
 >
 > **Quick access API Index:** [0](index/apis/openapi/0) · [1](index/apis/openapi/1) · [2](index/apis/openapi/2) · [3](index/apis/openapi/3) · [4](index/apis/openapi/4) · [5](index/apis/openapi/5) · [6](index/apis/openapi/6) · [7](index/apis/openapi/7) · [8](index/apis/openapi/8) · [9](index/apis/openapi/9) · [A](index/apis/openapi/A) · [B](index/apis/openapi/B) · [C](index/apis/openapi/C) · [D](index/apis/openapi/D) · [E](index/apis/openapi/E) · [F](index/apis/openapi/F) · [G](index/apis/openapi/G) · [H](index/apis/openapi/H) · [I](index/apis/openapi/I) · [J](index/apis/openapi/J) · [K](index/apis/openapi/K) · [L](index/apis/openapi/L) · [M](index/apis/openapi/M) · [N](index/apis/openapi/N) · [O](index/apis/openapi/O) · [P](index/apis/openapi/P) · [Q](index/apis/openapi/Q) · [R](index/apis/openapi/R) · [S](index/apis/openapi/S) · [T](index/apis/openapi/T) · [U](index/apis/openapi/U) · [V](index/apis/openapi/V) · [W](index/apis/openapi/W) · [X](index/apis/openapi/X) · [Y](index/apis/openapi/Y) · [Z](index/apis/openapi/Z)
-
-## Overview
-
-[![Contributor Covenant](https://img.shields.io/badge/Contributor%20Covenant-3.0-40c463.svg)](CODE_OF_CONDUCT.md)
-[![License: CC0-1.0](https://img.shields.io/badge/License-CC0_1.0-blue)](LICENSE.md)
-
-### The agentic knowledge layer
-
-AI agents depend on APIs. Their capabilities are defined by the APIs they know about, and their reliability is defined by the quality of that knowledge. Documentation was previously nice-to-have, but for AI it's a *need-to-have*. The goal of this project is to collate all knowledge about all the world's APIs into a communal, detailed, comprehensive, structured documentation catalog designed for use by AI.  This allows AI to accurately generate API integration code, and it allows agents to plan and interact with APIs reliably, without intermediaries.
-
-### Open source and open standards
-
-This communal effort requires a stable but extensible representation format that can describe all salient aspects of APIs and associated workflows in full detail. The [OpenAPI specifications](https://www.openapis.org/) provide the de-facto standard for formal API descriptions, are widely adopted, supported by a vast ecosystem of associated tooling, and governed by the Linux Foundation. Importantly, the OpenAPI Initiative's most recent specification, [Arazzo](https://www.openapis.org/arazzo-specification), allows complex multi-API workflows to be described in a declarative format.
-
-The Jentic API Directory is an open-source catalog of API and workflow descriptions that builds upon these open standards to contribute API and workflow knowledge to AI agents. We will coordinate with the OpenAPI community, and propose an RFC containing various extensions to capture additional knowledge that is especially relevant in the context of AI agents (for example concerning authentication, rate limiting, pricing, governance and safety). If you have suggestions to improve the directory, we welcome discussion on our Discord and PRs on this repository.
-
-### AI-scale
-
-Documenting all the world's API knowledge is made achievable by generative AI. Our starting point was OpenAPI documents provided by various vendors online (with special credit to the [APIs.guru](https://apis.guru/) repository). On top of this, we have generated thousands Arazzo workflows using AI. We are growing this repository using AI agents to import (and improve) existing OpenAPI documents and to generate new OpenAPI specifications where no structured documentation previously existed. Our AI agents are also discovering novel Arazzo workflows that can be performed on top of that API knowledge.  We will propose a scorecard evaluation to measure the quality of the generated documentation, allowing us to ensure that both the quantity and the quality of documentation increases as we progress.
-
-We welcome all contributions from the community and from partners who want to accelerate this effort with their own resources and ingenuity. We will ensure that all contributions help the knowledge about each API and workflow in the repository to converge on the best canonical version.
-
-### Repository Focus
-
-The repository focuses on:
-1. Standardized OpenAPI specifications for public APIs
-2. Arazzo workflows that define composable operations across one or more APIs
-3. Associated tooling, for example to help import and enrich documentation, or to convert it out into other formats (e.g., AI model provider's tool definition formats).
-4. Evaluations and scorecards to measure API knowledge completeness, accuracy and AI-readiness
-5. RFCs for extensions to open formats used in the repository, and any other proposals.
 
 ## Explore the API Directory
 
@@ -47,6 +15,7 @@ The repository focuses on:
 [![OpenAPI](https://img.shields.io/badge/format-OpenAPI_%2B_Arazzo-85EA2D?style=flat-square&logo=openapiinitiative&logoColor=black)](https://www.openapis.org/)
 [![License: CC0-1.0](https://img.shields.io/badge/license-CC0_1.0-blue?style=flat-square)](LICENSE.md)
 [![Discord](https://img.shields.io/badge/Discord-community-7289DA?style=flat-square&logo=discord&logoColor=white)](https://discord.gg/yrxmDZWMqB)
+[![Contributor Covenant](https://img.shields.io/badge/Contributor%20Covenant-3.0-40c463?style=flat-square)](CODE_OF_CONDUCT.md)
 
 Every API has a machine-readable **OpenAPI spec** in this repository and a human-readable, **AI-readiness–scored** page on [jentic.com/apis](https://jentic.com/apis).
 
@@ -155,6 +124,33 @@ The directory goes well beyond the usual suspects — a taste of the long tail:
 | <img src="https://www.google.com/s2/favicons?domain=lichess.org&sz=32" width="16" height="16" align="top" /> **Lichess** | Open chess platform | [📄 OpenAPI](apis/openapi/lichess.org/main/2.0.130/openapi.json) | [🔗 page](https://jentic.com/apis/lichess.org/main) |
 
 > Looking for something else? Search the **[full API Directory →](https://jentic.com/apis)**, or jump into the raw specs via the [Quick access API Index](#jentic-public-apis) above.
+
+## Overview
+
+### The agentic knowledge layer
+
+AI agents depend on APIs. Their capabilities are defined by the APIs they know about, and their reliability is defined by the quality of that knowledge. Documentation was previously nice-to-have, but for AI it's a *need-to-have*. The goal of this project is to collate all knowledge about all the world's APIs into a communal, detailed, comprehensive, structured documentation catalog designed for use by AI.  This allows AI to accurately generate API integration code, and it allows agents to plan and interact with APIs reliably, without intermediaries.
+
+### Open source and open standards
+
+This communal effort requires a stable but extensible representation format that can describe all salient aspects of APIs and associated workflows in full detail. The [OpenAPI specifications](https://www.openapis.org/) provide the de-facto standard for formal API descriptions, are widely adopted, supported by a vast ecosystem of associated tooling, and governed by the Linux Foundation. Importantly, the OpenAPI Initiative's most recent specification, [Arazzo](https://www.openapis.org/arazzo-specification), allows complex multi-API workflows to be described in a declarative format.
+
+The Jentic API Directory is an open-source catalog of API and workflow descriptions that builds upon these open standards to contribute API and workflow knowledge to AI agents. We will coordinate with the OpenAPI community, and propose an RFC containing various extensions to capture additional knowledge that is especially relevant in the context of AI agents (for example concerning authentication, rate limiting, pricing, governance and safety). If you have suggestions to improve the directory, we welcome discussion on our Discord and PRs on this repository.
+
+### AI-scale
+
+Documenting all the world's API knowledge is made achievable by generative AI. Our starting point was OpenAPI documents provided by various vendors online (with special credit to the [APIs.guru](https://apis.guru/) repository). On top of this, we have generated thousands Arazzo workflows using AI. We are growing this repository using AI agents to import (and improve) existing OpenAPI documents and to generate new OpenAPI specifications where no structured documentation previously existed. Our AI agents are also discovering novel Arazzo workflows that can be performed on top of that API knowledge.  We will propose a scorecard evaluation to measure the quality of the generated documentation, allowing us to ensure that both the quantity and the quality of documentation increases as we progress.
+
+We welcome all contributions from the community and from partners who want to accelerate this effort with their own resources and ingenuity. We will ensure that all contributions help the knowledge about each API and workflow in the repository to converge on the best canonical version.
+
+### Repository Focus
+
+The repository focuses on:
+1. Standardized OpenAPI specifications for public APIs
+2. Arazzo workflows that define composable operations across one or more APIs
+3. Associated tooling, for example to help import and enrich documentation, or to convert it out into other formats (e.g., AI model provider's tool definition formats).
+4. Evaluations and scorecards to measure API knowledge completeness, accuracy and AI-readiness
+5. RFCs for extensions to open formats used in the repository, and any other proposals.
 
 ## Project Stage
 
