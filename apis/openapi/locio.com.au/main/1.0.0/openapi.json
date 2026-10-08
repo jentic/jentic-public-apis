@@ -1,0 +1,1355 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Locio API",
+    "version": "1.0.0",
+    "summary": "Australian address autocomplete, validation and geocoding.",
+    "description": "Address and locality search across Australia, and the post offices, parcel lockers and posting boxes to send things from.\n\nAddress data comes from G-NAF (CC BY 4.0, Geoscape Australia), localities from GeoNames (CC BY 4.0) and places from OpenStreetMap (ODbL) and operator feeds. Attribution travels with the data: whatever you build shows those credits where the data appears.\n\nEvery response is JSON. Errors are RFC 7807 problem documents.",
+    "contact": {
+      "url": "https://locio.com.au/docs/"
+    },
+    "license": {
+      "name": "Data licences",
+      "url": "https://locio.com.au/legal/"
+    },
+    "x-jentic-source-url": "https://api.locio.com.au/v1/openapi.json"
+  },
+  "servers": [
+    {
+      "url": "https://api.locio.com.au",
+      "description": "Production"
+    }
+  ],
+  "paths": {
+    "/v1/addresses": {
+      "get": {
+        "tags": [
+          "G-NAF Addresses"
+        ],
+        "summary": "Suggest addresses as someone types",
+        "description": "G-NAF only. Unlike `/v1/typeahead`, which also returns suburbs and places, every result here is a resolved address, so nothing has to be filtered out.\n\nMatching is a prefix of the street line, so type it as it is written: number first, then the street. A unit in front is understood and resolves to the unit's own record, not the building's: `3/90 Bay Road` returns the pid of unit 3, and `90 Bay Road` returns the pid of the parcel. `unit 3`, `u3`, `apt 3` and `3 90` are read the same way. A trailing postcode narrows.\n\nEach result carries its `id`. Store that, not the text: the text is however your user typed it that day, the id is the address. An Australian result carries the same value under `address_detail_pid`, which is G-NAF's own column name.",
+        "operationId": "searchAddresses",
+        "x-units": "1 per request",
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 2
+            },
+            "example": "145 sydney road"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 10,
+              "maximum": 50
+            }
+          },
+          {
+            "name": "country",
+            "in": "query",
+            "description": "Which country's addresses to search, as a two letter ISO 3166-1 code. Defaults to `AU`.\n\nOnly a secret key may send it. A public key is scoped to the country the request came from, which Cloudflare resolves from the browser's address, and this parameter is ignored on one: a key that sits in a page cannot choose what it may see.\n\nA country no address data is loaded for answers 200 with an empty `data`, a `country_code` and a `note` saying so. That is not an error: it is the right answer for somebody typing from a country you do not hold.",
+            "schema": {
+              "type": "string",
+              "minLength": 2,
+              "maxLength": 2,
+              "default": "AU"
+            },
+            "example": "AU"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Matching addresses, best first.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Address"
+                      }
+                    },
+                    "country_code": {
+                      "type": "string",
+                      "description": "The country these results were searched in. `AU` today. Distinct from an address's own `country`, which is the country's name."
+                    },
+                    "note": {
+                      "type": "string",
+                      "description": "Why the answer is empty when empty is correct: no address data is loaded for this country, or the country could not be determined. Absent on an ordinary answer."
+                    }
+                  }
+                },
+                "example": {
+                  "data": [
+                    {
+                      "id": "GATAS717990791",
+                      "address_detail_pid": "GATAS717990791",
+                      "gnaf_pid": "GATAS717990791",
+                      "formatted": "Piermont Resort, Unit 9, 12990 Tasman Highway, Swansea TAS 7190",
+                      "components": {
+                        "building_name": "Piermont Resort",
+                        "flat_type": "Unit",
+                        "flat_number": "9",
+                        "number_first": "12990",
+                        "street_name": "Tasman",
+                        "street_type": "Highway",
+                        "locality_name": "Swansea",
+                        "state": "TAS",
+                        "postcode": "7190"
+                      },
+                      "lat": -42.1557993,
+                      "lng": 148.07629134,
+                      "mesh_block": "60049060000",
+                      "country": "Australia",
+                      "region": "Tasmania",
+                      "locality": "Swansea"
+                    }
+                  ],
+                  "country_code": "AU"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`q` is missing."
+          },
+          "401": {
+            "description": "No key, or a key we do not recognise. Send it as `Authorization: Bearer pf_live_...`."
+          },
+          "402": {
+            "description": "The quota for this billing period is spent. `X-Quota-Reset` says when it returns; the billing portal is how to raise it sooner."
+          },
+          "429": {
+            "description": "Too many requests a second for this plan. `RateLimit-Limit` says the rate and `Retry-After` says how long to wait; this is a rate, not a quota, so it clears in a second."
+          }
+        }
+      }
+    },
+    "/v1/addresses/resolve": {
+      "get": {
+        "tags": [
+          "G-NAF Addresses"
+        ],
+        "summary": "Resolve a whole address string to one record",
+        "description": "For an address you are holding rather than one being typed: a delivery address off a checkout form, a row in a spreadsheet.\n\nGive the whole thing, however it is written. Abbreviations, missing commas and a missing state are all fine; where the street ends and the suburb begins is worked out by trying the readings against G-NAF.\n\nThis answers validation, geocoding and parsing in one call, because they are one question: `matched` says whether the address is real, and `address` carries the coordinates, the components and the pid. It is one unit, not three.",
+        "operationId": "resolveAddress",
+        "x-units": "1 per request",
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 2
+            },
+            "example": "1 george st sydenham nsw 2044"
+          },
+          {
+            "name": "country",
+            "in": "query",
+            "description": "Which country's addresses to search, as a two letter ISO 3166-1 code. Defaults to `AU`.\n\nOnly a secret key may send it. A public key is scoped to the country the request came from, which Cloudflare resolves from the browser's address, and this parameter is ignored on one: a key that sits in a page cannot choose what it may see.\n\nA country no address data is loaded for answers 200 with an empty `data`, a `country_code` and a `note` saying so. That is not an error: it is the right answer for somebody typing from a country you do not hold.",
+            "schema": {
+              "type": "string",
+              "minLength": 2,
+              "maxLength": 2,
+              "default": "AU"
+            },
+            "example": "AU"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Whether it resolved, and what it resolved to. An address that is not in G-NAF is a 200 with matched false, not an error: that is the answer you asked for.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "matched": {
+                          "type": "boolean"
+                        },
+                        "address": {
+                          "nullable": true,
+                          "allOf": [
+                            {
+                              "$ref": "#/components/schemas/Address"
+                            }
+                          ]
+                        }
+                      }
+                    },
+                    "country_code": {
+                      "type": "string",
+                      "description": "The country these results were searched in. `AU` today. Distinct from an address's own `country`, which is the country's name."
+                    },
+                    "note": {
+                      "type": "string",
+                      "description": "Why the answer is empty when empty is correct: no address data is loaded for this country, or the country could not be determined. Absent on an ordinary answer."
+                    }
+                  }
+                },
+                "example": {
+                  "data": {
+                    "matched": true,
+                    "address": {
+                      "id": "GATAS717990791",
+                      "address_detail_pid": "GATAS717990791",
+                      "gnaf_pid": "GATAS717990791",
+                      "formatted": "Piermont Resort, Unit 9, 12990 Tasman Highway, Swansea TAS 7190",
+                      "components": {
+                        "building_name": "Piermont Resort",
+                        "flat_type": "Unit",
+                        "flat_number": "9",
+                        "number_first": "12990",
+                        "street_name": "Tasman",
+                        "street_type": "Highway",
+                        "locality_name": "Swansea",
+                        "state": "TAS",
+                        "postcode": "7190"
+                      },
+                      "lat": -42.1557993,
+                      "lng": 148.07629134,
+                      "mesh_block": "60049060000",
+                      "country": "Australia",
+                      "region": "Tasmania",
+                      "locality": "Swansea"
+                    }
+                  },
+                  "country_code": "AU"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`q` is missing."
+          },
+          "401": {
+            "description": "No key, or a key we do not recognise. Send it as `Authorization: Bearer pf_live_...`."
+          },
+          "402": {
+            "description": "The quota for this billing period is spent. `X-Quota-Reset` says when it returns; the billing portal is how to raise it sooner."
+          },
+          "429": {
+            "description": "Too many requests a second for this plan. `RateLimit-Limit` says the rate and `Retry-After` says how long to wait; this is a rate, not a quota, so it clears in a second."
+          }
+        }
+      }
+    },
+    "/v1/addresses/similar": {
+      "get": {
+        "tags": [
+          "G-NAF Addresses"
+        ],
+        "summary": "Find addresses close to one that is misspelled",
+        "description": "For when `/v1/addresses/resolve` found nothing. An address typed by a person is wrong often enough that \"no match\" is not a useful final answer: `1 gorge rd sydenhum` is one address, and saying which is the point.\n\nThe suburb is corrected first, then street lines within it are scored by similarity. Include the suburb if you have it — it is what keeps this fast, and it is what makes the correction good.\n\n**This is the expensive endpoint.** Every other address call is a prefix seek; this is a similarity scan, and it costs three units accordingly. Call it once on an address that failed to resolve, never on a keystroke — use `/v1/addresses` for that.",
+        "operationId": "similarAddresses",
+        "x-units": "3 per request",
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 4
+            },
+            "example": "1 gorge rd sydenhum nsw"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 10,
+              "maximum": 10
+            }
+          },
+          {
+            "name": "country",
+            "in": "query",
+            "description": "Which country's addresses to search, as a two letter ISO 3166-1 code. Defaults to `AU`.\n\nOnly a secret key may send it. A public key is scoped to the country the request came from, which Cloudflare resolves from the browser's address, and this parameter is ignored on one: a key that sits in a page cannot choose what it may see.\n\nA country no address data is loaded for answers 200 with an empty `data`, a `country_code` and a `note` saying so. That is not an error: it is the right answer for somebody typing from a country you do not hold.",
+            "schema": {
+              "type": "string",
+              "minLength": 2,
+              "maxLength": 2,
+              "default": "AU"
+            },
+            "example": "AU"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Addresses close to the term, best first. Empty when nothing was close enough.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Address"
+                      }
+                    },
+                    "country_code": {
+                      "type": "string",
+                      "description": "The country these results were searched in. `AU` today. Distinct from an address's own `country`, which is the country's name."
+                    },
+                    "note": {
+                      "type": "string",
+                      "description": "Why the answer is empty when empty is correct: no address data is loaded for this country, or the country could not be determined. Absent on an ordinary answer."
+                    }
+                  }
+                },
+                "example": {
+                  "data": [
+                    {
+                      "id": "GATAS717990791",
+                      "address_detail_pid": "GATAS717990791",
+                      "gnaf_pid": "GATAS717990791",
+                      "formatted": "Piermont Resort, Unit 9, 12990 Tasman Highway, Swansea TAS 7190",
+                      "components": {
+                        "building_name": "Piermont Resort",
+                        "flat_type": "Unit",
+                        "flat_number": "9",
+                        "number_first": "12990",
+                        "street_name": "Tasman",
+                        "street_type": "Highway",
+                        "locality_name": "Swansea",
+                        "state": "TAS",
+                        "postcode": "7190"
+                      },
+                      "lat": -42.1557993,
+                      "lng": 148.07629134,
+                      "mesh_block": "60049060000",
+                      "country": "Australia",
+                      "region": "Tasmania",
+                      "locality": "Swansea"
+                    }
+                  ],
+                  "country_code": "AU"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`q` is missing, or shorter than four characters, which similarity cannot say anything useful about."
+          },
+          "401": {
+            "description": "No key, or a key we do not recognise. Send it as `Authorization: Bearer pf_live_...`."
+          },
+          "402": {
+            "description": "The quota for this billing period is spent. `X-Quota-Reset` says when it returns; the billing portal is how to raise it sooner."
+          },
+          "429": {
+            "description": "Too many requests a second for this plan. `RateLimit-Limit` says the rate and `Retry-After` says how long to wait; this is a rate, not a quota, so it clears in a second."
+          }
+        }
+      }
+    },
+    "/v1/addresses/{id}": {
+      "get": {
+        "tags": [
+          "G-NAF Addresses"
+        ],
+        "summary": "Retrieve one address by its id",
+        "description": "The pid a search or a resolve returned. This is the endpoint that makes storing a pid worthwhile: the address can be read back a year later without knowing how it was originally typed.\n\nA 404 means G-NAF retired the id between releases, which does happen. Search for the address again to get its current one.",
+        "operationId": "getAddress",
+        "x-units": "1 per request",
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "GAVIC411711441",
+            "description": "The id from a result you stored. In Australia that is G-NAF's ADDRESS_DETAIL_PID, which a result also carries under `address_detail_pid`."
+          },
+          {
+            "name": "country",
+            "in": "query",
+            "description": "Which country's addresses to search, as a two letter ISO 3166-1 code. Defaults to `AU`.\n\nOnly a secret key may send it. A public key is scoped to the country the request came from, which Cloudflare resolves from the browser's address, and this parameter is ignored on one: a key that sits in a page cannot choose what it may see.\n\nA country no address data is loaded for answers 200 with an empty `data`, a `country_code` and a `note` saying so. That is not an error: it is the right answer for somebody typing from a country you do not hold.",
+            "schema": {
+              "type": "string",
+              "minLength": 2,
+              "maxLength": 2,
+              "default": "AU"
+            },
+            "example": "AU"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The address.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/Address"
+                    },
+                    "country_code": {
+                      "type": "string",
+                      "description": "The country these results were searched in. `AU` today. Distinct from an address's own `country`, which is the country's name."
+                    },
+                    "note": {
+                      "type": "string",
+                      "description": "Why the answer is empty when empty is correct: no address data is loaded for this country, or the country could not be determined. Absent on an ordinary answer."
+                    }
+                  }
+                },
+                "example": {
+                  "data": {
+                    "id": "GATAS717990791",
+                    "address_detail_pid": "GATAS717990791",
+                    "gnaf_pid": "GATAS717990791",
+                    "formatted": "Piermont Resort, Unit 9, 12990 Tasman Highway, Swansea TAS 7190",
+                    "components": {
+                      "building_name": "Piermont Resort",
+                      "flat_type": "Unit",
+                      "flat_number": "9",
+                      "number_first": "12990",
+                      "street_name": "Tasman",
+                      "street_type": "Highway",
+                      "locality_name": "Swansea",
+                      "state": "TAS",
+                      "postcode": "7190"
+                    },
+                    "lat": -42.1557993,
+                    "lng": 148.07629134,
+                    "mesh_block": "60049060000",
+                    "country": "Australia",
+                    "region": "Tasmania",
+                    "locality": "Swansea"
+                  },
+                  "country_code": "AU"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "That is not the shape of a G-NAF address id."
+          },
+          "401": {
+            "description": "No key, or a key we do not recognise. Send it as `Authorization: Bearer pf_live_...`."
+          },
+          "402": {
+            "description": "The quota for this billing period is spent. `X-Quota-Reset` says when it returns; the billing portal is how to raise it sooner."
+          },
+          "404": {
+            "description": "No address with that id. Also when the address is outside the country this key may search: an id either resolves for you or it does not, and which ids exist elsewhere is not something a key can probe for."
+          },
+          "429": {
+            "description": "Too many requests a second for this plan. `RateLimit-Limit` says the rate and `Retry-After` says how long to wait; this is a rate, not a quota, so it clears in a second."
+          }
+        }
+      }
+    },
+    "/v1/typeahead": {
+      "get": {
+        "tags": [
+          "Search"
+        ],
+        "summary": "Suggest addresses, suburbs and places as someone types",
+        "description": "Two characters minimum: below that the endpoint returns an empty list rather than matching most of the table.\n\nDebounce by at least 150ms in the client. Each request is a unit, and firing on every keystroke spends them for no better answer.\n\nA result whose `kind` is `address` is a resolved G-NAF record, not a string: it carries `gnaf_pid`, coordinates, and `components` holding the address split into G-NAF's own fields. Store the pid against your own record and the two systems agree they mean the same door, whatever either of you does to the formatting afterwards.\n\nAddress matching is a prefix of the street line, so type it the way it is written: the number first, then the street. A unit in front is understood and resolves to the unit's own record, not the building's: `3/90 Bay Road` returns the pid of unit 3, and `90 Bay Road` returns the pid of the parcel. `unit 3`, `u3`, `apt 3` and `3 90` are read the same way. A suburb name or a postcode alone matches suburbs, not addresses.",
+        "operationId": "typeahead",
+        "x-units": "1 per request",
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 2
+            },
+            "example": "coburg"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 25,
+              "default": 10
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Matches, best first.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SearchEnvelope"
+                },
+                "example": {
+                  "data": [
+                    {
+                      "kind": "address",
+                      "name": "Piermont Resort, Unit 9, 12990 Tasman Highway",
+                      "country": "australia",
+                      "region": "tas",
+                      "locality": "swansea",
+                      "locality_name": "Swansea",
+                      "state": "TAS",
+                      "postcode": "7190",
+                      "lat": -42.1557993,
+                      "lng": 148.07629134,
+                      "score": 0.95,
+                      "gnaf_pid": "GATAS717990791",
+                      "components": {
+                        "building_name": "Piermont Resort",
+                        "flat_type": "Unit",
+                        "flat_number": "9",
+                        "number_first": "12990",
+                        "street_name": "Tasman",
+                        "street_type": "Highway",
+                        "locality_name": "Swansea",
+                        "state": "TAS",
+                        "postcode": "7190"
+                      }
+                    },
+                    {
+                      "kind": "locality",
+                      "slug": "swansea",
+                      "name": "Swansea",
+                      "country": "australia",
+                      "region": "tas",
+                      "postcode": "7190",
+                      "place_count": 3,
+                      "lat": -42.1219,
+                      "lng": 148.0688,
+                      "score": 1
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "402": {
+            "$ref": "#/components/responses/QuotaExhausted"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      }
+    },
+    "/v1/keys": {
+      "get": {
+        "tags": [
+          "Account"
+        ],
+        "summary": "List your keys",
+        "description": "Hints only. The key itself exists in the response that created it and nowhere else.",
+        "operationId": "listKeys",
+        "x-units": "not metered",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Your keys.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/ApiKey"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "402": {
+            "description": "The quota for this billing period is spent. `X-Quota-Reset` says when it returns; the billing portal is how to raise it sooner."
+          },
+          "403": {
+            "description": "Signed in, but the email address is not confirmed."
+          },
+          "429": {
+            "description": "Too many requests a second for this plan. `RateLimit-Limit` says the rate and `Retry-After` says how long to wait; this is a rate, not a quota, so it clears in a second."
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Account"
+        ],
+        "summary": "Create a key",
+        "description": "The response is the only time the key is shown: only a hash is stored, so it cannot be retrieved again.\n\nA public key is safe in a browser and must name the sites it may be used from.",
+        "operationId": "createKey",
+        "x-units": "not metered",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "name"
+                ],
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "maxLength": 60,
+                    "example": "Checkout autocomplete"
+                  },
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "secret",
+                      "public"
+                    ],
+                    "default": "secret"
+                  },
+                  "allowed_origins": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "format": "uri"
+                    },
+                    "example": [
+                      "https://example.com"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created. Copy the key now.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/MintedKey"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "A public key was requested with no allowed origins, or an origin is not an origin."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "402": {
+            "description": "The quota for this billing period is spent. `X-Quota-Reset` says when it returns; the billing portal is how to raise it sooner."
+          },
+          "403": {
+            "description": "Signed in, but the email address is not confirmed."
+          },
+          "429": {
+            "description": "Too many requests a second for this plan. `RateLimit-Limit` says the rate and `Retry-After` says how long to wait; this is a rate, not a quota, so it clears in a second."
+          }
+        }
+      }
+    },
+    "/v1/keys/{id}": {
+      "delete": {
+        "tags": [
+          "Account"
+        ],
+        "summary": "Revoke a key",
+        "description": "Immediate. A key belonging to another account answers 404, the same as one that never existed.",
+        "operationId": "revokeKey",
+        "x-units": "not metered",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Revoked."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "402": {
+            "description": "The quota for this billing period is spent. `X-Quota-Reset` says when it returns; the billing portal is how to raise it sooner."
+          },
+          "404": {
+            "description": "No such key."
+          },
+          "429": {
+            "description": "Too many requests a second for this plan. `RateLimit-Limit` says the rate and `Retry-After` says how long to wait; this is a rate, not a quota, so it clears in a second."
+          }
+        }
+      }
+    },
+    "/v1/me/usage": {
+      "get": {
+        "tags": [
+          "Account"
+        ],
+        "summary": "What this account has used this period",
+        "description": "Nobody should learn their usage from an invoice, so the reset date is part of the answer.",
+        "operationId": "usage",
+        "x-units": "not metered",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Usage against the plan.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/Usage"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "402": {
+            "description": "The quota for this billing period is spent. `X-Quota-Reset` says when it returns; the billing portal is how to raise it sooner."
+          },
+          "429": {
+            "description": "Too many requests a second for this plan. `RateLimit-Limit` says the rate and `Retry-After` says how long to wait; this is a rate, not a quota, so it clears in a second."
+          }
+        }
+      }
+    },
+    "/v1/plans": {
+      "get": {
+        "tags": [
+          "Account"
+        ],
+        "summary": "The pricing ladder",
+        "description": "What each plan includes: units a month, requests a second, overage rate and export cadence. Public, and the same numbers the meter enforces.",
+        "operationId": "plans",
+        "x-units": "not metered",
+        "responses": {
+          "200": {
+            "description": "Every plan, cheapest first.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Plan"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "apiKey": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "A key from https://locio.com.au/account/api. Send it as Authorization: Bearer lc_live_… A secret key belongs on your server; a public key may appear in a page and is limited to the origins you name."
+      },
+      "session": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "locio_session",
+        "description": "The browser session from signing in. These endpoints manage keys and cannot themselves be called with one."
+      }
+    },
+    "responses": {
+      "Unauthorized": {
+        "description": "No key, or not a valid one. Revoked and unknown keys answer the same way.",
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/Problem"
+            }
+          }
+        }
+      },
+      "QuotaExhausted": {
+        "description": "The period's units are spent. X-Quota-Reset says when they return. Distinct from 429 so a client can tell \"buy more\" from \"slow down\".",
+        "headers": {
+          "X-Quota-Limit": {
+            "schema": {
+              "type": "integer"
+            }
+          },
+          "X-Quota-Remaining": {
+            "schema": {
+              "type": "integer"
+            }
+          },
+          "X-Quota-Reset": {
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          }
+        },
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/Problem"
+            }
+          }
+        }
+      },
+      "RateLimited": {
+        "description": "Too many requests a second. Back off for Retry-After seconds; refused requests are not charged.",
+        "headers": {
+          "Retry-After": {
+            "schema": {
+              "type": "integer"
+            }
+          }
+        },
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/Problem"
+            }
+          }
+        }
+      }
+    },
+    "schemas": {
+      "Problem": {
+        "type": "object",
+        "description": "RFC 7807.",
+        "properties": {
+          "type": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "status": {
+            "type": "integer"
+          },
+          "detail": {
+            "type": "string"
+          }
+        }
+      },
+      "SearchEnvelope": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SearchHit"
+            }
+          },
+          "generated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "SearchHit": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "locality",
+              "place",
+              "address"
+            ],
+            "description": "What was matched. An address may sit in a suburb with no page of its own, which is why locality_name and state are text beside a possibly empty slug."
+          },
+          "slug": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "country": {
+            "type": "string"
+          },
+          "region": {
+            "type": "string"
+          },
+          "locality": {
+            "type": "string"
+          },
+          "locality_name": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          },
+          "postcode": {
+            "type": "string"
+          },
+          "place_count": {
+            "type": "integer"
+          },
+          "lat": {
+            "type": "number"
+          },
+          "lng": {
+            "type": "number"
+          },
+          "score": {
+            "type": "number"
+          },
+          "gnaf_pid": {
+            "type": "string",
+            "description": "The G-NAF Address Detail PID, on address results only. This is the id to store against your own record: it is stable across G-NAF releases for an address that has not changed, so two systems holding it agree they mean the same door.",
+            "example": "GAVIC411711441"
+          },
+          "components": {
+            "$ref": "#/components/schemas/AddressComponents",
+            "description": "The address split into G-NAF's own fields, on address results only. Absent when the record predates component storage, which is a different statement from present-and-empty: it means this address has not been parsed, not that it has no unit or street type."
+          }
+        }
+      },
+      "ApiKey": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer"
+          },
+          "name": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "secret",
+              "public"
+            ]
+          },
+          "hint": {
+            "type": "string",
+            "description": "Enough to tell two keys apart, useless to a thief.",
+            "example": "pf_live_…9f2c"
+          },
+          "allowed_origins": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "last_used_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "MintedKey": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/ApiKey"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "key": {
+                "type": "string",
+                "description": "Shown once. Not stored and not retrievable.",
+                "example": "pf_live_3f9a2c7e8b1d4056a2f4c8e19b7d3a5c"
+              },
+              "note": {
+                "type": "string"
+              }
+            }
+          }
+        ]
+      },
+      "Usage": {
+        "type": "object",
+        "properties": {
+          "plan": {
+            "type": "string"
+          },
+          "limit": {
+            "type": "integer"
+          },
+          "used": {
+            "type": "integer"
+          },
+          "remaining": {
+            "type": "integer"
+          },
+          "since": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "resets": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "burst": {
+            "type": "integer",
+            "description": "Requests a second."
+          },
+          "keys": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "integer"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "hint": {
+                  "type": "string"
+                },
+                "units": {
+                  "type": "integer"
+                }
+              }
+            }
+          }
+        }
+      },
+      "Plan": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "example": "growth"
+          },
+          "price_cents": {
+            "type": "integer",
+            "description": "AUD cents a month, excluding GST.",
+            "example": 2500
+          },
+          "units": {
+            "type": "integer",
+            "description": "Units included each period. A typeahead call is one unit; GeoJSON is one per hundred features.",
+            "example": 1000000
+          },
+          "burst_per_second": {
+            "type": "integer",
+            "example": 50
+          },
+          "overage_allowed": {
+            "type": "boolean",
+            "description": "Free hard stops. Paid plans bill for overrun, capped at twice the plan price."
+          },
+          "overage_cents": {
+            "type": "integer",
+            "description": "Cents per overage_units beyond the plan.",
+            "example": 50
+          },
+          "overage_units": {
+            "type": "integer",
+            "example": 10000
+          },
+          "exports": {
+            "type": "string",
+            "enum": [
+              "none",
+              "monthly",
+              "weekly",
+              "daily"
+            ]
+          }
+        }
+      },
+      "AddressComponents": {
+        "type": "object",
+        "description": "One address in G-NAF's field names, so it can be checked against the published schema rather than guessed at. Every field is optional: most Australian addresses have no flat and no level, and G-NAF holds properties with no street number. Values are cased for printing, not in G-NAF's upper case.",
+        "properties": {
+          "building_name": {
+            "type": "string",
+            "description": "G-NAF's own name for the building, where it has one. It leads the address: \"Piermont Resort, Unit 9, 12990 Tasman Highway\".",
+            "example": "Piermont Resort"
+          },
+          "flat_type": {
+            "type": "string",
+            "example": "Shop"
+          },
+          "flat_number": {
+            "type": "string",
+            "example": "3"
+          },
+          "level_type": {
+            "type": "string",
+            "example": "Level"
+          },
+          "level_number": {
+            "type": "string",
+            "example": "3"
+          },
+          "number_first": {
+            "type": "string",
+            "example": "145"
+          },
+          "number_first_suffix": {
+            "type": "string",
+            "example": "A"
+          },
+          "number_last": {
+            "type": "string",
+            "description": "The far end of a range; 435-437 is number_first 435 and number_last 437.",
+            "example": "437"
+          },
+          "number_last_suffix": {
+            "type": "string"
+          },
+          "street_name": {
+            "type": "string",
+            "description": "The name alone, without the type: Sydney, not Sydney Road.",
+            "example": "Sydney"
+          },
+          "street_type": {
+            "type": "string",
+            "example": "Road"
+          },
+          "street_suffix": {
+            "type": "string",
+            "description": "A direction, where the street carries one.",
+            "example": "West"
+          },
+          "locality_name": {
+            "type": "string",
+            "description": "The suburb. Repeated here so an address maps into your own type from one object.",
+            "example": "Coburg"
+          },
+          "state": {
+            "type": "string",
+            "example": "VIC"
+          },
+          "postcode": {
+            "type": "string",
+            "example": "3058"
+          },
+          "lot_number": {
+            "type": "string",
+            "description": "The lot, for an address identified by one rather than by a street number. On a new subdivision it is the only number the address has, and `formatted` writes it as \"Lot 3\".",
+            "example": "3"
+          }
+        }
+      },
+      "Address": {
+        "type": "object",
+        "description": "One G-NAF record, resolved.",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "The id of this address in its country's register, and the one key every address carries. In Australia it is G-NAF's ADDRESS_DETAIL_PID, written under `address_detail_pid` as well. Another register numbers its addresses its own way, and those ids appear under `id` alone. Ids are unique within a country, so store the `country_code` beside it.",
+            "example": "GATAS717990791"
+          },
+          "address_detail_pid": {
+            "type": "string",
+            "description": "G-NAF's ADDRESS_DETAIL_PID. This is the id to store against your own record: it is stable across G-NAF releases for an address that has not changed, so two systems holding it agree they mean the same door. Not to be confused with gnaf.primary_pid, which identifies the parcel this address sits on rather than this address.",
+            "example": "GAVIC411711441"
+          },
+          "gnaf_pid": {
+            "type": "string",
+            "description": "Former name for address_detail_pid. Same value. Removed in the next release.",
+            "example": "GAVIC411711441",
+            "deprecated": true
+          },
+          "formatted": {
+            "type": "string",
+            "description": "The address on one line, as it would be written on an envelope. Composed from the components, so the two can never disagree.",
+            "example": "Shop 3, 145 Sydney Road, Coburg VIC 3058"
+          },
+          "components": {
+            "$ref": "#/components/schemas/AddressComponents"
+          },
+          "lat": {
+            "type": "number",
+            "example": -37.7409
+          },
+          "lng": {
+            "type": "number",
+            "example": 144.9654
+          },
+          "country": {
+            "type": "string",
+            "description": "The country, as a name. Absent when this address sits outside the areas the directory has seeded."
+          },
+          "region": {
+            "type": "string",
+            "description": "The state or territory, as a name. Absent when this address sits outside the areas the directory has seeded."
+          },
+          "locality": {
+            "type": "string",
+            "description": "The suburb, as a name."
+          },
+          "mesh_block": {
+            "type": "string",
+            "description": "The ABS mesh block: the smallest geographic unit the census publishes, and the join key to ABS statistics about the area.",
+            "example": "60049060000"
+          },
+          "gnaf": {
+            "$ref": "#/components/schemas/GNAFRecord"
+          },
+          "country_code": {
+            "type": "string",
+            "description": "Which register this address came from, as a two letter ISO 3166-1 code. Absent on an Australian record, which is the default. The G-NAF specific fields -- `address_detail_pid`, `gnaf_pid`, `mesh_block` and `gnaf` -- appear only on Australian records.",
+            "example": "AU"
+          }
+        }
+      },
+      "GNAFRecord": {
+        "type": "object",
+        "description": "The rest of the G-NAF row: the parcel it sits on, whether it is a unit under another address, and how the coordinate was derived. Absent on a record loaded before this was carried.",
+        "properties": {
+          "date_created": {
+            "type": "string",
+            "format": "date",
+            "description": "When G-NAF first published this address.",
+            "example": "2004-04-29"
+          },
+          "address_site_name": {
+            "type": "string",
+            "description": "G-NAF's name for the site, where the address is part of a named one: a school, a hospital, a caravan park."
+          },
+          "legal_parcel_id": {
+            "type": "string",
+            "description": "The title reference for the parcel, and the join to a state land registry.",
+            "example": "3\\RP4791"
+          },
+          "alias_principal": {
+            "type": "string",
+            "enum": [
+              "PRINCIPAL",
+              "ALIAS"
+            ],
+            "description": "Whether G-NAF treats this as the principal record for the address or as an alias of one. Only principal records are served.",
+            "example": "PRINCIPAL"
+          },
+          "primary_secondary": {
+            "type": "string",
+            "enum": [
+              "PRIMARY",
+              "SECONDARY"
+            ],
+            "description": "SECONDARY means the address is a unit under another. 90 Bay Road, Sandringham is one PRIMARY parcel and five SECONDARY units.",
+            "example": "SECONDARY"
+          },
+          "primary_pid": {
+            "type": "string",
+            "description": "The gnaf_pid of the parcel this address sits under, on a SECONDARY record. The only thing in the data saying several addresses are one building.",
+            "example": "GAVIC422078857"
+          },
+          "geocode_type": {
+            "type": "string",
+            "description": "How the coordinate was derived. The difference between a pin on the door and a pin in the middle of the property.",
+            "example": "FRONTAGE CENTRE SETBACK"
+          }
+        }
+      }
+    }
+  },
+  "security": [
+    {
+      "apiKey": []
+    }
+  ],
+  "tags": [
+    {
+      "name": "G-NAF Addresses",
+      "description": "Australian addresses from G-NAF, the Geocoded National Address File: the national address register, the same source Australia Post and the ABS work from. Resolve one to its G-NAF id, coordinates, ABS mesh block and structured fields. This is the product; everything below it is either a convenience over it or the plumbing around it."
+    },
+    {
+      "name": "Search",
+      "description": "One box over addresses, suburbs and places at once. Use this when you do not know which of the three somebody is typing; use Addresses when you do."
+    },
+    {
+      "name": "Account",
+      "description": "Keys, usage and plans. Session authenticated, not key authenticated."
+    }
+  ]
+}
