@@ -1,0 +1,4742 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "vatnode API",
+    "version": "1.0.0",
+    "summary": "EU VAT validation and rates API",
+    "description": "vatnode validates EU VAT IDs against the EU Commission’s VIES system with\nnational-database fallback, and serves up-to-date VAT rates for every\nEU member state. Coverage: all 27 EU member states + Northern Ireland (XI prefix),\nwhich participates in VIES under the Windsor Framework.\n\nThis specification covers two surfaces:\n\n- The **product API** – VAT validation (`/v1/vat/*`) and VAT rates\n  (`/v1/rates/*`), authenticated with an API key. This is the surface you\n  integrate against from your backend.\n- The **account-management API** – profile and API keys (`/v1/me/*`),\n  authenticated with the logged-in browser session. These endpoints power\n  the vatnode dashboard and are not intended for API-key-authenticated\n  server-to-server use.\n- **VAT monitoring** – subscriptions (`/v1/subscriptions/*`) and webhook\n  registration (`/v1/webhooks/*`), which accept either the dashboard\n  session or a live API key, so integrations such as the Zapier and Make\n  apps can subscribe to VAT events on the account’s behalf.\n\nBilling endpoints (`/v1/billing/*`) remain internal to the dashboard and\nare not part of this contract.\n\n## Authentication\n\n`/v1/vat/*` requires an API key passed as a Bearer token:\n\n```\nAuthorization: Bearer vat_live_...\n```\n\nTest keys (prefix `vat_test_`) accept only VAT IDs starting with `XX` and\nreturn deterministic fixtures without hitting VIES or consuming quota.\n\n`/v1/rates/*` is public and requires no authentication.\n\nThe account-management endpoints (`/v1/me/*`) are authenticated by the\nbetter-auth session cookie (`better-auth.session_token`) set when a user\nlogs in to the dashboard. They do not accept API-key bearer tokens. A\nrequest without a valid session returns `401 UNAUTHORIZED`.\n\nMonitoring (`/v1/subscriptions/*`) and webhook registration\n(`/v1/webhooks/*`) accept either that session cookie or a **live** API key\nas a Bearer token. A test key is rejected with `403 TEST_KEY_NOT_ALLOWED`,\nbecause these endpoints act on real VAT numbers and deliver real HTTP\ncallbacks.\n\n`/v1/account` returns the plan, quota and billing state of the account a\nkey belongs to. It spends no quota and accepts test keys, so integrations\nuse it both as their connection test and to show entitlements.\n\n## Errors\n\nEvery error response uses the same envelope:\n\n```json\n{ \"error\": { \"code\": \"STABLE_CODE\", \"message\": \"…\", \"requestId\": \"…\" } }\n```\n\n`code` is a stable machine-readable string (branch on it, not on\n`message`); `message` is human-readable and may change; `requestId` echoes\nthe `X-Request-Id` response header for support correlation. The full set of\n`code` values is enumerated on the `VatError` and `ManagementError` schemas.\n\nTwo conditions apply to every operation and are not repeated on each one:\n\n- Any request whose body, query or path parameters fail structural\n  validation returns `400` with code `INVALID_REQUEST`.\n- Any unexpected server-side failure returns `500` with code\n  `INTERNAL_ERROR`.\n\n## Consultation numbers\n\nWhen your account has a requester VAT configured (dashboard Account details →\nRequester VAT, or `PATCH /v1/me/requester`), every call to\n`/v1/vat/{vatId}` automatically calls VIES `checkVatApprox` on behalf of\nthat requester. VIES then returns a `consultationNumber` (its own\n`requestIdentifier`) in the response. It proves a check was made against\nVIES at a given date and time – it shows that you checked, not that the\ncounterparty stayed valid afterwards.\n\nThe requester is account-level only – there is no per-call override.\nConfigure it once and it applies to every subsequent check.\n\nWhen a requester is configured, vatnode guarantees one of two outcomes:\na successful response containing a `consultationNumber`, or an error.\nNational-registry fallback is disabled in this mode – a result without\na consultation number would silently strip the audit evidence the\naccount opted into. Specifically:\n\n- If VIES rejects the requester (e.g. deregistered, typo), the API\n  returns `INVALID_REQUESTER` (HTTP 422).\n- If VIES is unavailable, the API returns `VIES_UNAVAILABLE`\n  (HTTP 503) or `UPSTREAM_TIMEOUT` (HTTP 504) – no national\n  fallback is attempted.\n\nAccounts that prefer maximum validation availability over a consultation\nnumber on every check should leave the requester unset.\n\n## What a `checkId` guarantees\n\nEvery successful validation returns a `checkId`, and it is only issued\nafter the check has been committed to vatnode’s own records. There is no\nwindow in which you hold a `checkId` for a check vatnode cannot produce,\nfor as long as we retain the record – check records are anonymised after\nfive years, and de-linked from the account when it is deleted.\nIf the record cannot be written, the call fails with `AUDIT_WRITE_FAILED`\n(HTTP 502) instead of returning a verdict – nothing is billed, and the\nrequest is safe to retry. The same rule covers a bulk job’s positions: a\nposition whose record cannot be written reports `AUDIT_WRITE_FAILED`\ninstead of a verdict, and is not billed.\n",
+    "contact": {
+      "name": "vatnode support",
+      "email": "mail@vatnode.dev",
+      "url": "https://vatnode.dev"
+    },
+    "license": {
+      "name": "Proprietary",
+      "url": "https://vatnode.dev/terms"
+    },
+    "x-logo": {
+      "url": "https://vatnode.dev/icon.svg",
+      "altText": "vatnode"
+    },
+    "x-apisguru-categories": [
+      "financial",
+      "developer_tools"
+    ],
+    "x-tags": [
+      "VAT",
+      "VIES",
+      "tax",
+      "EU",
+      "validation"
+    ],
+    "x-jentic-source-url": "https://vatnode.dev/openapi.yaml"
+  },
+  "servers": [
+    {
+      "url": "https://api.vatnode.dev",
+      "description": "Production"
+    }
+  ],
+  "paths": {
+    "/v1/vat/{vatId}": {
+      "get": {
+        "tags": [
+          "VAT validation"
+        ],
+        "summary": "Validate an EU VAT ID",
+        "description": "Validates the supplied VAT ID against VIES, falling back to the\nrelevant national registry when VIES is unavailable. Without a\nrequester, for some member states vatnode also queries the national\nVAT register at the same time as VIES, and the register answer is\nreturned if it arrives first – `source` is then the register code and\n`consultationNumber` is `null`. Results for the base validation are cached for up to 15\nminutes.\n\nConfigure a requester VAT once in the dashboard (Account details, or\n`PATCH /v1/me/requester`) to obtain a VIES `consultationNumber`\non every call automatically. When the account has a requester\nconfigured, the cache is bypassed so a fresh consultation number is\nalways issued.\n",
+        "operationId": "validateVat",
+        "security": [
+          {
+            "ApiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/VatIdPath"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Validation result.",
+            "headers": {
+              "RateLimit-Limit": {
+                "$ref": "#/components/headers/RateLimitLimit"
+              },
+              "RateLimit-Remaining": {
+                "$ref": "#/components/headers/RateLimitRemaining"
+              },
+              "RateLimit-Reset": {
+                "$ref": "#/components/headers/RateLimitReset"
+              },
+              "Vatnode-Quota-Warning": {
+                "$ref": "#/components/headers/VatnodeQuotaWarning"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VatValidationResult"
+                },
+                "examples": {
+                  "valid": {
+                    "summary": "Valid VAT ID with consultation number",
+                    "value": {
+                      "valid": true,
+                      "vatId": "IE6388047V",
+                      "countryCode": "IE",
+                      "countryName": "Ireland",
+                      "companyName": "GOOGLE IRELAND LIMITED",
+                      "companyAddress": "3RD FLOOR, GORDON HOUSE, BARROW STREET, DUBLIN 4",
+                      "companyRegistrationDate": null,
+                      "companyForm": null,
+                      "industryDescription": null,
+                      "registryCode": null,
+                      "registryCodeName": null,
+                      "taxId": null,
+                      "taxIdName": null,
+                      "commercialName": null,
+                      "companyStatus": null,
+                      "secondaryActivities": [],
+                      "companyAgeYears": null,
+                      "registryPrivacy": false,
+                      "countryVat": {
+                        "vatName": "Value Added Tax",
+                        "vatAbbr": "VAT",
+                        "currency": "EUR",
+                        "standardRate": 23,
+                        "reducedRates": [
+                          13.5,
+                          9
+                        ],
+                        "superReducedRate": 4.8,
+                        "parkingRate": 13.5,
+                        "vatNumberFormat": "IE + 7 digits + 1-2 letters",
+                        "vatNumberPattern": "^IE[0-9]{7}[A-Z]{1,2}$",
+                        "identifiers": {
+                          "registryAuthorityName": {
+                            "en": "Companies Registration Office"
+                          },
+                          "registryName": {
+                            "en": "CRO register"
+                          },
+                          "registryCodeName": {
+                            "en": "registered number"
+                          },
+                          "taxIdName": {
+                            "en": "Tax Reference Number"
+                          },
+                          "vatIdName": {
+                            "en": "VAT number"
+                          }
+                        },
+                        "countryVatUpdatedAt": "2026-04-23"
+                      },
+                      "checkId": "018ef2a1-7c1d-7a3b-8f4e-1b2c3d4e5f60",
+                      "verifiedAt": "2026-04-23T10:15:30.123Z",
+                      "source": "VIES",
+                      "consultationNumber": "WAPIAAAAW1234567",
+                      "specialTerritory": null
+                    }
+                  },
+                  "specialTerritory": {
+                    "summary": "Valid VAT ID whose address falls in a special territory",
+                    "description": "A mainland trader – almost every result – has\n`specialTerritory: null`, as above. This is what the field\nlooks like when the trader address says otherwise.\n",
+                    "value": {
+                      "valid": true,
+                      "vatId": "FI12345671",
+                      "countryCode": "FI",
+                      "countryName": "Finland",
+                      "companyName": "EXAMPLE AB",
+                      "companyAddress": "STRANDGATAN 1, 22100 MARIEHAMN",
+                      "companyRegistrationDate": null,
+                      "companyForm": null,
+                      "industryDescription": null,
+                      "registryCode": "1234567-1",
+                      "registryCodeName": "Y-tunnus",
+                      "taxId": "1234567-1",
+                      "taxIdName": "Y-tunnus",
+                      "commercialName": null,
+                      "companyStatus": null,
+                      "secondaryActivities": [],
+                      "companyAgeYears": null,
+                      "registryPrivacy": false,
+                      "countryVat": {
+                        "vatName": "Arvonlisävero",
+                        "vatAbbr": "ALV",
+                        "currency": "EUR",
+                        "standardRate": 25.5,
+                        "reducedRates": [
+                          10,
+                          13.5
+                        ],
+                        "superReducedRate": null,
+                        "parkingRate": null,
+                        "vatNumberFormat": "FI + 8 digits",
+                        "vatNumberPattern": "^FI\\d{8}$",
+                        "identifiers": {
+                          "registryAuthorityName": {
+                            "fi": "Patentti- ja rekisterihallitus",
+                            "sv": "Patent- och registerstyrelsen",
+                            "en": "Finnish Patent and Registration Office"
+                          },
+                          "registryName": {
+                            "fi": "kaupparekisteri",
+                            "sv": "handelsregistret",
+                            "en": "Trade Register"
+                          },
+                          "registryCodeName": {
+                            "fi": "Y-tunnus",
+                            "sv": "FO-nummer",
+                            "en": "Business ID"
+                          },
+                          "taxIdName": {
+                            "fi": "Y-tunnus",
+                            "sv": "FO-nummer",
+                            "en": "Business ID"
+                          },
+                          "vatIdName": {
+                            "fi": "arvonlisäverotunniste",
+                            "sv": "momsnummer",
+                            "en": "VAT number"
+                          }
+                        },
+                        "countryVatUpdatedAt": "2026-04-23"
+                      },
+                      "checkId": "018ef2a1-7c1d-7a3b-8f4e-1b2c3d4e5f61",
+                      "verifiedAt": "2026-04-23T10:15:30.123Z",
+                      "source": "VIES",
+                      "consultationNumber": null,
+                      "specialTerritory": {
+                        "code": "aland-islands",
+                        "name": "Åland Islands",
+                        "memberState": "FI",
+                        "euVatArea": false,
+                        "source": "ADDRESS_INFERRED"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The VAT ID is not a valid VAT number format (`INVALID_FORMAT`).\nIn test mode, a VAT ID not starting with `XX` also returns\n`INVALID_FORMAT`.\n",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VatError"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "description": "VIES reported the VAT ID or your IP as blocked\n(`VAT_BLOCKED` / `IP_BLOCKED`). Surfaced as `VIES_ERROR`.\n",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VatError"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The account’s configured requester VAT (dashboard setting) is\ninvalid in VIES. Only returned when a requester is configured.\nFix or clear it to continue.\n",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VatError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Monthly quota exceeded.",
+            "headers": {
+              "RateLimit-Limit": {
+                "$ref": "#/components/headers/RateLimitLimit"
+              },
+              "RateLimit-Remaining": {
+                "$ref": "#/components/headers/RateLimitRemaining"
+              },
+              "RateLimit-Reset": {
+                "$ref": "#/components/headers/RateLimitReset"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VatError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unhandled internal server error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VatError"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "VIES returned an unexpected protocol error. Also returned when a\nrequester is configured and VIES answered `valid: true` without a\nconsultation number (retried once first) – the check is withheld\nrather than delivered without its audit evidence, and no quota is\nconsumed.\n\n`AUDIT_WRITE_FAILED` is the third case: the check itself succeeded,\nbut its record could not be stored, so the verdict and its `checkId`\nare withheld rather than handed back unrecorded. No quota is\nconsumed and the check is safe to retry.\n",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VatError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "VIES is unavailable. Without a requester, vatnode also\nexhausted national-registry fallbacks. With a requester,\nnational fallback is intentionally skipped.\n",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VatError"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "VIES request timed out and no fallback was available.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VatError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/vat/bulk": {
+      "post": {
+        "tags": [
+          "VAT validation"
+        ],
+        "summary": "Submit up to 50 000 EU VAT IDs for background validation",
+        "description": "Records the batch and answers `202 Accepted` with a job id. **Nothing is\nvalidated during this request** – the positions are worked through in\nthe background and read back through the three endpoints below.\n\nThis is why the endpoint is asynchronous: a cold-cache VAT ID costs a\nreal VIES round trip, so even a hundred of them cannot honestly be\nanswered inside one HTTP request, let alone fifty thousand. A job runs\nat a deliberately limited concurrency – five checks at a time, whatever\nthe batch size – and steps aside from member states VIES is currently\nstruggling with, so a batch takes a bounded share of upstream capacity\nrather than as much as it can get. There is no priority queue: your live\n`GET /v1/vat/{vatId}` calls are not routed ahead of your batches, they\nsimply are not competing with an unbounded one. Stepping aside applies\nto the affected positions only: the job keeps working every other member\nstate in the batch and comes back to the degraded one later. If it is\nstill degraded when the job runs out of retries, ONLY that member\nstate’s positions are answered `VIES_UNAVAILABLE` – a position is never\ngiven an error for a check that was not attempted.\n\n**Duplicates are collapsed.** VAT IDs are normalised (trimmed,\nuppercased) and de-duplicated, preserving first-seen order, so a list\ncontaining the same ID twice produces ONE position and is charged ONE\nquota unit. `duplicatesDropped` reports how many entries that removed.\n\n**Send an `Idempotency-Key`.** It is optional, and this is the endpoint\nwhere it matters most: if the connection drops before the `202` arrives,\nyou cannot tell whether up to 50 000 billable positions were accepted,\nand a plain retry buys them twice. Repeating the request with the same\nkey AND THE SAME LIST OF VAT IDS returns the SAME job – no second job,\nno second charge. Keys are scoped to your account; a key you have not\nused before starts a new batch. Repeating a key with a DIFFERENT list is\nrejected with `409 IDEMPOTENCY_KEY_CONFLICT` rather than silently\nanswered with the old job (which would hide part of the new batch) or\nbought as a second job (which would defeat the key). 8–200 characters of\nletters, digits, `.`, `-` or `_`; a key that does not parse is refused\nwith `IDEMPOTENCY_KEY_INVALID` rather than ignored, because ignoring it\nwould leave you believing you were protected.\n\n**Quota is spent per position, as it is answered**, exactly as on the\nsingle-ID endpoint – not reserved for the whole batch up front. A\nposition that ends in an upstream error is refunded, and so is one\nwhose answer could not be stored. That per-position accounting has\none gap: if the process running the job dies between reserving a\nposition’s quota and recording its answer, the reservation is not\nreturned. The position stays pending, is answered again when the job\nresumes, and its quota unit is spent twice – bounded by the five\npositions a pass works on at once, so a crash costs at most a\nhandful of positions, not the batch. What running out of quota\nmid-job does depends on the plan: a plan with overage enabled keeps\ngoing and bills the extra positions at its overage rate, while a\nhard-capped plan answers every remaining position with\n`RATE_LIMITED`. Either way the job finishes.\n\nIn test mode (a `vat_test_` key) the job is real and the polling\ncontract is identical, but every position must start with `XX` and is\nanswered from fixtures – no quota, no VIES call, no stored check.\n\nJobs and their positions are kept for **30 days** (`expiresAt`), after\nwhich they are deleted. The checks themselves live on under their own\n`checkId` in your check history.\n",
+        "operationId": "submitVatBulkJob",
+        "security": [
+          {
+            "ApiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9._-]{8,200}$"
+            },
+            "description": "Mint one per batch you intend to submit (a UUID is ideal) and resend\nit verbatim, with the same `vatIds`, on any retry. The same key and\nbatch always resolve to the same job; the same key with a different\nbatch is a `409`, not a silent mismatch.\n",
+            "example": "batch-2026-09-07-run-1"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BulkVatRequest"
+              },
+              "example": {
+                "vatIds": [
+                  "IE6388047V",
+                  "DE811907980",
+                  "FR40303265045"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "The batch was recorded. Poll the job for progress. A repeat of a\nrequest that carried an `Idempotency-Key` and the SAME `vatIds`\nanswers `202` with the job that key already created – `status` and\nthe counters are then whatever that job has reached by now, not\nrecomputed from this request, and not necessarily `queued`.\n",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BulkJobAccepted"
+                },
+                "example": {
+                  "jobId": "0f8b1d64-4a1e-4a5e-9f4a-2b1c8d3e5f60",
+                  "status": "queued",
+                  "totalItems": 3,
+                  "duplicatesDropped": 0,
+                  "createdAt": "2026-09-07T09:12:00.000Z"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "409": {
+            "description": "This `Idempotency-Key` was already used for a different batch\n(`IDEMPOTENCY_KEY_CONFLICT`). The job it originally bought is\nuntouched; resubmit with a new key to run this batch.\n",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManagementError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "VAT validation"
+        ],
+        "summary": "List this account’s bulk jobs",
+        "operationId": "listVatBulkJobs",
+        "security": [
+          {
+            "ApiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/PageQuery"
+          },
+          {
+            "$ref": "#/components/parameters/LimitQuery"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Jobs newest first.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BulkJobPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      }
+    },
+    "/v1/vat/bulk/{jobId}": {
+      "get": {
+        "tags": [
+          "VAT validation"
+        ],
+        "summary": "Read a bulk job’s status and progress",
+        "description": "Progress counters are kept on the job itself, so this stays a single\ncheap read however large the batch is. Poll it until `status` is\nterminal – `finished`, `cancelled` or `failed` – then page through the\nresults. Every job reaches one of the three: there is a bound on how\nmany times a job may step aside from a degraded member state, and on\nthe last attempt the affected positions are answered rather than\npostponed again.\n",
+        "operationId": "getVatBulkJob",
+        "security": [
+          {
+            "ApiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/BulkJobIdPath"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The job.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BulkJob"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/v1/vat/bulk/{jobId}/results": {
+      "get": {
+        "tags": [
+          "VAT validation"
+        ],
+        "summary": "Page through a bulk job’s positions",
+        "description": "Positions in submit order, readable while the job is still running —\na position that is not answered yet has `status: pending`. Each answered\nposition carries the same `checkId` as the equivalent single check, so\nit is traceable to a stored record.\n\nOn a `cancelled` job, `pending` is final: those positions were never\nchecked, never charged, and will never be answered. Resubmit the ones\nyou still need as a new batch.\n",
+        "operationId": "listVatBulkJobResults",
+        "security": [
+          {
+            "ApiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/BulkJobIdPath"
+          },
+          {
+            "$ref": "#/components/parameters/PageQuery"
+          },
+          {
+            "$ref": "#/components/parameters/LimitQuery"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "One page of positions.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BulkJobResultPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/v1/vat/bulk/{jobId}/cancel": {
+      "post": {
+        "tags": [
+          "VAT validation"
+        ],
+        "summary": "Ask a running bulk job to stop",
+        "description": "Idempotent. The job stops at its next position and ends `cancelled`;\npositions already answered keep their result and stay billed – the\ncheck ran and its record exists. Positions it had not reached stay\n`pending` for good and are not charged. Cancelling an already-finished\njob changes nothing and returns it as it stands.\n\nRevoking the API key a job was submitted with stops it the same way:\nrevocation means nothing more is read or written with that key, and a\nrunning batch is no exception. Such a job ends `cancelled` with\n`errorCode: API_KEY_REVOKED`. Everything it had already collected stays\nreadable through your other keys and in your check history.\n",
+        "operationId": "cancelVatBulkJob",
+        "security": [
+          {
+            "ApiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/BulkJobIdPath"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The job as it now stands.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BulkJob"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/v1/rates": {
+      "get": {
+        "tags": [
+          "VAT rates"
+        ],
+        "summary": "List VAT rates for all European countries",
+        "operationId": "listRates",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "List of VAT rates for all 45 European countries: EU-27, Northern\nIreland (XI), and non-EU countries (e.g. Norway, Switzerland, the\nUnited Kingdom, Ukraine, Turkey). The `isEU` flag distinguishes\nmember states. These are reference rates only – VAT number\nvalidation covers EU-27 + Northern Ireland.\n",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "rates",
+                    "count"
+                  ],
+                  "properties": {
+                    "rates": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/VatRate"
+                      }
+                    },
+                    "count": {
+                      "type": "integer",
+                      "example": 45
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The path is not recognised. `GET /v1/rates` takes no parameters and\nrequires no authentication, so it produces no client error of its\nown; the API’s global handler returns the standard `NOT_FOUND`\nenvelope only for an unrecognised path under the rates namespace\n(for example a mistyped `/v1/rates/{code}`).\n",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VatError"
+                }
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/v1/rates/{countryCode}": {
+      "get": {
+        "tags": [
+          "VAT rates"
+        ],
+        "summary": "Get VAT rates for a single country",
+        "operationId": "getRate",
+        "security": [],
+        "parameters": [
+          {
+            "name": "countryCode",
+            "in": "path",
+            "required": true,
+            "description": "ISO 3166-1 alpha-2 country code (uppercase). Use `GR` for Greece —\nthe VAT prefix `EL` is **not** accepted on this endpoint and returns\n`404`. Northern Ireland is `XI`.\n",
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Z]{2}$",
+              "example": "DE"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "VAT rates for the country.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VatRate"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The `countryCode` path segment is not exactly two letters\n(`INVALID_REQUEST`). A well-formed but unknown code returns `404`\ninstead.\n",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VatError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown country code (`NOT_FOUND`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VatError"
+                }
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/v1/account": {
+      "get": {
+        "tags": [
+          "Account summary"
+        ],
+        "summary": "Account summary for the calling API key",
+        "description": "Plan entitlements, quota consumption, monitoring usage and billing\nstate for the account the key belongs to. Read-only and local: it never\ncalls VIES, never contacts the payment provider and never spends\nquota, so an integration can poll it cheaply and use it as its\nconnection test – an invalid or revoked key returns `401`.\n\nTest keys are accepted, so a customer can wire up an integration\nagainst the sandbox before switching to a live key.\n\nCarries no personal data: an API key identifies an account, not a\nperson.\n",
+        "operationId": "getAccount",
+        "security": [
+          {
+            "ApiKey": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Entitlements and consumption for the account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "key",
+                    "plan",
+                    "usage",
+                    "monitoring",
+                    "billing"
+                  ],
+                  "properties": {
+                    "key": {
+                      "type": "object",
+                      "required": [
+                        "id",
+                        "label",
+                        "environment"
+                      ],
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "label": {
+                          "type": "string",
+                          "description": "Human-readable key label set in the dashboard.",
+                          "example": "Production"
+                        },
+                        "environment": {
+                          "type": "string",
+                          "enum": [
+                            "live",
+                            "test"
+                          ]
+                        }
+                      }
+                    },
+                    "plan": {
+                      "type": "object",
+                      "required": [
+                        "id",
+                        "name",
+                        "monthlyQuota",
+                        "subscriptionsLimit",
+                        "webhooksLimit"
+                      ],
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "example": "starter"
+                        },
+                        "name": {
+                          "type": "string",
+                          "example": "Starter"
+                        },
+                        "monthlyQuota": {
+                          "type": "integer",
+                          "description": "Included validations per month. `-1` = unlimited.",
+                          "example": 1000
+                        },
+                        "subscriptionsLimit": {
+                          "type": "integer",
+                          "description": "Monitored VAT IDs allowed. `-1` = unlimited, `0` = not available on this plan.",
+                          "example": 25
+                        },
+                        "webhooksLimit": {
+                          "type": "integer",
+                          "description": "Webhook endpoints allowed. `-1` = unlimited, `0` = not available on this plan.",
+                          "example": 3
+                        }
+                      }
+                    },
+                    "usage": {
+                      "type": "object",
+                      "required": [
+                        "used",
+                        "limit",
+                        "remaining",
+                        "overage",
+                        "resetAt"
+                      ],
+                      "properties": {
+                        "used": {
+                          "type": "integer",
+                          "description": "Validations spent in the current quota window.",
+                          "example": 128
+                        },
+                        "limit": {
+                          "type": "integer",
+                          "description": "Same as `plan.monthlyQuota`, repeated so a client needs one field.",
+                          "example": 1000
+                        },
+                        "remaining": {
+                          "type": "integer",
+                          "description": "Validations left inside the included quota, floored at 0. `-1`\non an unlimited plan. Checks continue past 0 where the plan\nallows overage – this is not a hard stop.\n",
+                          "example": 872
+                        },
+                        "overage": {
+                          "type": "integer",
+                          "description": "Validations beyond the included quota in this window.",
+                          "example": 0
+                        },
+                        "resetAt": {
+                          "type": "string",
+                          "format": "date-time",
+                          "nullable": true,
+                          "description": "When the quota window rolls over, anchored to the signup day-of-month."
+                        }
+                      }
+                    },
+                    "monitoring": {
+                      "type": "object",
+                      "required": [
+                        "subscriptions",
+                        "webhooks"
+                      ],
+                      "description": "Current consumption against the plan’s monitoring limits, counted\nthe same way those limits are enforced on create.\n",
+                      "properties": {
+                        "subscriptions": {
+                          "$ref": "#/components/schemas/UsageAgainstLimit"
+                        },
+                        "webhooks": {
+                          "$ref": "#/components/schemas/UsageAgainstLimit"
+                        }
+                      }
+                    },
+                    "billing": {
+                      "type": "object",
+                      "required": [
+                        "status",
+                        "interval",
+                        "currentPeriodEnd",
+                        "nextChargeAt"
+                      ],
+                      "properties": {
+                        "status": {
+                          "type": "string",
+                          "nullable": true,
+                          "enum": [
+                            "active",
+                            "past_due",
+                            "canceling",
+                            "canceled",
+                            null
+                          ],
+                          "description": "Subscription state. `null` on a free account."
+                        },
+                        "interval": {
+                          "type": "string",
+                          "nullable": true,
+                          "enum": [
+                            "month",
+                            "year",
+                            null
+                          ],
+                          "description": "Billing cadence. `null` when there is no paid subscription."
+                        },
+                        "currentPeriodEnd": {
+                          "type": "string",
+                          "format": "date-time",
+                          "nullable": true,
+                          "description": "End of the paid period. `null` on a free account."
+                        },
+                        "nextChargeAt": {
+                          "type": "string",
+                          "format": "date-time",
+                          "nullable": true,
+                          "description": "When the subscription renews. `null` unless the status is\n`active` — a cancelling subscription runs to the end of the\nperiod and is not charged again.\n"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      }
+    },
+    "/v1/me": {
+      "get": {
+        "tags": [
+          "Account"
+        ],
+        "summary": "Get the current user",
+        "description": "Profile, plan and current-period usage for the authenticated user.",
+        "operationId": "getMe",
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The authenticated user’s profile, plan and usage.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeProfile"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/SessionRequired"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Account"
+        ],
+        "summary": "Delete the current account",
+        "description": "Soft-deletes the authenticated user’s account: revokes all live API\nkeys immediately, invalidates all sessions, and anonymises the email\nafter a 30-day grace period. Idempotency is not offered – a second\ncall returns `409 ALREADY_DELETED`.\n",
+        "operationId": "deleteMe",
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Account scheduled for deletion.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/SessionRequired"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "description": "Account is already scheduled for deletion (`ALREADY_DELETED`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManagementError"
+                }
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/DbUnavailable"
+          }
+        }
+      }
+    },
+    "/v1/me/usage": {
+      "get": {
+        "tags": [
+          "Account"
+        ],
+        "summary": "Get detailed usage statistics",
+        "description": "Current billing-period request usage (included + overage), lifetime\nrequest total and monitoring-subscription usage against plan limits.\n",
+        "operationId": "getMeUsage",
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Usage statistics for the current billing period.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeUsage"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/SessionRequired"
+          }
+        }
+      }
+    },
+    "/v1/me/notifications": {
+      "get": {
+        "tags": [
+          "Account"
+        ],
+        "summary": "Get VAT-monitoring notification settings",
+        "operationId": "getMeNotifications",
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Account-level email-alert settings for VAT monitoring.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationSettings"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/SessionRequired"
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "Account"
+        ],
+        "summary": "Update VAT-monitoring notification settings",
+        "description": "Toggle email alerts and/or set the target address. Pass an empty\nstring for `email` to clear the override and fall back to the account\nemail.\n",
+        "operationId": "updateMeNotifications",
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "emailEnabled": {
+                    "type": "boolean"
+                  },
+                  "email": {
+                    "type": "string",
+                    "description": "A valid email address, or an empty string to clear the override."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The updated notification settings.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationSettings"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/SessionRequired"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/DbUnavailable"
+          }
+        }
+      }
+    },
+    "/v1/me/notifications/email-preview": {
+      "get": {
+        "tags": [
+          "Account"
+        ],
+        "summary": "Render a sample monitoring digest email",
+        "description": "Returns a representative alert email (subject, HTML and text) so the\nuser can preview exactly what a monitoring digest looks like.\n",
+        "operationId": "getMeEmailPreview",
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The rendered sample email.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "subject",
+                    "html",
+                    "text"
+                  ],
+                  "properties": {
+                    "subject": {
+                      "type": "string"
+                    },
+                    "html": {
+                      "type": "string"
+                    },
+                    "text": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/SessionRequired"
+          }
+        }
+      }
+    },
+    "/v1/me/security-events": {
+      "get": {
+        "tags": [
+          "Account"
+        ],
+        "summary": "List recent security events",
+        "description": "The last 20 sign-in / signup and API-key audit events for the\nauthenticated user, merged and sorted newest-first. Drives the\n‘Recent activity’ card in the dashboard.\n",
+        "operationId": "getMeSecurityEvents",
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Recent security events.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "events"
+                  ],
+                  "properties": {
+                    "events": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/SecurityEvent"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/SessionRequired"
+          }
+        }
+      }
+    },
+    "/v1/me/checks": {
+      "get": {
+        "tags": [
+          "Account"
+        ],
+        "summary": "List VAT check history",
+        "description": "Paginated history of VAT checks made with the account’s API keys (50 per page).",
+        "operationId": "getMeChecks",
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "description": "1-based page number. Invalid or missing values default to 1.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of VAT check history.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChecksHistory"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/SessionRequired"
+          }
+        }
+      }
+    },
+    "/v1/me/checks/export": {
+      "get": {
+        "tags": [
+          "Account"
+        ],
+        "summary": "Export VAT check history as CSV",
+        "description": "Downloads the account’s full VAT check history (all pages, not\npaginated) as a CSV file, including the VIES consultation number\nfor each check. Returned as a file attachment.\n",
+        "operationId": "exportMeChecks",
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The full VAT check history as a CSV file attachment.",
+            "headers": {
+              "Content-Disposition": {
+                "description": "Attachment with a dated filename, e.g. `attachment; filename=\"vatnode-checks-2026-07-15.csv\"`.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "text/csv": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                },
+                "example": "\"checkId\",\"vatId\",\"countryCode\",\"valid\",\"companyName\",\"source\",\"errorCode\",\"cacheHit\",\"createdAt\",\"keyLabel\",\"consultationNumber\"\n\"a1b2c3d4-0000-0000-0000-000000000000\",\"LU26375245\",\"LU\",\"true\",\"Amazon Europe Core S.a r.l.\",\"VIES\",\"\",\"false\",\"2026-07-15T09:12:44.000Z\",\"Production\",\"WAPIAAAAWaJt2C8w\"\n"
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/SessionRequired"
+          }
+        }
+      }
+    },
+    "/v1/me/api-keys": {
+      "get": {
+        "tags": [
+          "Account"
+        ],
+        "summary": "List API keys",
+        "description": "Lists the account’s live API keys (previews only, never the full\nsecret) plus the current test key and the plan’s key limit.\n",
+        "operationId": "listApiKeys",
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The account’s API keys.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiKeysList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/SessionRequired"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Account"
+        ],
+        "summary": "Create a live API key",
+        "description": "Mints a new live API key. The full secret is returned exactly once in\nthis response and never again – store it securely.\n",
+        "operationId": "createApiKey",
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "label"
+                ],
+                "properties": {
+                  "label": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 100,
+                    "example": "Production server"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The created key, including the full secret (shown once).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiKeyCreated"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/SessionRequired"
+          },
+          "422": {
+            "description": "The plan’s API-key limit has been reached (`KEY_LIMIT_REACHED`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManagementError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Key creation failed (`CREATION_FAILED`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManagementError"
+                }
+              }
+            }
+          },
+          "503": {
+            "$ref": "#/components/responses/DbUnavailable"
+          }
+        }
+      }
+    },
+    "/v1/me/api-keys/{id}": {
+      "delete": {
+        "tags": [
+          "Account"
+        ],
+        "summary": "Delete an API key",
+        "description": "Revokes (soft-deletes) a live API key. The key stops working immediately.",
+        "operationId": "deleteApiKey",
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ApiKeyIdPath"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The key was revoked.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/SessionRequired"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/v1/me/api-keys/{id}/revoke": {
+      "post": {
+        "tags": [
+          "Account"
+        ],
+        "summary": "Revoke an API key",
+        "description": "Revokes (soft-deletes) a live API key. Equivalent outcome to\n`DELETE /v1/me/api-keys/{id}`.\n",
+        "operationId": "revokeApiKey",
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ApiKeyIdPath"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The key was revoked.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/SessionRequired"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/v1/me/test-key/regenerate": {
+      "post": {
+        "tags": [
+          "Account"
+        ],
+        "summary": "Regenerate the test API key",
+        "description": "Issues a fresh test key, replacing the previous one.",
+        "operationId": "regenerateTestKey",
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The new test key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "key"
+                  ],
+                  "properties": {
+                    "key": {
+                      "type": "string",
+                      "example": "vat_test_a1b2c3d4e5f6"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/SessionRequired"
+          },
+          "500": {
+            "description": "Regeneration failed (`REGENERATION_FAILED`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManagementError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/me/onboarding": {
+      "get": {
+        "tags": [
+          "Account"
+        ],
+        "summary": "Should the welcome modal be shown?",
+        "operationId": "getOnboarding",
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Whether the onboarding welcome modal should be displayed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "shouldShow"
+                  ],
+                  "properties": {
+                    "shouldShow": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/SessionRequired"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Account"
+        ],
+        "summary": "Dismiss the welcome modal",
+        "description": "Marks the onboarding modal as seen (idempotent). Any provided answers\nare emailed to the vatnode team; there is no persisted answer store.\n",
+        "operationId": "dismissOnboarding",
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "role": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "maxLength": 50
+                  },
+                  "companySize": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "maxLength": 20
+                  },
+                  "useCase": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "maxLength": 50
+                  },
+                  "currentSolution": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "maxLength": 50
+                  },
+                  "trigger": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "maxLength": 50
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The modal was dismissed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/SessionRequired"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/v1/me/requester": {
+      "get": {
+        "tags": [
+          "Account"
+        ],
+        "summary": "Get the account-level VIES requester",
+        "description": "The merchant’s own EU VAT, attached as the `requester` on VIES calls\nso responses carry a consultation number.\n",
+        "operationId": "getRequester",
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The configured requester (both fields null when unset).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Requester"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/SessionRequired"
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "Account"
+        ],
+        "summary": "Set or clear the account-level VIES requester",
+        "description": "Sets the merchant’s own EU VAT (verified against VIES before saving)\nor clears it. Accepts either a single full `vatId` or the split\n`requesterCountryCode` + `requesterVatNumber` form. Pass\n`{ \"vatId\": null }` to clear.\n",
+        "operationId": "updateRequester",
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "required": [
+                      "vatId"
+                    ],
+                    "properties": {
+                      "vatId": {
+                        "type": [
+                          "string",
+                          "null"
+                        ],
+                        "minLength": 3,
+                        "maxLength": 22,
+                        "example": "FI12345678"
+                      }
+                    }
+                  },
+                  {
+                    "type": "object",
+                    "required": [
+                      "requesterCountryCode",
+                      "requesterVatNumber"
+                    ],
+                    "properties": {
+                      "requesterCountryCode": {
+                        "type": [
+                          "string",
+                          "null"
+                        ],
+                        "description": "Two-letter EU country code (VIES `EL` for Greece)."
+                      },
+                      "requesterVatNumber": {
+                        "type": [
+                          "string",
+                          "null"
+                        ],
+                        "minLength": 1,
+                        "maxLength": 20
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The saved requester.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/SuccessResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/Requester"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid VAT format (`INVALID_FORMAT`), VIES does not recognise the\nnumber as active (`VIES_NOT_REGISTERED`), or the request body did\nnot match either accepted shape (`INVALID_REQUEST`).\n",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManagementError"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/SessionRequired"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/v1/subscriptions": {
+      "get": {
+        "tags": [
+          "Monitoring subscriptions"
+        ],
+        "summary": "List monitoring subscriptions",
+        "description": "All non-cancelled VAT-monitoring subscriptions for the account.",
+        "operationId": "listSubscriptions",
+        "security": [
+          {
+            "SessionCookie": []
+          },
+          {
+            "ApiKey": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The account’s monitoring subscriptions and plan limit.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubscriptionList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/SessionRequired"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/DbUnavailable"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Monitoring subscriptions"
+        ],
+        "summary": "Create a monitoring subscription",
+        "description": "Starts monitoring a VAT ID. Enforces per-plan limits and rejects\nduplicates of an already-monitored VAT ID.\n",
+        "operationId": "createSubscription",
+        "security": [
+          {
+            "SessionCookie": []
+          },
+          {
+            "ApiKey": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "vatId"
+                ],
+                "properties": {
+                  "vatId": {
+                    "type": "string",
+                    "minLength": 4,
+                    "maxLength": 20,
+                    "example": "IE6388047V"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The created subscription.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Subscription"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The VAT ID does not parse to a valid format (`INVALID_FORMAT`), or\nthe request body failed structural validation – e.g. `vatId`\nmissing or outside 4–20 characters (`INVALID_REQUEST`).\n",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManagementError"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/SessionRequired"
+          },
+          "403": {
+            "description": "Monitoring is not available on the current plan or the plan’s\nsubscription limit has been reached (`PLAN_LIMIT`).\n",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManagementError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "This VAT ID is already being monitored (`ALREADY_EXISTS`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManagementError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Subscription creation failed (`INTERNAL_ERROR`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManagementError"
+                }
+              }
+            }
+          },
+          "503": {
+            "$ref": "#/components/responses/DbUnavailable"
+          }
+        }
+      }
+    },
+    "/v1/subscriptions/{id}": {
+      "patch": {
+        "tags": [
+          "Monitoring subscriptions"
+        ],
+        "summary": "Pause or resume a subscription",
+        "operationId": "updateSubscription",
+        "security": [
+          {
+            "SessionCookie": []
+          },
+          {
+            "ApiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/SubscriptionIdPath"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "status"
+                ],
+                "properties": {
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "active",
+                      "paused"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The updated subscription.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Subscription"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/SessionRequired"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/DbUnavailable"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Monitoring subscriptions"
+        ],
+        "summary": "Cancel a subscription",
+        "description": "Soft-deletes (cancels) a monitoring subscription.",
+        "operationId": "cancelSubscription",
+        "security": [
+          {
+            "SessionCookie": []
+          },
+          {
+            "ApiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/SubscriptionIdPath"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The subscription was cancelled.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/SessionRequired"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/DbUnavailable"
+          }
+        }
+      }
+    },
+    "/v1/webhooks": {
+      "get": {
+        "tags": [
+          "Webhook management"
+        ],
+        "summary": "List webhooks",
+        "operationId": "listWebhooks",
+        "security": [
+          {
+            "SessionCookie": []
+          },
+          {
+            "ApiKey": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The account’s active webhook endpoints.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/SessionRequired"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/DbUnavailable"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Webhook management"
+        ],
+        "summary": "Create a webhook",
+        "description": "Registers a new webhook endpoint. The URL must be a publicly\nreachable HTTPS endpoint (validated against SSRF). The signing\n`secret` is returned exactly once in this response. New webhooks start\n`disabled` and are activated only after a successful test delivery\n(`POST /v1/webhooks/{id}/test`).\n",
+        "operationId": "createWebhook",
+        "security": [
+          {
+            "SessionCookie": []
+          },
+          {
+            "ApiKey": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "url"
+                ],
+                "properties": {
+                  "url": {
+                    "type": "string",
+                    "format": "uri",
+                    "description": "Publicly reachable HTTPS endpoint.",
+                    "example": "https://example.com/webhooks/vatnode"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The created webhook, including the signing secret (shown once).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookCreated"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/SessionRequired"
+          },
+          "422": {
+            "description": "The URL is not a safe public HTTPS endpoint (`INVALID_URL`), or the\nplan’s webhook limit has been reached / webhooks are unavailable on\nthe plan (`WEBHOOK_LIMIT_REACHED`).\n",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManagementError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Webhook creation failed (`INTERNAL_ERROR`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManagementError"
+                }
+              }
+            }
+          },
+          "503": {
+            "$ref": "#/components/responses/DbUnavailable"
+          }
+        }
+      }
+    },
+    "/v1/webhooks/{id}": {
+      "get": {
+        "tags": [
+          "Webhook management"
+        ],
+        "summary": "Get a webhook",
+        "description": "A single webhook with its 20 most recent delivery attempts.",
+        "operationId": "getWebhook",
+        "security": [
+          {
+            "SessionCookie": []
+          },
+          {
+            "ApiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/WebhookIdPath"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The webhook and its recent deliveries.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookDetail"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/SessionRequired"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/DbUnavailable"
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "Webhook management"
+        ],
+        "summary": "Update a webhook",
+        "description": "Update the URL and/or status. A webhook cannot be set `active`\ndirectly – it must pass a test (`TEST_REQUIRED`). Changing the URL\ndrops the webhook back to `disabled` and requires a fresh test.\n",
+        "operationId": "updateWebhook",
+        "security": [
+          {
+            "SessionCookie": []
+          },
+          {
+            "ApiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/WebhookIdPath"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "url": {
+                    "type": "string",
+                    "format": "uri",
+                    "description": "New publicly reachable HTTPS endpoint."
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "disabled"
+                    ],
+                    "description": "Only `disabled` is accepted; activation happens via a test."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The updated webhook.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Webhook"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/SessionRequired"
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "422": {
+            "description": "Attempted to set `active` directly (`TEST_REQUIRED`) or the URL is\nnot a safe public HTTPS endpoint (`INVALID_URL`).\n",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManagementError"
+                }
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/DbUnavailable"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Webhook management"
+        ],
+        "summary": "Delete a webhook",
+        "description": "Soft-deletes (deactivates) a webhook endpoint. The row is retained for\ndelivery history but stops counting against the plan’s webhook limit,\nso the slot is free immediately.\n",
+        "operationId": "deleteWebhook",
+        "security": [
+          {
+            "SessionCookie": []
+          },
+          {
+            "ApiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/WebhookIdPath"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The webhook was deleted.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/SessionRequired"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/DbUnavailable"
+          }
+        }
+      }
+    },
+    "/v1/webhooks/{id}/test": {
+      "post": {
+        "tags": [
+          "Webhook management"
+        ],
+        "summary": "Send a test event",
+        "description": "Sends a signed `webhook.test` event to the endpoint and returns the\nlive result (status code, latency, error) without persisting it to\ndelivery history. A successful (2xx) test is the only way a webhook\nbecomes `active`.\n",
+        "operationId": "testWebhook",
+        "security": [
+          {
+            "SessionCookie": []
+          },
+          {
+            "ApiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/WebhookIdPath"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The live test result. `ok` is true only for a 2xx response from the\nendpoint; transport failures return `ok: false` with a null status\ncode and an `error` message.\n",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookTestResult"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/SessionRequired"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/DbUnavailable"
+          }
+        }
+      }
+    },
+    "/v1/webhooks/{id}/deliveries": {
+      "get": {
+        "tags": [
+          "Webhook management"
+        ],
+        "summary": "List webhook deliveries",
+        "description": "The 50 most recent delivery attempts for a webhook, newest-first.",
+        "operationId": "listWebhookDeliveries",
+        "security": [
+          {
+            "SessionCookie": []
+          },
+          {
+            "ApiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/WebhookIdPath"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Recent delivery attempts for the webhook.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookDeliveriesList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/SessionRequired"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/DbUnavailable"
+          }
+        }
+      }
+    }
+  },
+  "webhooks": {
+    "vatBecameValid": {
+      "post": {
+        "tags": [
+          "Webhooks"
+        ],
+        "summary": "VAT_BECAME_VALID",
+        "operationId": "webhookVatBecameValid",
+        "description": "Sent when a monitored VAT ID transitions from invalid → valid in VIES.\nDelivered as a signed HTTP POST to every active webhook URL registered\non the account.\n",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/WebhookSignatureHeader"
+          },
+          {
+            "$ref": "#/components/parameters/WebhookEventHeader"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WebhookEnvelopeVatBecameValid"
+              }
+            }
+          }
+        },
+        "responses": {
+          "2XX": {
+            "description": "Acknowledged. Any 2xx status is treated as successful delivery."
+          }
+        }
+      }
+    },
+    "vatBecameInvalid": {
+      "post": {
+        "tags": [
+          "Webhooks"
+        ],
+        "summary": "VAT_BECAME_INVALID",
+        "operationId": "webhookVatBecameInvalid",
+        "description": "Sent when a monitored VAT ID transitions from valid → invalid in VIES.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/WebhookSignatureHeader"
+          },
+          {
+            "$ref": "#/components/parameters/WebhookEventHeader"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WebhookEnvelopeVatBecameInvalid"
+              }
+            }
+          }
+        },
+        "responses": {
+          "2XX": {
+            "description": "Acknowledged."
+          }
+        }
+      }
+    },
+    "companyNameChanged": {
+      "post": {
+        "tags": [
+          "Webhooks"
+        ],
+        "summary": "COMPANY_NAME_CHANGED",
+        "operationId": "webhookCompanyNameChanged",
+        "description": "Sent when the company name returned by VIES for a monitored VAT ID\ndiffers from the previously-recorded name. Fires only while the VAT ID\nis currently valid.\n",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/WebhookSignatureHeader"
+          },
+          {
+            "$ref": "#/components/parameters/WebhookEventHeader"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WebhookEnvelopeCompanyNameChanged"
+              }
+            }
+          }
+        },
+        "responses": {
+          "2XX": {
+            "description": "Acknowledged."
+          }
+        }
+      }
+    },
+    "companyAddressChanged": {
+      "post": {
+        "tags": [
+          "Webhooks"
+        ],
+        "summary": "COMPANY_ADDRESS_CHANGED",
+        "operationId": "webhookCompanyAddressChanged",
+        "description": "Sent when the company address returned by VIES for a monitored VAT ID\ndiffers from the previously-recorded address. Fires only while the\nVAT ID is currently valid.\n",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/WebhookSignatureHeader"
+          },
+          {
+            "$ref": "#/components/parameters/WebhookEventHeader"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WebhookEnvelopeCompanyAddressChanged"
+              }
+            }
+          }
+        },
+        "responses": {
+          "2XX": {
+            "description": "Acknowledged."
+          }
+        }
+      }
+    },
+    "viesUnavailable": {
+      "post": {
+        "tags": [
+          "Webhooks"
+        ],
+        "summary": "VIES_UNAVAILABLE",
+        "operationId": "webhookViesUnavailable",
+        "description": "Sent at 23:00 UTC when every retry attempt (hourly between 06:00 and\n22:00 UTC) failed to reach VIES for this subscription. The previous\nrecorded state of the VAT ID is unchanged – this event signals only\nthat the daily check could not complete.\n",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/WebhookSignatureHeader"
+          },
+          {
+            "$ref": "#/components/parameters/WebhookEventHeader"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WebhookEnvelopeViesUnavailable"
+              }
+            }
+          }
+        },
+        "responses": {
+          "2XX": {
+            "description": "Acknowledged."
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "headers": {
+      "RateLimitLimit": {
+        "description": "Your plan’s monthly base quota. Emitted for live keys on both `200`\nand `429` responses; omitted for unlimited (enterprise/internal) plans\nand in test mode. Uses the IETF draft `RateLimit-*` header names.\n",
+        "schema": {
+          "type": "integer",
+          "example": 100
+        }
+      },
+      "RateLimitRemaining": {
+        "description": "Requests remaining in the current monthly window after this request.\nComputed as `max(limit - used - 1, 0)` – the current request has already\nreserved its slot.\n",
+        "schema": {
+          "type": "integer",
+          "example": 17
+        }
+      },
+      "RateLimitReset": {
+        "description": "Unix epoch seconds at which the current monthly quota window resets.\n",
+        "schema": {
+          "type": "integer",
+          "format": "int64",
+          "example": 1782777600
+        }
+      },
+      "VatnodeQuotaWarning": {
+        "description": "Soft warning emitted only on `200` responses once usage reaches ~80% or\nmore of the monthly quota (and the request was still allowed). A human\nhint for logs/monitoring, e.g. `82% of monthly quota used; upgrade at\nhttps://vatnode.dev/dashboard/billing`. Absent below the threshold.\n",
+        "schema": {
+          "type": "string",
+          "example": "82% of monthly quota used; upgrade at https://vatnode.dev/dashboard/billing"
+        }
+      }
+    },
+    "securitySchemes": {
+      "ApiKey": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "vat_live_<token> or vat_test_<token>",
+        "description": "API key issued from the vatnode dashboard. Live keys (prefix\n`vat_live_`) hit VIES and consume monthly quota. Test keys (prefix\n`vat_test_`) accept only VAT IDs starting with `XX` and return\ndeterministic fixtures.\n"
+      },
+      "SessionCookie": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "better-auth.session_token",
+        "description": "better-auth session cookie set when a user logs in to the dashboard.\nAuthenticates the account-management endpoints (`/v1/me/*`), which do\nnot accept API-key bearer tokens, and is one of the two accepted\ncredentials on `/v1/subscriptions/*` and `/v1/webhooks/*`.\n"
+      }
+    },
+    "parameters": {
+      "VatIdPath": {
+        "name": "vatId",
+        "in": "path",
+        "required": true,
+        "description": "VAT ID including the two-letter country prefix as accepted by VIES,\ne.g. `IE6388047V`. Greek VAT IDs must use the `EL` prefix – the ISO\ncode `GR` is **not** a valid VAT prefix and returns `INVALID_FORMAT`.\nNorthern Ireland uses `XI`. Whitespace and separators are normalised\nserver-side; no country-prefix aliasing is performed.\n",
+        "schema": {
+          "type": "string",
+          "minLength": 4,
+          "maxLength": 18,
+          "example": "IE6388047V"
+        }
+      },
+      "ApiKeyIdPath": {
+        "name": "id",
+        "in": "path",
+        "required": true,
+        "description": "API key identifier.",
+        "schema": {
+          "type": "string"
+        }
+      },
+      "BulkJobIdPath": {
+        "name": "jobId",
+        "in": "path",
+        "required": true,
+        "description": "Bulk job identifier, as returned by `POST /v1/vat/bulk`.",
+        "schema": {
+          "type": "string",
+          "format": "uuid"
+        }
+      },
+      "PageQuery": {
+        "name": "page",
+        "in": "query",
+        "required": false,
+        "description": "1-based page number.",
+        "schema": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 1
+        }
+      },
+      "LimitQuery": {
+        "name": "limit",
+        "in": "query",
+        "required": false,
+        "description": "Items per page.",
+        "schema": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100,
+          "default": 20
+        }
+      },
+      "SubscriptionIdPath": {
+        "name": "id",
+        "in": "path",
+        "required": true,
+        "description": "Subscription identifier.",
+        "schema": {
+          "type": "string"
+        }
+      },
+      "WebhookIdPath": {
+        "name": "id",
+        "in": "path",
+        "required": true,
+        "description": "Webhook identifier.",
+        "schema": {
+          "type": "string"
+        }
+      },
+      "WebhookSignatureHeader": {
+        "name": "X-Vatnode-Signature",
+        "in": "header",
+        "required": true,
+        "description": "HMAC-SHA256 over `<t>.<raw request body>`, keyed with the full\nper-webhook signing key (`vat_wh_…`, prefix included), formatted as\n`t=<unix-seconds>,v1=<hex-hmac>`. Verify it before trusting the payload.\n",
+        "schema": {
+          "type": "string",
+          "example": "t=1747636992,v1=8f43...c0"
+        }
+      },
+      "WebhookEventHeader": {
+        "name": "X-Vatnode-Event",
+        "in": "header",
+        "required": true,
+        "description": "The event type, mirroring the `event` field in the body.",
+        "schema": {
+          "type": "string",
+          "example": "VAT_BECAME_INVALID"
+        }
+      }
+    },
+    "responses": {
+      "Unauthorized": {
+        "description": "Missing or invalid API key.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/VatError"
+            }
+          }
+        }
+      },
+      "SessionRequired": {
+        "description": "No valid session (`UNAUTHORIZED`), or the account has been deleted (`ACCOUNT_DELETED`).",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ManagementError"
+            }
+          }
+        }
+      },
+      "DbUnavailable": {
+        "description": "The database is temporarily unavailable (`DB_UNAVAILABLE`).",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ManagementError"
+            }
+          }
+        }
+      },
+      "NotFound": {
+        "description": "The addressed resource does not exist, or is not owned by the\nauthenticated caller. Returns the standard error envelope with code\n`NOT_FOUND`. Ownership and existence are deliberately not\ndistinguished, so a resource belonging to another account is reported\nas missing rather than forbidden.\n",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ManagementError"
+            }
+          }
+        }
+      },
+      "ValidationError": {
+        "description": "The request body, query string or path parameters failed structural\nvalidation (wrong type, missing required field, out-of-range length,\nmalformed enum, etc.). Returns the standard error envelope with code\n`INVALID_REQUEST`. This is distinct from a semantically well-formed\nrequest that is rejected later (e.g. `INVALID_FORMAT` for a VAT ID that\nparses but is not a valid VAT number).\n",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ManagementError"
+            }
+          }
+        }
+      },
+      "InternalError": {
+        "description": "An unexpected server error occurred. Returns the standard error\nenvelope with code `INTERNAL_ERROR` and a `requestId` for support\ncorrelation. The failing request had no side effects the caller can\nrely on; retry is safe for idempotent operations.\n",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/VatError"
+            }
+          }
+        }
+      }
+    },
+    "schemas": {
+      "UsageAgainstLimit": {
+        "type": "object",
+        "required": [
+          "used",
+          "limit"
+        ],
+        "properties": {
+          "used": {
+            "type": "integer",
+            "description": "How many the account currently has.",
+            "example": 4
+          },
+          "limit": {
+            "type": "integer",
+            "description": "How many the plan allows. `-1` = unlimited, `0` = not available on this plan.",
+            "example": 25
+          }
+        }
+      },
+      "VatValidationResult": {
+        "type": "object",
+        "required": [
+          "valid",
+          "vatId",
+          "countryCode",
+          "countryName",
+          "companyName",
+          "companyAddress",
+          "companyRegistrationDate",
+          "companyForm",
+          "industryDescription",
+          "registryCode",
+          "registryCodeName",
+          "taxId",
+          "taxIdName",
+          "commercialName",
+          "companyStatus",
+          "secondaryActivities",
+          "companyAgeYears",
+          "registryPrivacy",
+          "countryVat",
+          "checkId",
+          "verifiedAt",
+          "source",
+          "consultationNumber",
+          "specialTerritory"
+        ],
+        "properties": {
+          "valid": {
+            "type": "boolean",
+            "description": "Whether the VAT ID is valid. With `source: VIES` this is the VIES\nverdict. With a national registry `source` it is that register’s\nanswer about domestic VAT registration, not a VIES confirmation\nthat the number is valid for intra-EU transactions – re-check in\nVIES before relying on it to zero-rate an intra-EU supply.\n"
+          },
+          "vatId": {
+            "type": "string",
+            "description": "Normalised VAT ID (uppercase, no separators)."
+          },
+          "countryCode": {
+            "type": "string",
+            "description": "Two-letter country code extracted from the VAT ID."
+          },
+          "countryName": {
+            "type": "string"
+          },
+          "companyName": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "companyAddress": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "companyRegistrationDate": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date"
+          },
+          "companyForm": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "industryDescription": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "registryCode": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The company’s number in the national business register, in its\nnational format (e.g. `0112038-9` for a Finnish Y-tunnus, `123 456 789`\nfor a French SIREN). Read off the VAT number where the VAT number is\nbuilt from it (BE, BG, CZ, DK, FI, FR, SE) and taken from the national\nregister for LT. `null` everywhere else, and for VAT numbers built\nfrom a personal number (a Bulgarian ЕГН, a Czech rodné číslo, a\nSwedish personnummer).\n"
+          },
+          "registryCodeName": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Local name of `registryCode` in the country’s first official\nlanguage (e.g. `Y-tunnus`, `numéro SIREN`). `null` when\n`registryCode` is `null`.\n"
+          },
+          "taxId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The national tax number the VAT number carries, in its national\nformat – e.g. the Spanish NIF, the Polish NIP, the Greek ΑΦΜ, or\n`CZ` + IČO for a Czech DIČ. The same value as `registryCode` where\none number serves both (BE, DK, FI, FR, SE). `null` where the VAT\nnumber is not the national tax number.\n"
+          },
+          "taxIdName": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Local name of `taxId` in the country’s first official language\n(e.g. `NIP`, `ΑΦΜ`). `null` when `taxId` is `null`.\n"
+          },
+          "commercialName": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Trade / commercial name where the source provides one distinct from\nthe legal `companyName`. `null` when the source has only one name or\nno commercial name (never a duplicate of `companyName`).\n"
+          },
+          "companyStatus": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Best-effort normalized operational status from the source registry\n(one of `active`, `inactive`, `ceased`, `bankrupt`, `liquidation`,\n`dissolved`, or a lowercased source value that does not map cleanly).\nEnrichment metadata only – it never overrides `valid`. `null` when\nthe source provides no status.\n"
+          },
+          "secondaryActivities": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": [],
+            "description": "Secondary activity / classification descriptions where the source\nprovides them (the main activity is `industryDescription`). Empty\narray when none or unavailable.\n"
+          },
+          "companyAgeYears": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "Full years between `companyRegistrationDate` and `verifiedAt`\n(floored). `null` when `companyRegistrationDate` is `null`.\n"
+          },
+          "registryPrivacy": {
+            "type": "boolean",
+            "description": "`true` when the source national register marks the record as\nrestricted from publication at the registrant’s own request – French\n‘non-diffusible’, Dutch *afscherming*. The record above is still\nreturned in full; the flag tells you the registrant asked their\nregister not to hand these details out, which matters if you plan to\nrepublish them. vatnode’s own public /check pages mask a flagged\nrecord. `false` for every other result, including countries whose\nregister exposes no such flag.\n"
+          },
+          "countryVat": {
+            "$ref": "#/components/schemas/CountryVatInfo"
+          },
+          "checkId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "UUIDv7 identifier for this validation, and the primary key of the\nstored check record. It is issued only after that record is\ncommitted, so a `checkId` you hold always names a check vatnode can\nstill produce – it is a receipt, not a request id. If the record\ncannot be stored, the response is `AUDIT_WRITE_FAILED` (HTTP 502)\nwith no `checkId` and no quota consumed.\n"
+          },
+          "verifiedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "VIES",
+              "CACHE",
+              "BZST",
+              "MF_PL",
+              "ANAF_RO",
+              "ARES_CZ",
+              "SIREN_FR",
+              "PRH_FI",
+              "CVR_DK",
+              "BOLAGSVERKET_SE",
+              "KVK_NL",
+              "CBE_BE",
+              "JARS_LV",
+              "JARS_LT",
+              "AJPES_SI"
+            ],
+            "description": "Which system produced this result.\n\n- `VIES` — the EU Commission’s VIES service answered directly. The\n  only source that can carry a `consultationNumber`.\n- `CACHE` — the base validation was served from vatnode’s cache\n  (a prior VIES or national-register result, up to 15 minutes old).\n  A cached result does not say which of the two produced it. Never\n  carries a consultation number.\n- A national registry code (`MF_PL` for PL, `ANAF_RO` for RO,\n  `ARES_CZ` for CZ) – vatnode answered from that national register\n  instead of VIES, either because VIES was unavailable for the\n  country or, for some member states (currently CZ), because the\n  register answered before VIES.\n  `valid` then reflects the national register (domestic\n  VAT registration), not a VIES confirmation that the number is\n  valid for intra-EU transactions. Only possible when no requester\n  was supplied; never carries a consultation number. The other\n  national codes in the enum are not returned as a validity source.\n\nA successful requester-authenticated call (one returning a\n`consultationNumber`) always has `source: VIES`, because national\nfallback is disabled whenever a requester is supplied.\n"
+          },
+          "consultationNumber": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "VIES `requestIdentifier`, returned only when the account has a\nrequester VAT configured (dashboard Account details) and VIES answered\nsuccessfully via `checkVatApprox`. `null` when no requester is\nconfigured, when the answer came from a national register, or when\nserved from cache.\n"
+          },
+          "specialTerritory": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/SpecialTerritory"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The EU special-VAT territory the trader address falls in, or `null`.\nAlways present on the response; `null` for the overwhelming majority\nof results – mainland traders, and every result whose source\nreturned no address to read.\n"
+          }
+        }
+      },
+      "SpecialTerritory": {
+        "type": "object",
+        "required": [
+          "code",
+          "name",
+          "memberState",
+          "euVatArea",
+          "source"
+        ],
+        "description": "An EU special-VAT territory whose treatment diverges from its member\nstate’s – the Canary Islands (IGIC, not VAT), the French overseas\ndepartments, Åland, Madeira and the Azores among them.\n\n**This is inferred from the address, not a tax determination.** No\nspecial territory has its own VIES prefix: a Canary Islands business\ncarries an ordinary `ES` number and an Åland business an ordinary `FI`\none, so the only signal is a postal code in the trader address that\nfalls in a range exclusive to the territory. It reflects the registered\naddress, never the place of supply that governs any given transaction.\n",
+        "properties": {
+          "code": {
+            "type": "string",
+            "enum": [
+              "canary-islands",
+              "ceuta",
+              "melilla",
+              "guadeloupe",
+              "martinique",
+              "french-guiana",
+              "reunion",
+              "mayotte",
+              "aland-islands",
+              "madeira",
+              "azores",
+              "busingen",
+              "helgoland",
+              "livigno",
+              "campione-ditalia",
+              "mount-athos"
+            ],
+            "description": "Stable machine-readable territory identifier.",
+            "example": "aland-islands"
+          },
+          "name": {
+            "type": "string",
+            "description": "Human-readable territory name.",
+            "example": "Åland Islands"
+          },
+          "memberState": {
+            "type": "string",
+            "description": "Parent member state’s VIES country prefix.",
+            "example": "FI"
+          },
+          "euVatArea": {
+            "type": "boolean",
+            "description": "`false` — outside the EU VAT area, under its own regime (Canary\nIGIC) or behind a fiscal border (Åland). `true` – inside the EU VAT\narea but on regional rates (Madeira, Azores).\n",
+            "example": false
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "ADDRESS_INFERRED"
+            ],
+            "description": "Provenance. Always `ADDRESS_INFERRED` – the value exists only\nbecause a postal code was read out of the trader address.\n"
+          }
+        }
+      },
+      "CountryVatInfo": {
+        "type": "object",
+        "required": [
+          "vatName",
+          "vatAbbr",
+          "currency",
+          "standardRate",
+          "reducedRates",
+          "superReducedRate",
+          "parkingRate",
+          "vatNumberFormat",
+          "vatNumberPattern",
+          "identifiers",
+          "countryVatUpdatedAt"
+        ],
+        "properties": {
+          "vatName": {
+            "type": "string",
+            "example": "Value Added Tax"
+          },
+          "vatAbbr": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "example": "VAT"
+          },
+          "currency": {
+            "type": "string",
+            "example": "EUR"
+          },
+          "standardRate": {
+            "type": "number",
+            "example": 23
+          },
+          "reducedRates": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            },
+            "example": [
+              13.5,
+              9
+            ]
+          },
+          "superReducedRate": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "example": 4.8
+          },
+          "parkingRate": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "example": 13.5
+          },
+          "vatNumberFormat": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "vatNumberPattern": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Regular expression the VAT number should match."
+          },
+          "identifiers": {
+            "$ref": "#/components/schemas/CountryIdentifiers"
+          },
+          "countryVatUpdatedAt": {
+            "type": "string",
+            "description": "Date the rate dataset was last updated (ISO 8601)."
+          }
+        }
+      },
+      "LocalizedName": {
+        "type": [
+          "object",
+          "null"
+        ],
+        "description": "A name keyed by ISO 639-1 language code – every official language of the country, plus `en`. `null` where no official name could be confirmed.",
+        "required": [
+          "en"
+        ],
+        "properties": {
+          "en": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": {
+          "type": "string"
+        },
+        "example": {
+          "de": "Unternehmens-Identifikationsnummer",
+          "fr": "numéro d'identification des entreprises",
+          "it": "numero d'identificazione delle imprese",
+          "en": "Unique Enterprise Identification Number"
+        }
+      },
+      "CountryIdentifiers": {
+        "type": "object",
+        "description": "Names, never numbers, of the country’s company registrar, company register, register number, business tax number and VAT identification number.",
+        "required": [
+          "registryAuthorityName",
+          "registryName",
+          "registryCodeName",
+          "taxIdName",
+          "vatIdName"
+        ],
+        "properties": {
+          "registryAuthorityName": {
+            "$ref": "#/components/schemas/LocalizedName"
+          },
+          "registryName": {
+            "$ref": "#/components/schemas/LocalizedName"
+          },
+          "registryCodeName": {
+            "$ref": "#/components/schemas/LocalizedName"
+          },
+          "taxIdName": {
+            "$ref": "#/components/schemas/LocalizedName"
+          },
+          "vatIdName": {
+            "$ref": "#/components/schemas/LocalizedName"
+          }
+        }
+      },
+      "VatRate": {
+        "type": "object",
+        "required": [
+          "countryCode",
+          "countryName",
+          "isEU",
+          "vatName",
+          "vatAbbr",
+          "currency",
+          "standardRate",
+          "reducedRates",
+          "superReducedRate",
+          "parkingRate",
+          "vatNumberFormat",
+          "vatNumberPattern",
+          "identifiers",
+          "updatedAt"
+        ],
+        "properties": {
+          "countryCode": {
+            "type": "string",
+            "example": "DE"
+          },
+          "countryName": {
+            "type": "string",
+            "example": "Germany"
+          },
+          "isEU": {
+            "type": "boolean",
+            "description": "Whether the country is an EU member state. Non-EU countries are reference rates only – VAT number validation covers EU-27 + Northern Ireland.",
+            "example": true
+          },
+          "vatName": {
+            "type": "string"
+          },
+          "vatAbbr": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "currency": {
+            "type": "string",
+            "description": "ISO 4217 currency code.",
+            "example": "EUR"
+          },
+          "standardRate": {
+            "type": "number",
+            "example": 19
+          },
+          "reducedRates": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            },
+            "example": [
+              7
+            ]
+          },
+          "superReducedRate": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "parkingRate": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "vatNumberFormat": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "vatNumberPattern": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "identifiers": {
+            "$ref": "#/components/schemas/CountryIdentifiers"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date",
+            "description": "Date the rate dataset was last updated (ISO 8601).",
+            "example": "2026-04-23"
+          }
+        }
+      },
+      "BulkVatRequest": {
+        "type": "object",
+        "required": [
+          "vatIds"
+        ],
+        "properties": {
+          "vatIds": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 50000,
+            "items": {
+              "type": "string",
+              "description": "A VAT ID in the usual `CC` + national-number form. Normalised\n(trimmed, uppercased) before the batch is recorded.\n",
+              "example": "IE6388047V"
+            },
+            "description": "The VAT IDs to validate. De-duplicated after normalisation, so\nrepeated entries yield one position and cost one quota unit.\n"
+          }
+        }
+      },
+      "BulkJobAccepted": {
+        "type": "object",
+        "required": [
+          "jobId",
+          "status",
+          "totalItems",
+          "duplicatesDropped",
+          "createdAt"
+        ],
+        "properties": {
+          "jobId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "queued",
+              "processing",
+              "finished",
+              "cancelled",
+              "failed"
+            ],
+            "description": "`queued` for a batch just accepted. A replay under an\n`Idempotency-Key` returns the existing job, which may have moved on\nalready – including to one of the terminal states described on\n`BulkJob`.\n"
+          },
+          "totalItems": {
+            "type": "integer",
+            "description": "Unique VAT IDs recorded – the number of positions the job has."
+          },
+          "duplicatesDropped": {
+            "type": "integer",
+            "description": "Entries removed as duplicates of an earlier one in the same batch.\nOn a fresh accept this is counted off the list you just sent; on a\nreplay of the same `Idempotency-Key` and batch it is the count the\noriginal accept stored, not recomputed from this request.\n"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "BulkJob": {
+        "type": "object",
+        "required": [
+          "jobId",
+          "status",
+          "totalItems",
+          "processedItems",
+          "summary",
+          "createdAt",
+          "expiresAt"
+        ],
+        "properties": {
+          "jobId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "queued",
+              "processing",
+              "finished",
+              "cancelled",
+              "failed"
+            ],
+            "description": "`finished` means every position has an answer – including positions\nthat answered with an error. It is not a claim that every VAT ID\nwas successfully validated; read `summary`.\n\n`cancelled` means the job stopped early: positions it had already\nanswered keep their results, the rest stay `pending` and unbilled.\n\n`failed` also means the job stopped early, for a reason of its own\nrather than a stop it was asked for; `errorCode` says which.\nPositions are treated exactly as under `cancelled`.\n\nAll three are terminal. Branch on the terminal set, not on\n`finished` alone, so a job that ends any other way does not leave a\npoller running until the job expires.\n"
+          },
+          "totalItems": {
+            "type": "integer"
+          },
+          "processedItems": {
+            "type": "integer"
+          },
+          "summary": {
+            "type": "object",
+            "required": [
+              "valid",
+              "invalid",
+              "errors"
+            ],
+            "properties": {
+              "valid": {
+                "type": "integer"
+              },
+              "invalid": {
+                "type": "integer"
+              },
+              "errors": {
+                "type": "integer",
+                "description": "Positions that carry an `error` object."
+              }
+            }
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "startedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "finishedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "cancelRequestedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When a cancel was first requested; the job may still be stopping.\nA `cancelled` job can have this `null` – it was stopped by something\nother than a cancel request, and `errorCode` says what.\n"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the job and its positions are deleted (30 days after\nsubmission). The underlying checks remain in your check history.\n"
+          },
+          "errorCode": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why the job ended the way it did, when that needs saying. `null` for\nan ordinary run and for a cancel you requested. `API_KEY_REVOKED`\nmeans the API key the job was submitted with was revoked while it\nwas running, so it stopped where it stood.\n"
+          }
+        }
+      },
+      "BulkJobItemResult": {
+        "type": "object",
+        "required": [
+          "position",
+          "vatId",
+          "status",
+          "valid",
+          "source",
+          "consultationNumber",
+          "checkId",
+          "error"
+        ],
+        "properties": {
+          "position": {
+            "type": "integer",
+            "description": "0-based index in submit order, after de-duplication."
+          },
+          "vatId": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "done"
+            ],
+            "description": "`pending` while the job is still working through the batch – and\npermanently, on a `cancelled` job, for the positions it never\nreached. Those were not checked and not charged.\n"
+          },
+          "valid": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "`true`/`false` once a determination was reached, `null` while\npending or when the position failed – in which case `error` is set.\n"
+          },
+          "source": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/VatSource"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "consultationNumber": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "VIES `requestIdentifier`, present only when the account had a\nrequester VAT configured when the job was submitted.\n"
+          },
+          "checkId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Receipt for the stored check behind this position – the same\nidentifier the single-ID endpoint returns. `null` for a position\nthat produced no verdict.\n"
+          },
+          "error": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "Present only for a failed position. The job itself still finishes.",
+            "required": [
+              "code",
+              "message"
+            ],
+            "properties": {
+              "code": {
+                "type": "string",
+                "description": "Per-position error code, same taxonomy as the single-ID\nendpoint (`INVALID_FORMAT`, `RATE_LIMITED`, `VIES_UNAVAILABLE`,\n`UPSTREAM_TIMEOUT`, `INVALID_REQUESTER`, `VIES_ERROR`,\n`AUDIT_WRITE_FAILED`, `INTERNAL_ERROR`).\n"
+              },
+              "message": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            }
+          },
+          "processedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        }
+      },
+      "BulkJobPage": {
+        "type": "object",
+        "required": [
+          "items",
+          "total",
+          "page",
+          "pages"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BulkJob"
+            }
+          },
+          "total": {
+            "type": "integer"
+          },
+          "page": {
+            "type": "integer"
+          },
+          "pages": {
+            "type": "integer"
+          }
+        }
+      },
+      "BulkJobResultPage": {
+        "type": "object",
+        "required": [
+          "items",
+          "total",
+          "page",
+          "pages"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BulkJobItemResult"
+            },
+            "description": "Positions in submit order."
+          },
+          "total": {
+            "type": "integer"
+          },
+          "page": {
+            "type": "integer"
+          },
+          "pages": {
+            "type": "integer"
+          }
+        }
+      },
+      "VatSource": {
+        "type": "string",
+        "enum": [
+          "VIES",
+          "CACHE",
+          "BZST",
+          "MF_PL",
+          "ANAF_RO",
+          "ARES_CZ",
+          "SIREN_FR",
+          "PRH_FI",
+          "CVR_DK",
+          "BOLAGSVERKET_SE",
+          "KVK_NL",
+          "CBE_BE",
+          "JARS_LV",
+          "JARS_LT",
+          "AJPES_SI"
+        ],
+        "description": "Which system produced a result. `VIES` is the only source that can\ncarry a `consultationNumber`; `CACHE` is a prior result up to 15\nminutes old; anything else is a national register used as fallback\nwhen VIES was unavailable, whose verdict reflects domestic VAT\nregistration and is not a VIES confirmation.\n"
+      },
+      "VatError": {
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "type": "object",
+            "required": [
+              "code",
+              "message",
+              "requestId"
+            ],
+            "properties": {
+              "code": {
+                "type": "string",
+                "enum": [
+                  "INVALID_REQUEST",
+                  "INVALID_FORMAT",
+                  "INVALID_REQUESTER",
+                  "UNAUTHORIZED",
+                  "INVALID_API_KEY",
+                  "RATE_LIMITED",
+                  "VIES_UNAVAILABLE",
+                  "VIES_ERROR",
+                  "UPSTREAM_TIMEOUT",
+                  "AUDIT_WRITE_FAILED",
+                  "INTERNAL_ERROR",
+                  "NOT_FOUND"
+                ],
+                "description": "Machine-readable error code.\n\n- `INVALID_REQUEST` — request body, query or path parameters failed structural validation. HTTP 400.\n- `INVALID_FORMAT` — format invalid (local or VIES). HTTP 400.\n- `INVALID_REQUESTER` — requester VAT is invalid in VIES. Only raised when a requester is supplied. HTTP 422.\n- `UNAUTHORIZED` — Authorization header missing. HTTP 401.\n- `INVALID_API_KEY` — API key is invalid or revoked. HTTP 401.\n- `RATE_LIMITED` — monthly quota exceeded. HTTP 429.\n- `VIES_UNAVAILABLE` — VIES/MS down; fallbacks also failed (no requester) or were skipped (requester set). HTTP 503.\n- `VIES_ERROR` — unexpected VIES protocol error (incl. `VAT_BLOCKED` / `IP_BLOCKED` at HTTP 403, and a requester-qualified `valid: true` that carried no consultation number). HTTP 502 or 403.\n- `UPSTREAM_TIMEOUT` — VIES request timed out and no fallback was available. HTTP 504.\n- `AUDIT_WRITE_FAILED` — the check ran, but its audit record could not be stored, so no `checkId` was issued and the verdict is withheld. Not counted against your quota; safe to retry. HTTP 502.\n- `INTERNAL_ERROR` — unhandled server error. HTTP 500.\n- `NOT_FOUND` — unknown country code (rates only). HTTP 404.\n"
+              },
+              "message": {
+                "type": "string"
+              },
+              "requestId": {
+                "type": "string",
+                "description": "Echoes the `X-Request-Id` header for support correlation."
+              },
+              "viesCode": {
+                "type": "string",
+                "description": "Raw VIES error code when the underlying failure came from VIES."
+              },
+              "details": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          }
+        }
+      },
+      "WebhookEnvelopeBase": {
+        "type": "object",
+        "required": [
+          "id",
+          "version",
+          "event",
+          "data",
+          "timestamp"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Stable, unique identifier for the event. Identical across every retry\nof the same delivery – use it to deduplicate.\n"
+          },
+          "version": {
+            "type": "string",
+            "description": "Envelope schema version. Currently `1`. Bumped only on a breaking\nchange to the payload shape, so consumers can version-handle safely.\n",
+            "example": "1"
+          },
+          "event": {
+            "type": "string",
+            "description": "Event type. See per-envelope schema for allowed values."
+          },
+          "data": {
+            "type": "object",
+            "description": "Event-specific payload. See per-envelope schema."
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the event was emitted (ISO-8601, UTC)."
+          }
+        }
+      },
+      "WebhookDataBase": {
+        "type": "object",
+        "required": [
+          "vatId",
+          "countryCode",
+          "subscriptionId"
+        ],
+        "properties": {
+          "vatId": {
+            "type": "string",
+            "description": "The monitored VAT ID, including the VAT prefix as accepted by VIES.\nGreek VAT IDs always use the `EL` prefix (e.g. `EL123456789`) – this\nis the only valid prefix for Greece.\n"
+          },
+          "countryCode": {
+            "type": "string",
+            "pattern": "^[A-Z]{2}$",
+            "description": "ISO 3166-1 alpha-2 country code (the code used for VAT-rate lookups).\nFor Greece this is `GR`, while the `vatId` above carries the `EL`\nprefix – `EL` is the VAT prefix, `GR` is the rates code. Northern\nIreland is `XI`.\n"
+          },
+          "subscriptionId": {
+            "type": "string",
+            "description": "Stable identifier of the subscription this event belongs to."
+          }
+        }
+      },
+      "WebhookEnvelopeVatBecameValid": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/WebhookEnvelopeBase"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "event": {
+                "type": "string",
+                "const": "VAT_BECAME_VALID"
+              },
+              "data": {
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/WebhookDataBase"
+                  },
+                  {
+                    "type": "object",
+                    "required": [
+                      "previousState",
+                      "newState"
+                    ],
+                    "properties": {
+                      "previousState": {
+                        "type": "string",
+                        "const": "invalid"
+                      },
+                      "newState": {
+                        "type": "string",
+                        "const": "valid"
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "WebhookEnvelopeVatBecameInvalid": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/WebhookEnvelopeBase"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "event": {
+                "type": "string",
+                "const": "VAT_BECAME_INVALID"
+              },
+              "data": {
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/WebhookDataBase"
+                  },
+                  {
+                    "type": "object",
+                    "required": [
+                      "previousState",
+                      "newState"
+                    ],
+                    "properties": {
+                      "previousState": {
+                        "type": "string",
+                        "const": "valid"
+                      },
+                      "newState": {
+                        "type": "string",
+                        "const": "invalid"
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "WebhookEnvelopeCompanyNameChanged": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/WebhookEnvelopeBase"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "event": {
+                "type": "string",
+                "const": "COMPANY_NAME_CHANGED"
+              },
+              "data": {
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/WebhookDataBase"
+                  },
+                  {
+                    "type": "object",
+                    "required": [
+                      "previousName",
+                      "newName"
+                    ],
+                    "properties": {
+                      "previousName": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "newName": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "WebhookEnvelopeCompanyAddressChanged": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/WebhookEnvelopeBase"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "event": {
+                "type": "string",
+                "const": "COMPANY_ADDRESS_CHANGED"
+              },
+              "data": {
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/WebhookDataBase"
+                  },
+                  {
+                    "type": "object",
+                    "required": [
+                      "previousAddress",
+                      "newAddress"
+                    ],
+                    "properties": {
+                      "previousAddress": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "newAddress": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "WebhookEnvelopeViesUnavailable": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/WebhookEnvelopeBase"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "event": {
+                "type": "string",
+                "const": "VIES_UNAVAILABLE"
+              },
+              "data": {
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/WebhookDataBase"
+                  },
+                  {
+                    "type": "object",
+                    "required": [
+                      "reason"
+                    ],
+                    "properties": {
+                      "reason": {
+                        "type": "string",
+                        "description": "Human-readable reason for the failure.",
+                        "example": "VIES unreachable for full day"
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "ManagementError": {
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "description": "Error envelope for the account-management endpoints. Shares the shape\nof `VatError` but carries a broader, endpoint-specific set of `code`\nvalues.\n",
+        "properties": {
+          "error": {
+            "type": "object",
+            "required": [
+              "code",
+              "message"
+            ],
+            "properties": {
+              "code": {
+                "type": "string",
+                "description": "Machine-readable error code. Common values across the\naccount-management endpoints:\n\n- `UNAUTHORIZED` — no valid session. HTTP 401.\n- `ACCOUNT_DELETED` — the account has been soft-deleted. HTTP 401.\n- `DB_UNAVAILABLE` — database temporarily unavailable. HTTP 503.\n- `INVALID_REQUEST` — request body/query/path failed structural validation. HTTP 400.\n- `INVALID_FORMAT` — invalid VAT ID format. HTTP 400.\n- `NOT_FOUND` — resource missing or not owned by the caller. HTTP 404.\n- `ALREADY_EXISTS` — VAT ID already monitored. HTTP 409.\n- `ALREADY_DELETED` — account already scheduled for deletion. HTTP 409.\n- `PLAN_LIMIT` — plan feature/limit reached (subscriptions). HTTP 403.\n- `KEY_LIMIT_REACHED` — plan API-key limit reached. HTTP 422.\n- `WEBHOOK_LIMIT_REACHED` — plan webhook limit reached / unavailable. HTTP 422.\n- `INVALID_URL` — webhook URL is not a safe public HTTPS endpoint. HTTP 422.\n- `TEST_REQUIRED` — a webhook must pass a test before activation. HTTP 422.\n- `VIES_NOT_REGISTERED` — VIES does not recognise the requester VAT. HTTP 400.\n- `CREATION_FAILED` / `REGENERATION_FAILED` / `INTERNAL_ERROR` – server-side failure. HTTP 500.\n",
+                "example": "NOT_FOUND"
+              },
+              "message": {
+                "type": "string"
+              },
+              "requestId": {
+                "type": "string",
+                "description": "Present on most errors; echoes the `X-Request-Id` header."
+              }
+            }
+          }
+        }
+      },
+      "MeProfile": {
+        "type": "object",
+        "required": [
+          "id",
+          "email",
+          "name",
+          "plan",
+          "usage",
+          "createdAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "email": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "plan": {
+            "type": "object",
+            "required": [
+              "id",
+              "name",
+              "monthlyQuota",
+              "overageEnabled",
+              "overagePricePerRequest"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "example": "free"
+              },
+              "name": {
+                "type": "string",
+                "example": "Free"
+              },
+              "monthlyQuota": {
+                "type": "integer",
+                "description": "Included monthly requests. `-1` means unlimited.",
+                "example": 100
+              },
+              "overageEnabled": {
+                "type": "boolean"
+              },
+              "overagePricePerRequest": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              }
+            }
+          },
+          "usage": {
+            "type": "object",
+            "required": [
+              "requestsThisMonth",
+              "requestsLimit",
+              "overageThisMonth",
+              "resetAt"
+            ],
+            "properties": {
+              "requestsThisMonth": {
+                "type": "integer"
+              },
+              "requestsLimit": {
+                "type": "integer",
+                "description": "Same as `plan.monthlyQuota`. `-1` means unlimited."
+              },
+              "overageThisMonth": {
+                "type": "integer"
+              },
+              "resetAt": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time"
+              }
+            }
+          },
+          "createdAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        }
+      },
+      "MeUsage": {
+        "type": "object",
+        "required": [
+          "periodStart",
+          "periodEnd",
+          "requests",
+          "subscriptions"
+        ],
+        "properties": {
+          "periodStart": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "periodEnd": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "requests": {
+            "type": "object",
+            "required": [
+              "used",
+              "total",
+              "limit",
+              "remaining",
+              "overage",
+              "overageEnabled",
+              "overagePricePerRequest"
+            ],
+            "properties": {
+              "used": {
+                "type": "integer",
+                "description": "Requests used in the current billing period."
+              },
+              "total": {
+                "type": "integer",
+                "description": "Lifetime request total across all of the account’s keys."
+              },
+              "limit": {
+                "type": "integer",
+                "description": "Included monthly quota. `-1` means unlimited."
+              },
+              "remaining": {
+                "type": "integer",
+                "description": "Remaining inside the included quota (clamped at 0). `-1` when unlimited."
+              },
+              "overage": {
+                "type": "integer"
+              },
+              "overageEnabled": {
+                "type": "boolean"
+              },
+              "overagePricePerRequest": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              }
+            }
+          },
+          "subscriptions": {
+            "type": "object",
+            "required": [
+              "used",
+              "limit"
+            ],
+            "properties": {
+              "used": {
+                "type": "integer"
+              },
+              "limit": {
+                "type": "integer",
+                "description": "Plan subscription limit. `-1` means unlimited, `0` means unavailable."
+              }
+            }
+          }
+        }
+      },
+      "NotificationSettings": {
+        "type": "object",
+        "required": [
+          "emailEnabled",
+          "email",
+          "accountEmail"
+        ],
+        "properties": {
+          "emailEnabled": {
+            "type": "boolean"
+          },
+          "email": {
+            "type": "string",
+            "description": "Override alert address. Empty string means ‘use the account email’."
+          },
+          "accountEmail": {
+            "type": "string"
+          }
+        }
+      },
+      "SecurityEvent": {
+        "type": "object",
+        "required": [
+          "id",
+          "category",
+          "label",
+          "ip",
+          "userAgent",
+          "createdAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "category": {
+            "type": "string",
+            "enum": [
+              "auth",
+              "api_key"
+            ]
+          },
+          "label": {
+            "type": "string",
+            "example": "Sign-in"
+          },
+          "ip": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "userAgent": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "ChecksHistory": {
+        "type": "object",
+        "required": [
+          "checks",
+          "total",
+          "page",
+          "pages"
+        ],
+        "properties": {
+          "checks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/VatCheckHistoryItem"
+            }
+          },
+          "total": {
+            "type": "integer"
+          },
+          "page": {
+            "type": "integer"
+          },
+          "pages": {
+            "type": "integer"
+          }
+        }
+      },
+      "VatCheckHistoryItem": {
+        "type": "object",
+        "required": [
+          "id",
+          "vatId",
+          "countryCode",
+          "valid",
+          "companyName",
+          "source",
+          "errorCode",
+          "cacheHit",
+          "createdAt",
+          "keyLabel",
+          "consultationNumber"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "vatId": {
+            "type": "string"
+          },
+          "countryCode": {
+            "type": "string"
+          },
+          "valid": {
+            "type": "boolean"
+          },
+          "companyName": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "source": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "errorCode": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "cacheHit": {
+            "type": "boolean"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "keyLabel": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "consultationNumber": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "ApiKeysList": {
+        "type": "object",
+        "required": [
+          "testKey",
+          "keys",
+          "count",
+          "limit"
+        ],
+        "properties": {
+          "testKey": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "keys": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ApiKeySummary"
+            }
+          },
+          "count": {
+            "type": "integer"
+          },
+          "limit": {
+            "type": "integer",
+            "description": "Plan API-key limit. `-1` means unlimited."
+          }
+        }
+      },
+      "ApiKeySummary": {
+        "type": "object",
+        "required": [
+          "id",
+          "label",
+          "keyPreview",
+          "environment",
+          "lastUsedAt",
+          "createdAt",
+          "revoked"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "keyPreview": {
+            "type": "string",
+            "example": "vat_live_a1b2...c3d4"
+          },
+          "environment": {
+            "type": "string",
+            "enum": [
+              "live",
+              "test"
+            ]
+          },
+          "lastUsedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "revoked": {
+            "type": "boolean"
+          }
+        }
+      },
+      "ApiKeyCreated": {
+        "type": "object",
+        "required": [
+          "id",
+          "key",
+          "label",
+          "keyPreview",
+          "environment",
+          "createdAt",
+          "message"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "key": {
+            "type": "string",
+            "description": "The full API key secret. Returned only once, at creation.",
+            "example": "vat_live_a1b2c3d4e5f6g7h8"
+          },
+          "label": {
+            "type": "string"
+          },
+          "keyPreview": {
+            "type": "string"
+          },
+          "environment": {
+            "type": "string",
+            "enum": [
+              "live"
+            ]
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      },
+      "Requester": {
+        "type": "object",
+        "required": [
+          "requesterCountryCode",
+          "requesterVatNumber"
+        ],
+        "properties": {
+          "requesterCountryCode": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "example": "FI"
+          },
+          "requesterVatNumber": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "example": "12345678"
+          }
+        }
+      },
+      "SuccessResponse": {
+        "type": "object",
+        "required": [
+          "success"
+        ],
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "example": true
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      },
+      "Subscription": {
+        "type": "object",
+        "required": [
+          "id",
+          "vatId",
+          "countryCode",
+          "status",
+          "lastCheckedAt",
+          "lastCompanyName",
+          "lastCompanyAddress",
+          "lastValid",
+          "createdAt",
+          "updatedAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "vatId": {
+            "type": "string"
+          },
+          "countryCode": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "paused",
+              "cancelled"
+            ]
+          },
+          "lastCheckedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "lastCompanyName": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "lastCompanyAddress": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "lastValid": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "SubscriptionList": {
+        "type": "object",
+        "required": [
+          "subscriptions",
+          "count",
+          "limit"
+        ],
+        "properties": {
+          "subscriptions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Subscription"
+            }
+          },
+          "count": {
+            "type": "integer"
+          },
+          "limit": {
+            "type": "integer",
+            "description": "Plan subscription limit. `-1` means unlimited, `0` means unavailable."
+          }
+        }
+      },
+      "Webhook": {
+        "type": "object",
+        "required": [
+          "id",
+          "url",
+          "status",
+          "createdAt",
+          "updatedAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string",
+            "format": "uri"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "disabled",
+              "inactive"
+            ]
+          },
+          "consecutiveFailures": {
+            "type": "integer",
+            "description": "Consecutive failed deliveries. Present on list/update responses."
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "WebhookList": {
+        "type": "object",
+        "required": [
+          "webhooks",
+          "count"
+        ],
+        "properties": {
+          "webhooks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Webhook"
+            }
+          },
+          "count": {
+            "type": "integer"
+          }
+        }
+      },
+      "WebhookCreated": {
+        "type": "object",
+        "required": [
+          "id",
+          "url",
+          "status",
+          "secret",
+          "createdAt",
+          "updatedAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string",
+            "format": "uri"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "disabled"
+            ],
+            "description": "New webhooks start disabled until a test delivery succeeds."
+          },
+          "secret": {
+            "type": "string",
+            "description": "HMAC signing key. Returned only once, at creation."
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "WebhookDetail": {
+        "type": "object",
+        "required": [
+          "id",
+          "url",
+          "status",
+          "createdAt",
+          "updatedAt",
+          "recentDeliveries"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string",
+            "format": "uri"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "disabled",
+              "inactive"
+            ]
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "recentDeliveries": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WebhookDelivery"
+            }
+          }
+        }
+      },
+      "WebhookDelivery": {
+        "type": "object",
+        "required": [
+          "id",
+          "eventId",
+          "attempt",
+          "statusCode",
+          "error",
+          "sentAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "eventId": {
+            "type": "string"
+          },
+          "attempt": {
+            "type": "integer"
+          },
+          "statusCode": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "sentAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "nextRetryAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "Present only on the deliveries-list endpoint."
+          }
+        }
+      },
+      "WebhookDeliveriesList": {
+        "type": "object",
+        "required": [
+          "deliveries",
+          "count"
+        ],
+        "properties": {
+          "deliveries": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WebhookDelivery"
+            }
+          },
+          "count": {
+            "type": "integer"
+          }
+        }
+      },
+      "WebhookTestResult": {
+        "type": "object",
+        "required": [
+          "ok",
+          "statusCode",
+          "durationMs",
+          "error"
+        ],
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "description": "True only for a 2xx response from the endpoint."
+          },
+          "statusCode": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "statusText": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "durationMs": {
+            "type": "integer"
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "request": {
+            "type": "object",
+            "description": "The request that was sent (method, URL, headers, body).",
+            "additionalProperties": true
+          },
+          "response": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "The endpoint’s response (headers, body), or null on transport failure.",
+            "additionalProperties": true
+          }
+        }
+      }
+    }
+  },
+  "security": [
+    {
+      "ApiKey": []
+    }
+  ],
+  "tags": [
+    {
+      "name": "VAT validation",
+      "description": "Validate EU VAT IDs against VIES with national fallback."
+    },
+    {
+      "name": "VAT rates",
+      "description": "Up-to-date VAT rates for EU member states."
+    },
+    {
+      "name": "Account summary",
+      "description": "Plan, quota, monitoring and billing state for the account a key belongs to."
+    },
+    {
+      "name": "Account",
+      "description": "Session-authenticated account management: profile, usage, API keys,\nnotification settings and the account-level VIES requester. Used by the\nvatnode dashboard.\n"
+    },
+    {
+      "name": "Monitoring subscriptions",
+      "description": "CRUD for VAT-monitoring subscriptions, authenticated by the dashboard\nsession or a live API key. Each\nsubscription re-validates a VAT ID against VIES on a daily schedule and\nemits webhook events on state changes.\n"
+    },
+    {
+      "name": "Webhook management",
+      "description": "CRUD for the webhook endpoints that receive\nmonitoring events, plus test delivery and delivery-history inspection.\n"
+    },
+    {
+      "name": "Webhooks",
+      "description": "Event deliveries from VAT monitoring subscriptions. vatnode POSTs a\nsigned JSON payload to every URL you register in the dashboard whenever\na monitored VAT ID changes state (or once at 23:00 UTC if VIES was\nunreachable for the full day).\n"
+    }
+  ]
+}
