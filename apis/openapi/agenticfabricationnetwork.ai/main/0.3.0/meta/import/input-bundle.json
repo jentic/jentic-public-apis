@@ -1,0 +1,2503 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "AFN — Agentic Fabrication Network",
+    "version": "0.3.0",
+    "description": "The agent-facing API of AFN, a network speaking UFP — the Universal Fabrication Protocol (the aggregator profile): quote, refine, checkout, track. Live processes: decals/stickers, FDM 3D printing, paper print (cards/flyers/posters), sheet metal, CNC machining, resin 3D printing (SLA/DLP), laser cutting, and apparel; US shipping. Human-readable docs at /docs; full schema spec at /docs/protocol.md; vendor-hosted binding at /docs/vendor-binding.md; agent summary at /llms.txt.",
+    "x-jentic-source-url": "https://agenticfabricationnetwork.ai/openapi.json"
+  },
+  "servers": [
+    {
+      "url": "https://agenticfabricationnetwork.ai"
+    }
+  ],
+  "paths": {
+    "/v1/agents": {
+      "post": {
+        "summary": "Create an agent (self-serve API key)",
+        "security": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "example": "my-agent"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "API key — shown exactly once",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "agent_id": {
+                      "type": "string"
+                    },
+                    "api_key": {
+                      "type": "string",
+                      "example": "ufp_sk_..."
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/capabilities": {
+      "get": {
+        "summary": "What the network can currently make",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Processes, materials, cuts, ranges. Material attribute claims are an OPEN vocabulary: beyond the named flags (outdoor_rated, submersible, high_temp, food_safe), any boolean key is a vendor-advertised claim (e.g. iso_13485: true) — absent always means \"no claim\", never \"no\". Each process entry may also claim tolerance_mm, the tightest ± tolerance (mm) held for that process; absent = no claim, and buyers demanding a tolerance exclude no-claim vendors."
+          }
+        }
+      }
+    },
+    "/v1/ufp/spec.schema.json": {
+      "get": {
+        "summary": "JSON Schema of the .ufp part spec",
+        "description": "The typed vocabulary of a .ufp manifest's `spec` (material, color, finish, quantities, thickness_in, tapping, inserts, bends, cut, size_in), generated from the protocol's zod schemas. Its record rows are the exact shapes POST /v1/quotes/{id}/refine validates, so a client that conforms never sends a record the network rejects. The manifest schema is served beside it at /v1/ufp/ufp.schema.json. Public, no key.",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "JSON Schema draft-07 (application/schema+json)."
+          }
+        }
+      }
+    },
+    "/v1/files": {
+      "post": {
+        "summary": "Register a design file",
+        "description": "Multipart upload (field 'file') or JSON {url} pointing at a public artwork image (PNG/JPEG/SVG/PDF), STL, STEP (.step/.stp), or DXF.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "url": {
+                    "type": "string",
+                    "format": "uri"
+                  },
+                  "filename": {
+                    "type": "string"
+                  }
+                }
+              }
+            },
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "file": {
+                    "type": "string",
+                    "format": "binary"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Registered",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "file_id": {
+                      "type": "string"
+                    },
+                    "viewer_mesh_url": {
+                      "type": "string",
+                      "description": "Present for mesh/BREP uploads (stl/step/iges): the face-classified viewer mesh (AFVM v1 binary). Built lazily when the file is quoted — poll until 200 (CORS on 200 and 404)."
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/quotes": {
+      "post": {
+        "summary": "Get ranked fabrication offers",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "spec",
+                  "constraints"
+                ],
+                "properties": {
+                  "process": {
+                    "type": "string",
+                    "enum": [
+                      "fdm_print",
+                      "resin_print",
+                      "powder_print",
+                      "metal_print",
+                      "elastomer_print",
+                      "cnc",
+                      "sheetmetal",
+                      "laser_cut",
+                      "decal",
+                      "print",
+                      "apparel"
+                    ],
+                    "description": "Optional. Omit it and AFN detects the file kind (artwork/stl/step/dxf) and quotes every process that can make it — the response's routing object lists candidates and also_possible"
+                  },
+                  "spec": {
+                    "type": "object",
+                    "description": "Provide file_id (new design) OR part_number (reorder of a previous paid order)",
+                    "properties": {
+                      "file_id": {
+                        "type": "string",
+                        "description": "Required unless part_number is set"
+                      },
+                      "part_number": {
+                        "type": "string",
+                        "description": "AFN part number (UFP-… / part_…) from a previous paid order — reorders reuse the stored design and spec; other fields here override the stored ones"
+                      },
+                      "share_key": {
+                        "type": "string",
+                        "description": "Required when reordering a LOCKED part: the k=… value from the owner's share link"
+                      },
+                      "attachments": {
+                        "type": "array",
+                        "maxItems": 10,
+                        "items": {
+                          "type": "object",
+                          "required": [
+                            "file_id"
+                          ],
+                          "properties": {
+                            "file_id": {
+                              "type": "string"
+                            },
+                            "role": {
+                              "type": "string",
+                              "enum": [
+                                "drawing",
+                                "spec_sheet",
+                                "bom",
+                                "centroid",
+                                "aux"
+                              ]
+                            }
+                          }
+                        },
+                        "description": "Additional files for the SAME part — the PDF drawing next to the STEP, spec sheets, BOMs (each from POST /v1/files). role is optional: omitted, AFN infers it from the file kind (artwork alongside geometry = drawing; a second geometry file = aux). Attachments never route or price a quote; they persist with the part, so reorders replay the full document set"
+                      },
+                      "size_in": {
+                        "type": "object",
+                        "properties": {
+                          "width": {
+                            "type": "number"
+                          },
+                          "height": {
+                            "type": "number"
+                          }
+                        },
+                        "description": "decal only; default 3x3"
+                      },
+                      "cut": {
+                        "type": "string",
+                        "description": "decal only, FREE-FORM — pass the user's words (\"triangle\", \"die cut\"). Known cuts (contour|square|oval|kiss_cut) match exactly; unknown asks return closest-match offers with substitutions. Omit to compare the main options"
+                      },
+                      "material": {
+                        "type": "string",
+                        "description": "decal: vinyl|holographic|transparent|glitter (free-form, closest-match like cut); fdm_print: pla|petg|asa"
+                      },
+                      "color": {
+                        "type": "string",
+                        "description": "fdm_print filament color"
+                      },
+                      "quantities": {
+                        "type": "array",
+                        "items": {
+                          "type": "integer"
+                        },
+                        "description": "One offer per quantity. Ask for what the user wants (even 1) — vendors with a higher minimum quote at their minimum and set requested_quantity on the offer. A part_number reorder with no quantities defaults to the quantity last purchased"
+                      }
+                    }
+                  },
+                  "constraints": {
+                    "$ref": "#/components/schemas/Constraints"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Ranked offers",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuoteResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/quotes/{id}": {
+      "get": {
+        "summary": "Re-read a quote (previews resolve asynchronously)",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Quote",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuoteResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/quotes/{id}/refine": {
+      "post": {
+        "summary": "Narrow a quote with added constraints, or change its spec",
+        "description": "Creates a child quote with merged constraints ('must be here by Friday') and/or a spec delta ('actually, in PLA' → {spec:{material:'pla'}} — lanes requote through warm vendor sessions). Empty body re-reads the quote.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RefineRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Narrowed quote",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuoteResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/quotes/{id}/preview": {
+      "post": {
+        "summary": "Preview a refine's routing (the soft quote) — nothing is created",
+        "description": "The same body as POST /v1/quotes/{id}/refine, planned and NOT launched: how many distinct fabricators (and which process lanes) the network would ask for the refined part, the shell's exact expected_vendors rows, and its exclusion notes. No child quote, no vendor call, no supersede of in-flight work, no demand or corpus write — fire one per edit; commit with /refine at your sync point. Answers 200 (never 201). An empty body previews the quote's own re-fan. Validation and not-found errors match refine's.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RefineRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Routing preview",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotePreviewResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/checkout": {
+      "post": {
+        "summary": "Create an order + hosted payment link",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "offer_id",
+                  "shipping_option_id"
+                ],
+                "properties": {
+                  "offer_id": {
+                    "type": "string"
+                  },
+                  "shipping_option_id": {
+                    "type": "string"
+                  },
+                  "ship_to": {
+                    "type": "object",
+                    "description": "Optional — omit to have the hosted payment page collect the shipping address",
+                    "required": [
+                      "name",
+                      "street1",
+                      "city",
+                      "state",
+                      "zip"
+                    ],
+                    "properties": {
+                      "name": {
+                        "type": "string"
+                      },
+                      "street1": {
+                        "type": "string"
+                      },
+                      "street2": {
+                        "type": "string"
+                      },
+                      "city": {
+                        "type": "string"
+                      },
+                      "state": {
+                        "type": "string",
+                        "minLength": 2,
+                        "maxLength": 2
+                      },
+                      "zip": {
+                        "type": "string"
+                      },
+                      "country": {
+                        "type": "string",
+                        "default": "US"
+                      }
+                    }
+                  },
+                  "contact": {
+                    "type": "object",
+                    "description": "Optional — omit to have the hosted payment page collect the buyer email",
+                    "required": [
+                      "email"
+                    ],
+                    "properties": {
+                      "email": {
+                        "type": "string",
+                        "format": "email"
+                      },
+                      "phone": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "return_url": {
+                    "type": "string",
+                    "format": "uri",
+                    "maxLength": 2048,
+                    "description": "Optional — the page the buyer is on when checkout starts. The post-payment landing pages show a 'Return to <site>' button pointing here. http(s) only; pass a URL the client actually knows, never an invented one."
+                  },
+                  "coupon_code": {
+                    "type": "string",
+                    "maxLength": 64,
+                    "description": "Optional coupon code (early-adopter codes from the AFN team; case-insensitive). Validated before any order exists — unknown, deactivated, or fully-redeemed codes refuse with a 400 and no money moves. The discount shows on the hosted payment page; a 100%-off code makes the total $0 and no card is collected."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Order created; give checkout_url to the user",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "order_id": {
+                      "type": "string"
+                    },
+                    "checkout_url": {
+                      "type": "string",
+                      "format": "uri"
+                    },
+                    "total_cents": {
+                      "type": "integer",
+                      "description": "What the buyer pays; 0 when a 100%-off coupon covered the order"
+                    },
+                    "currency": {
+                      "type": "string",
+                      "enum": [
+                        "usd"
+                      ]
+                    },
+                    "discount_cents": {
+                      "type": "integer",
+                      "description": "Present when a coupon applied: cents knocked off the total"
+                    },
+                    "coupon_code": {
+                      "type": "string",
+                      "description": "The redeemed coupon code, normalized uppercase"
+                    },
+                    "price_basis": {
+                      "type": "string",
+                      "enum": [
+                        "estimate_pending_verification"
+                      ],
+                      "description": "Present when the total is a cached estimate. The quote is a price ceiling: the checkout page confirms the vendor's live price, which can only match the quote or come in lower. If the vendor repriced upward the order expires unpaid — just re-quote. Agents need no special handling."
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/orders": {
+      "get": {
+        "summary": "The calling agent's recent orders (newest first)",
+        "description": "Resolve vague references — \"that order from last week\" — to a concrete order id, then track it or review it.",
+        "responses": {
+          "200": {
+            "description": "Recent orders",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "orders": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "order_id": {
+                            "type": "string"
+                          },
+                          "summary": {
+                            "type": "string"
+                          },
+                          "vendor": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "type": "string"
+                          },
+                          "total_cents": {
+                            "type": "integer"
+                          },
+                          "eta_date": {
+                            "type": "string",
+                            "format": "date",
+                            "nullable": true
+                          },
+                          "created_at": {
+                            "type": "string",
+                            "format": "date-time"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/orders/{id}": {
+      "get": {
+        "summary": "Order status, ETA, tracking, event log",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Order"
+          }
+        }
+      }
+    },
+    "/v1/orders/{id}/review": {
+      "post": {
+        "summary": "Leave a verified-purchase vendor review",
+        "description": "Reviews require possession of the order id (verified purchases only) and the order must be paid. One review per order — submitting again updates the existing review. Ratings appear on offers as vendor_rating and feed offer ranking.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "stars"
+                ],
+                "properties": {
+                  "stars": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 5
+                  },
+                  "comment": {
+                    "type": "string",
+                    "maxLength": 2000,
+                    "description": "Optional short factual comment"
+                  },
+                  "facets": {
+                    "type": "object",
+                    "description": "Optional 1-5 sub-scores; include only facets the buyer spoke to",
+                    "properties": {
+                      "quality": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 5
+                      },
+                      "timeliness": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 5
+                      },
+                      "accuracy": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 5
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Review recorded (or updated)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "review_id": {
+                      "type": "string"
+                    },
+                    "order_id": {
+                      "type": "string"
+                    },
+                    "vendor_display_name": {
+                      "type": "string"
+                    },
+                    "stars": {
+                      "type": "integer"
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "pending",
+                        "active"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Order not paid yet, or invalid stars/facets"
+          },
+          "404": {
+            "description": "Unknown order id"
+          }
+        }
+      }
+    },
+    "/v1/parts/{id}": {
+      "get": {
+        "summary": "Inspect a part number (durable reorder handle)",
+        "description": "Part numbers (UFP-… / part_…) are minted when an order is paid and emailed on the receipt. To reorder, POST /v1/quotes with spec.part_number instead of spec.file_id — the stored design and spec are reused and re-shopped across all current vendors; other spec fields override the stored ones. Parts are unlisted by default; a part whose owner enabled LOCKED mode also requires share_key (from the owner's share link) to view or reorder.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "share_key",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Required when the part is locked — the k=… value from the owner's share link"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Part (spec, preview, last order context)"
+          },
+          "403": {
+            "description": "Part is locked and share_key is missing or wrong — the response reveals nothing beyond the lock"
+          }
+        }
+      }
+    },
+    "/v1/attestations": {
+      "post": {
+        "summary": "Vendor-attested off-network transaction (vendor key auth)",
+        "description": "Vendors report transactions that happened outside this network — direct agent-to-vendor over the UFP vendor binding, or any other channel — to earn reputation credit and feed demand-gap routing. Auth is a vendor attestation key (ufp_vk_…), never an agent key; vendor identity comes from the key, a vendor_id in the payload is ignored. Idempotent on attestation_id: resubmitting updates (quoted_only → fulfilled). Credit is a ladder: bare attestation = partial, always labeled attested_transaction; evidence makes it spot-checkable; buyer confirmation = full (an unverified token never earns full). Full doc: /docs/attestations.md.",
+        "security": [
+          {
+            "vendorKey": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TransactionAttestation"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Attestation receipt — graded credit plus a detail string saying exactly what would have earned more",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AttestationReceipt"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Malformed attestation (per-field issues in the body)"
+          },
+          "401": {
+            "description": "Missing or unknown vendor attestation key"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "API key from POST /v1/agents, e.g. 'Authorization: Bearer ufp_sk_...'"
+      },
+      "vendorKey": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "Vendor attestation key ('Authorization: Bearer ufp_vk_...') — issued by the network operator to vendors, distinct from agent API keys. Used only on POST /v1/attestations."
+      }
+    },
+    "schemas": {
+      "Constraints": {
+        "type": "object",
+        "properties": {
+          "ship_to_zip": {
+            "type": "string",
+            "description": "Destination US ZIP code. Omit if the buyer never stated one — the network stamps its assumed central-US destination (prices stay all-in with shipping) and declares it (routing.ship_to_zip + routing.ship_to { zip, assumed: true })"
+          },
+          "ship_to_country": {
+            "type": "string",
+            "default": "US"
+          },
+          "deadline": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date",
+            "description": "Latest acceptable delivery date; offers that miss it (and nothing else) move to near_misses with their real ETA — never into offers[]. On refine, explicit null CLEARS an inherited deadline (near-misses convert back); omission inherits it"
+          },
+          "processes": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string",
+              "enum": [
+                "fdm_print",
+                "resin_print",
+                "powder_print",
+                "metal_print",
+                "elastomer_print",
+                "cnc",
+                "sheetmetal",
+                "laser_cut",
+                "decal",
+                "print",
+                "apparel"
+              ]
+            },
+            "minItems": 1,
+            "description": "Process-lane filter: quote ONLY these processes (intersected with routing candidates). Absent = no filter; on refine the child inherits the parent's filter, and an explicit null CLEARS an inherited filter (\"show everything again\"). Narrowing by process is a constraint, never a fresh quote — warm vendor sessions survive it."
+          },
+          "outdoor_rated": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "submersible": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "high_temp": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Must tolerate sustained heat (vendor heat-resistance claim)"
+          },
+          "food_safe": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Must be vendor-certified food safe"
+          },
+          "max_budget_cents": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "All-in budget cap, USD cents. On refine, explicit null CLEARS an inherited cap"
+          },
+          "requirements": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 120
+            },
+            "maxItems": 20,
+            "description": "Catch-all requirements channel: verbatim terms from the buyer's conversation (\"UV resistant\", \"anodized: red\", \"iso 13485\", \"tolerance: 0.1mm\"). Each term resolves deterministically — applied terms affect offers, unresolved terms come back in the quote's notes and are logged as demand for vendor sourcing. Terms never override explicit spec/constraint fields and are never an error; there is no wrong place to put a term."
+          },
+          "callouts": {
+            "type": "array",
+            "maxItems": 50,
+            "items": {
+              "type": "object",
+              "required": [
+                "name",
+                "value",
+                "unit"
+              ],
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "description": "What the dimension is, in the agent's words (\"hole_diameter\")"
+                },
+                "value": {
+                  "type": "number"
+                },
+                "unit": {
+                  "type": "string",
+                  "enum": [
+                    "mm",
+                    "in"
+                  ]
+                },
+                "tolerance_mm": {
+                  "type": "number",
+                  "description": "Required tolerance for this dimension, in mm (±)"
+                },
+                "critical": {
+                  "type": "boolean",
+                  "description": "Marked critical on the drawing (inspection-worthy)"
+                },
+                "note": {
+                  "type": "string",
+                  "maxLength": 200
+                }
+              }
+            },
+            "description": "Drawing callouts the buyer's agent extracted — dimensions that matter. The tightest tolerance_mm prunes vendors whose published tolerance claim cannot hold it; vendors with no tolerance claim on record are excluded when a tolerance is demanded."
+          },
+          "reliability": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "Vendor-reliability floor — narrows to vendors with a demonstrated track record. Like every constraint it narrows, never widens — except explicit null on a refine, which CLEARS the whole inherited floor.",
+            "properties": {
+              "min_stars": {
+                "type": "number",
+                "minimum": 1,
+                "maximum": 5,
+                "description": "Only vendors whose displayed rating is at least this — vendors with no reviews yet are excluded"
+              },
+              "min_reviews": {
+                "type": "integer",
+                "minimum": 1,
+                "description": "Only vendors with at least this many verified-purchase reviews"
+              },
+              "proven_spec_orders": {
+                "type": "integer",
+                "minimum": 1,
+                "description": "Only vendors with at least N completed orders for this exact process+material — \"a vendor that prints PC reliably\""
+              }
+            }
+          }
+        }
+      },
+      "RefineRequest": {
+        "type": "object",
+        "description": "Body of POST /v1/quotes/{id}/refine: any subset of Constraints fields (narrowing — merged into the parent's constraints) plus an optional `spec` delta (a spec CHANGE, not a narrowing: affected lanes REQUOTE with the new spec through warm vendor sessions). Empty body re-reads the quote's live state. GOING BACK (ALC-127): explicit `null` on any clearable constraint (deadline, max_budget_cents, the attribute flags, reliability, requirements, and the three filters) CLEARS the inherited value — the undo widening; `remove_requirements` takes back individual requirements terms; `undo_last_step: true` ALONE restores the previous step's stored spec + constraints exactly (the quote's `steps` array names recent steps, newest first).",
+        "properties": {
+          "ship_to_zip": {
+            "type": "string",
+            "description": "Destination US ZIP code. Omit if the buyer never stated one — the network stamps its assumed central-US destination (prices stay all-in with shipping) and declares it (routing.ship_to_zip + routing.ship_to { zip, assumed: true })"
+          },
+          "ship_to_country": {
+            "type": "string",
+            "default": "US"
+          },
+          "deadline": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date",
+            "description": "Latest acceptable delivery date; offers that miss it (and nothing else) move to near_misses with their real ETA — never into offers[]. On refine, explicit null CLEARS an inherited deadline (near-misses convert back); omission inherits it"
+          },
+          "processes": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string",
+              "enum": [
+                "fdm_print",
+                "resin_print",
+                "powder_print",
+                "metal_print",
+                "elastomer_print",
+                "cnc",
+                "sheetmetal",
+                "laser_cut",
+                "decal",
+                "print",
+                "apparel"
+              ]
+            },
+            "minItems": 1,
+            "description": "Process-lane filter: quote ONLY these processes (intersected with routing candidates). Absent = no filter; on refine the child inherits the parent's filter, and an explicit null CLEARS an inherited filter (\"show everything again\"). Narrowing by process is a constraint, never a fresh quote — warm vendor sessions survive it."
+          },
+          "outdoor_rated": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "submersible": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "high_temp": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Must tolerate sustained heat (vendor heat-resistance claim)"
+          },
+          "food_safe": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Must be vendor-certified food safe"
+          },
+          "max_budget_cents": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "All-in budget cap, USD cents. On refine, explicit null CLEARS an inherited cap"
+          },
+          "requirements": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 120
+            },
+            "maxItems": 20,
+            "description": "Catch-all requirements channel: verbatim terms from the buyer's conversation (\"UV resistant\", \"anodized: red\", \"iso 13485\", \"tolerance: 0.1mm\"). Each term resolves deterministically — applied terms affect offers, unresolved terms come back in the quote's notes and are logged as demand for vendor sourcing. Terms never override explicit spec/constraint fields and are never an error; there is no wrong place to put a term."
+          },
+          "callouts": {
+            "type": "array",
+            "maxItems": 50,
+            "items": {
+              "type": "object",
+              "required": [
+                "name",
+                "value",
+                "unit"
+              ],
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "description": "What the dimension is, in the agent's words (\"hole_diameter\")"
+                },
+                "value": {
+                  "type": "number"
+                },
+                "unit": {
+                  "type": "string",
+                  "enum": [
+                    "mm",
+                    "in"
+                  ]
+                },
+                "tolerance_mm": {
+                  "type": "number",
+                  "description": "Required tolerance for this dimension, in mm (±)"
+                },
+                "critical": {
+                  "type": "boolean",
+                  "description": "Marked critical on the drawing (inspection-worthy)"
+                },
+                "note": {
+                  "type": "string",
+                  "maxLength": 200
+                }
+              }
+            },
+            "description": "Drawing callouts the buyer's agent extracted — dimensions that matter. The tightest tolerance_mm prunes vendors whose published tolerance claim cannot hold it; vendors with no tolerance claim on record are excluded when a tolerance is demanded."
+          },
+          "reliability": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "Vendor-reliability floor — narrows to vendors with a demonstrated track record. Like every constraint it narrows, never widens — except explicit null on a refine, which CLEARS the whole inherited floor.",
+            "properties": {
+              "min_stars": {
+                "type": "number",
+                "minimum": 1,
+                "maximum": 5,
+                "description": "Only vendors whose displayed rating is at least this — vendors with no reviews yet are excluded"
+              },
+              "min_reviews": {
+                "type": "integer",
+                "minimum": 1,
+                "description": "Only vendors with at least this many verified-purchase reviews"
+              },
+              "proven_spec_orders": {
+                "type": "integer",
+                "minimum": 1,
+                "description": "Only vendors with at least N completed orders for this exact process+material — \"a vendor that prints PC reliably\""
+              }
+            }
+          },
+          "spec": {
+            "type": "object",
+            "description": "Spec fields to CHANGE on the child quote — child spec = parent spec with these overridden. Material changes go HERE (\"I need it in PLA\" → {spec:{material:\"pla\"}}), NOT into requirements: an explicit material replaces the material fan-out. Free-form — unstocked asks resolve to the closest stocked material with a substitution note.",
+            "properties": {
+              "material": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "minLength": 1,
+                "maxLength": 48
+              },
+              "color": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "finish": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "minLength": 1,
+                "maxLength": 48,
+                "description": "Finish delta; finish-capable lanes requote with it, printer lanes keep the color. null = remove."
+              },
+              "thickness_in": {
+                "type": [
+                  "number",
+                  "null"
+                ],
+                "exclusiveMinimum": 0,
+                "maximum": 1,
+                "description": "Sheet gauge delta, inches. null = back to the material's default gauge."
+              },
+              "bends": {
+                "type": [
+                  "array",
+                  "null"
+                ],
+                "maxItems": 50,
+                "description": "FULL replacement list of articulated bends (rows per /v1/ufp/spec.schema.json `bends`). null = remove every bend."
+              },
+              "tapping": {
+                "type": [
+                  "array",
+                  "null"
+                ],
+                "maxItems": 200,
+                "description": "FULL replacement list of tapped threads (rows per /v1/ufp/spec.schema.json `tapping`). null = remove every tap."
+              },
+              "inserts": {
+                "type": [
+                  "array",
+                  "null"
+                ],
+                "maxItems": 200,
+                "description": "FULL replacement list of hardware inserts (rows per /v1/ufp/spec.schema.json `inserts`). null = remove every insert."
+              },
+              "quantities": {
+                "type": [
+                  "array",
+                  "null"
+                ],
+                "items": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "minItems": 1,
+                "maxItems": 5
+              }
+            }
+          },
+          "remove_requirements": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 120
+            },
+            "maxItems": 20,
+            "description": "Take back INDIVIDUAL requirements terms by normalized match — the removal channel (terms merge as a union, so re-stating the list can never drop one). Unknown terms are ignored, never an error."
+          },
+          "undo_last_step": {
+            "type": "boolean",
+            "description": "Go back exactly one refine step: the network restores the PARENT quote's stored spec + constraints verbatim as a new child — exact, never reconstructed. Must be the ONLY field in the body. An undo is an unlabeled refine: open comparison scenarios close. Undoing the original quote is rejected with honest wording."
+          },
+          "scenario": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 40,
+            "description": "Comparison lane label (\"carbon steel\"). A labeled refine sits SIDE BY SIDE with the parent's other lanes instead of superseding them: same label replaces that scenario's in-flight work, different labels stream concurrently (max 4 distinct active labels per parent — a 5th is rejected listing the active ones), and a refine WITHOUT a scenario resets the baseline and supersedes every lane. Each labeled child echoes `scenario` on every read. Keep labels short and human."
+          },
+          "order_by": {
+            "type": "object",
+            "description": "\"Organize by\": how offers[] should PRESENT — pure presentation, never a re-price or a filter. An order_by-ONLY body re-orders the SAME quote in place (no child, no vendor calls, instant); the ordering persists across reads and streaming (new offers slot into the asked order) and is inherited by refine children until replaced or reset with {\"key\": \"recommended\"}. Exactly one of `key` (objective sort) or `custom` (an explicit id order the agent judged itself, e.g. \"most green first\" from the preview images — `label` required with it, unlisted offers land below the listed ones).",
+            "properties": {
+              "key": {
+                "type": "string",
+                "enum": [
+                  "recommended",
+                  "price",
+                  "unit_price",
+                  "total_price",
+                  "arrival",
+                  "rating"
+                ],
+                "description": "Objective ordering, natural direction: price/unit_price/total_price cheapest first, arrival soonest-possible first, rating best first (review count breaks ties), recommended = the default price+speed rank (also the reset value)."
+              },
+              "direction": {
+                "type": "string",
+                "enum": [
+                  "asc",
+                  "desc"
+                ],
+                "description": "desc reverses the key's natural direction (\"most expensive first\")"
+              },
+              "custom": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "minItems": 1,
+                "maxItems": 200,
+                "description": "Explicit offer-id order, first on top"
+              },
+              "label": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 60,
+                "description": "Short human wording clients display for a custom order (\"most green first\")"
+              }
+            }
+          }
+        }
+      },
+      "Offer": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "example": "of_9Ql3C6XlGmEGhk1y"
+          },
+          "quote_id": {
+            "type": "string"
+          },
+          "vendor": {
+            "type": "string",
+            "example": "stickerapp"
+          },
+          "vendor_display_name": {
+            "type": "string"
+          },
+          "vendor_logo_url": {
+            "type": "string",
+            "description": "The vendor's brand mark (small square image URL) for offer cards. Absent when AFN has no curated mark for the vendor — render the name alone, never a placeholder image"
+          },
+          "process": {
+            "type": "string",
+            "enum": [
+              "fdm_print",
+              "resin_print",
+              "powder_print",
+              "metal_print",
+              "elastomer_print",
+              "cnc",
+              "sheetmetal",
+              "laser_cut",
+              "decal",
+              "print",
+              "apparel"
+            ]
+          },
+          "spec_resolved": {
+            "type": "object",
+            "additionalProperties": true,
+            "description": "Exact size/cut/material/color the vendor will make"
+          },
+          "quantity": {
+            "type": "integer"
+          },
+          "requested_quantity": {
+            "type": "integer",
+            "description": "Present when the vendor's minimum order forced quantity above what was requested — e.g. asked for 1, minimum is 25"
+          },
+          "substitutions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "field": {
+                  "type": "string"
+                },
+                "requested": {
+                  "type": "string"
+                },
+                "provided": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Present when this offer is a closest-match stand-in for an unsupported ask, e.g. {field:\"cut\", requested:\"triangle\", provided:\"contour\"}. The ask is logged for future vendor sourcing."
+          },
+          "min_order": {
+            "type": "object",
+            "properties": {
+              "threshold_cents": {
+                "type": "integer"
+              },
+              "detail": {
+                "type": "string",
+                "example": "€250 minimum order value per order"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "min_purchase",
+                  "startup_fee"
+                ],
+                "description": "Which per-order charge shaped the price: \"min_purchase\" (default when absent) = the vendor floors the order value; \"startup_fee\" = a flat per-order fee added to every order and already inside the subtotal (threshold_cents is that fee)."
+              }
+            },
+            "description": "Present when a vendor per-order charge shaped this price — an order-value floor (the subtotal is the vendor's per-order minimum, not a scaled per-part price; floors billed as a cart top-up on the shipping line count too) or a flat per-order startup fee (see kind). threshold_cents is the vendor-side amount in USD cents; detail is the vendor's published wording. Absent = the price scaled from the part."
+          },
+          "unit_price_cents": {
+            "type": "integer",
+            "description": "All-in unit price (payment-processing gross-up baked in — no separate fee line ever)"
+          },
+          "subtotal_cents": {
+            "type": "integer"
+          },
+          "shipping_options": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "example": "standard"
+                },
+                "label": {
+                  "type": "string"
+                },
+                "cost_cents": {
+                  "type": "integer",
+                  "description": "All-in shipping cost, USD cents (payment-processing gross-up baked in; free shipping stays 0)"
+                },
+                "eta_date": {
+                  "type": "string",
+                  "format": "date"
+                },
+                "eta_business_days": {
+                  "type": "integer"
+                }
+              }
+            }
+          },
+          "total_from_cents": {
+            "type": "integer",
+            "description": "Subtotal + cheapest shipping"
+          },
+          "preview": {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "pending",
+                  "ready",
+                  "failed",
+                  "unavailable"
+                ]
+              },
+              "url": {
+                "type": "string",
+                "format": "uri"
+              },
+              "source": {
+                "type": "string",
+                "enum": [
+                  "vendor_render",
+                  "ufp_render"
+                ]
+              }
+            },
+            "description": "Product preview for these exact options. Resolves asynchronously — poll GET /v1/quotes/{id}."
+          },
+          "attributes": {
+            "type": "object",
+            "properties": {
+              "outdoor_rated": {
+                "type": "boolean"
+              },
+              "submersible": {
+                "type": "boolean"
+              },
+              "high_temp": {
+                "type": "boolean"
+              },
+              "food_safe": {
+                "type": "boolean"
+              }
+            },
+            "additionalProperties": {
+              "type": "boolean"
+            },
+            "description": "Only vendor-advertised claims appear; an absent flag means \"no claim\", never \"no\". OPEN vocabulary: beyond the named keys, any additional boolean key is a vendor-advertised claim (e.g. iso_13485: true) — same honest-claims rule"
+          },
+          "vendor_rating": {
+            "type": "object",
+            "properties": {
+              "stars": {
+                "type": "number",
+                "example": 4.6
+              },
+              "review_count": {
+                "type": "integer",
+                "description": "Honest count of reviews on file — 0 means no one has reviewed yet"
+              },
+              "facets": {
+                "type": "object",
+                "properties": {
+                  "quality": {
+                    "type": "number"
+                  },
+                  "timeliness": {
+                    "type": "number"
+                  },
+                  "accuracy": {
+                    "type": "number"
+                  }
+                },
+                "description": "Facet averages over reviews that scored them"
+              },
+              "reliability": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "process": {
+                      "type": "string",
+                      "enum": [
+                        "fdm_print",
+                        "resin_print",
+                        "powder_print",
+                        "metal_print",
+                        "elastomer_print",
+                        "cnc",
+                        "sheetmetal",
+                        "laser_cut",
+                        "decal",
+                        "print",
+                        "apparel"
+                      ]
+                    },
+                    "material": {
+                      "type": "string"
+                    },
+                    "orders": {
+                      "type": "integer",
+                      "description": "Honest sample size — completed orders for this process+material"
+                    },
+                    "stars": {
+                      "type": "number"
+                    },
+                    "on_time_rate": {
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 1
+                    }
+                  }
+                },
+                "description": "Per-process/material track record (\"prints PC reliably\") — filterable via constraints.reliability"
+              }
+            },
+            "description": "Vendor star rating built from verified-purchase reviews only (see POST /v1/orders/{id}/review)"
+          },
+          "price_basis": {
+            "type": "string",
+            "enum": [
+              "vendor_api",
+              "cached_matrix",
+              "estimate"
+            ]
+          },
+          "fulfillment": {
+            "type": "string",
+            "enum": [
+              "connected",
+              "not_connected"
+            ],
+            "description": "Whether UFP's checkout reaches this vendor. \"connected\" = a real paid order has gone end to end down this vendor+process lane. \"not_connected\" = the price is real but ordering isn't wired through yet; POST /v1/checkouts refuses it before any money moves."
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "QuoteResponse": {
+        "type": "object",
+        "properties": {
+          "quote_id": {
+            "type": "string"
+          },
+          "parent_quote_id": {
+            "type": "string",
+            "nullable": true
+          },
+          "scenario": {
+            "type": "string",
+            "description": "Comparison-scenario label this quote was refined under (see the refine body's `scenario`). Echoed on every read of a labeled child so pollers can bucket side-by-side offers by scenario. Absent on unlabeled quotes."
+          },
+          "process": {
+            "type": "string",
+            "enum": [
+              "fdm_print",
+              "resin_print",
+              "powder_print",
+              "metal_print",
+              "elastomer_print",
+              "cnc",
+              "sheetmetal",
+              "laser_cut",
+              "decal",
+              "print",
+              "apparel"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "open",
+              "quoting",
+              "complete",
+              "partial",
+              "expired",
+              "ordered"
+            ],
+            "description": "Quotes STREAM: \"quoting\" = the fastest vendors' offers are in this response and more are landing — re-read GET /v1/quotes/{id} (routing.expected_vendors says who is still pricing). \"complete\" = every vendor answered; \"partial\" = some lanes failed or were superseded but every offer shown is real and orderable."
+          },
+          "offers": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "example": "of_9Ql3C6XlGmEGhk1y"
+                },
+                "quote_id": {
+                  "type": "string"
+                },
+                "vendor": {
+                  "type": "string",
+                  "example": "stickerapp"
+                },
+                "vendor_display_name": {
+                  "type": "string"
+                },
+                "vendor_logo_url": {
+                  "type": "string",
+                  "description": "The vendor's brand mark (small square image URL) for offer cards. Absent when AFN has no curated mark for the vendor — render the name alone, never a placeholder image"
+                },
+                "process": {
+                  "type": "string",
+                  "enum": [
+                    "fdm_print",
+                    "resin_print",
+                    "powder_print",
+                    "metal_print",
+                    "elastomer_print",
+                    "cnc",
+                    "sheetmetal",
+                    "laser_cut",
+                    "decal",
+                    "print",
+                    "apparel"
+                  ]
+                },
+                "spec_resolved": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "description": "Exact size/cut/material/color the vendor will make"
+                },
+                "quantity": {
+                  "type": "integer"
+                },
+                "requested_quantity": {
+                  "type": "integer",
+                  "description": "Present when the vendor's minimum order forced quantity above what was requested — e.g. asked for 1, minimum is 25"
+                },
+                "substitutions": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "field": {
+                        "type": "string"
+                      },
+                      "requested": {
+                        "type": "string"
+                      },
+                      "provided": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "description": "Present when this offer is a closest-match stand-in for an unsupported ask, e.g. {field:\"cut\", requested:\"triangle\", provided:\"contour\"}. The ask is logged for future vendor sourcing."
+                },
+                "min_order": {
+                  "type": "object",
+                  "properties": {
+                    "threshold_cents": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string",
+                      "example": "€250 minimum order value per order"
+                    },
+                    "kind": {
+                      "type": "string",
+                      "enum": [
+                        "min_purchase",
+                        "startup_fee"
+                      ],
+                      "description": "Which per-order charge shaped the price: \"min_purchase\" (default when absent) = the vendor floors the order value; \"startup_fee\" = a flat per-order fee added to every order and already inside the subtotal (threshold_cents is that fee)."
+                    }
+                  },
+                  "description": "Present when a vendor per-order charge shaped this price — an order-value floor (the subtotal is the vendor's per-order minimum, not a scaled per-part price; floors billed as a cart top-up on the shipping line count too) or a flat per-order startup fee (see kind). threshold_cents is the vendor-side amount in USD cents; detail is the vendor's published wording. Absent = the price scaled from the part."
+                },
+                "unit_price_cents": {
+                  "type": "integer",
+                  "description": "All-in unit price (payment-processing gross-up baked in — no separate fee line ever)"
+                },
+                "subtotal_cents": {
+                  "type": "integer"
+                },
+                "shipping_options": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "example": "standard"
+                      },
+                      "label": {
+                        "type": "string"
+                      },
+                      "cost_cents": {
+                        "type": "integer",
+                        "description": "All-in shipping cost, USD cents (payment-processing gross-up baked in; free shipping stays 0)"
+                      },
+                      "eta_date": {
+                        "type": "string",
+                        "format": "date"
+                      },
+                      "eta_business_days": {
+                        "type": "integer"
+                      }
+                    }
+                  }
+                },
+                "total_from_cents": {
+                  "type": "integer",
+                  "description": "Subtotal + cheapest shipping"
+                },
+                "preview": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "pending",
+                        "ready",
+                        "failed",
+                        "unavailable"
+                      ]
+                    },
+                    "url": {
+                      "type": "string",
+                      "format": "uri"
+                    },
+                    "source": {
+                      "type": "string",
+                      "enum": [
+                        "vendor_render",
+                        "ufp_render"
+                      ]
+                    }
+                  },
+                  "description": "Product preview for these exact options. Resolves asynchronously — poll GET /v1/quotes/{id}."
+                },
+                "attributes": {
+                  "type": "object",
+                  "properties": {
+                    "outdoor_rated": {
+                      "type": "boolean"
+                    },
+                    "submersible": {
+                      "type": "boolean"
+                    },
+                    "high_temp": {
+                      "type": "boolean"
+                    },
+                    "food_safe": {
+                      "type": "boolean"
+                    }
+                  },
+                  "additionalProperties": {
+                    "type": "boolean"
+                  },
+                  "description": "Only vendor-advertised claims appear; an absent flag means \"no claim\", never \"no\". OPEN vocabulary: beyond the named keys, any additional boolean key is a vendor-advertised claim (e.g. iso_13485: true) — same honest-claims rule"
+                },
+                "vendor_rating": {
+                  "type": "object",
+                  "properties": {
+                    "stars": {
+                      "type": "number",
+                      "example": 4.6
+                    },
+                    "review_count": {
+                      "type": "integer",
+                      "description": "Honest count of reviews on file — 0 means no one has reviewed yet"
+                    },
+                    "facets": {
+                      "type": "object",
+                      "properties": {
+                        "quality": {
+                          "type": "number"
+                        },
+                        "timeliness": {
+                          "type": "number"
+                        },
+                        "accuracy": {
+                          "type": "number"
+                        }
+                      },
+                      "description": "Facet averages over reviews that scored them"
+                    },
+                    "reliability": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "process": {
+                            "type": "string",
+                            "enum": [
+                              "fdm_print",
+                              "resin_print",
+                              "powder_print",
+                              "metal_print",
+                              "elastomer_print",
+                              "cnc",
+                              "sheetmetal",
+                              "laser_cut",
+                              "decal",
+                              "print",
+                              "apparel"
+                            ]
+                          },
+                          "material": {
+                            "type": "string"
+                          },
+                          "orders": {
+                            "type": "integer",
+                            "description": "Honest sample size — completed orders for this process+material"
+                          },
+                          "stars": {
+                            "type": "number"
+                          },
+                          "on_time_rate": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1
+                          }
+                        }
+                      },
+                      "description": "Per-process/material track record (\"prints PC reliably\") — filterable via constraints.reliability"
+                    }
+                  },
+                  "description": "Vendor star rating built from verified-purchase reviews only (see POST /v1/orders/{id}/review)"
+                },
+                "price_basis": {
+                  "type": "string",
+                  "enum": [
+                    "vendor_api",
+                    "cached_matrix",
+                    "estimate"
+                  ]
+                },
+                "fulfillment": {
+                  "type": "string",
+                  "enum": [
+                    "connected",
+                    "not_connected"
+                  ],
+                  "description": "Whether UFP's checkout reaches this vendor. \"connected\" = a real paid order has gone end to end down this vendor+process lane. \"not_connected\" = the price is real but ordering isn't wired through yet; POST /v1/checkouts refuses it before any money moves."
+                },
+                "expires_at": {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              }
+            },
+            "description": "Ranked best-first (price + speed) — unless an `order_by` applies, in which case they arrive already sorted by it (the echoed order_by says which)."
+          },
+          "order_by": {
+            "type": "object",
+            "description": "The presentation ordering offers[] is currently sorted by (see the refine body's `order_by`), echoed on every read while one applies. Absent = the default recommended (price + speed) rank."
+          },
+          "steps": {
+            "type": "array",
+            "description": "The last few refine steps behind this quote, NEWEST FIRST (ALC-127) — steps[0] is the step that produced this quote (what undo_last_step takes back). Computed from stored quote states on every read, capped at 3. Absent on original quotes.",
+            "items": {
+              "type": "object",
+              "required": [
+                "quote_id",
+                "parent_quote_id",
+                "summary",
+                "changes"
+              ],
+              "properties": {
+                "quote_id": {
+                  "type": "string",
+                  "description": "The child quote this step produced"
+                },
+                "parent_quote_id": {
+                  "type": "string",
+                  "description": "The quote the step refined — its stored state is what undo restores"
+                },
+                "scenario": {
+                  "type": "string",
+                  "description": "Present when this step opened a comparison-scenario lane"
+                },
+                "summary": {
+                  "type": "string",
+                  "description": "Human one-liner for the step (\"added deadline 2026-09-05; material pla → asa\")"
+                },
+                "changes": {
+                  "type": "array",
+                  "description": "Field-level machine diff: constraint keys plus \"spec.<key>\" for spec deltas. `from` absent = the field wasn't set before; `to` absent = the step cleared it.",
+                  "items": {
+                    "type": "object",
+                    "required": [
+                      "field"
+                    ],
+                    "properties": {
+                      "field": {
+                        "type": "string"
+                      },
+                      "from": {},
+                      "to": {}
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "near_misses": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "example": "of_9Ql3C6XlGmEGhk1y"
+                },
+                "quote_id": {
+                  "type": "string"
+                },
+                "vendor": {
+                  "type": "string",
+                  "example": "stickerapp"
+                },
+                "vendor_display_name": {
+                  "type": "string"
+                },
+                "vendor_logo_url": {
+                  "type": "string",
+                  "description": "The vendor's brand mark (small square image URL) for offer cards. Absent when AFN has no curated mark for the vendor — render the name alone, never a placeholder image"
+                },
+                "process": {
+                  "type": "string",
+                  "enum": [
+                    "fdm_print",
+                    "resin_print",
+                    "powder_print",
+                    "metal_print",
+                    "elastomer_print",
+                    "cnc",
+                    "sheetmetal",
+                    "laser_cut",
+                    "decal",
+                    "print",
+                    "apparel"
+                  ]
+                },
+                "spec_resolved": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "description": "Exact size/cut/material/color the vendor will make"
+                },
+                "quantity": {
+                  "type": "integer"
+                },
+                "requested_quantity": {
+                  "type": "integer",
+                  "description": "Present when the vendor's minimum order forced quantity above what was requested — e.g. asked for 1, minimum is 25"
+                },
+                "substitutions": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "field": {
+                        "type": "string"
+                      },
+                      "requested": {
+                        "type": "string"
+                      },
+                      "provided": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "description": "Present when this offer is a closest-match stand-in for an unsupported ask, e.g. {field:\"cut\", requested:\"triangle\", provided:\"contour\"}. The ask is logged for future vendor sourcing."
+                },
+                "min_order": {
+                  "type": "object",
+                  "properties": {
+                    "threshold_cents": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string",
+                      "example": "€250 minimum order value per order"
+                    },
+                    "kind": {
+                      "type": "string",
+                      "enum": [
+                        "min_purchase",
+                        "startup_fee"
+                      ],
+                      "description": "Which per-order charge shaped the price: \"min_purchase\" (default when absent) = the vendor floors the order value; \"startup_fee\" = a flat per-order fee added to every order and already inside the subtotal (threshold_cents is that fee)."
+                    }
+                  },
+                  "description": "Present when a vendor per-order charge shaped this price — an order-value floor (the subtotal is the vendor's per-order minimum, not a scaled per-part price; floors billed as a cart top-up on the shipping line count too) or a flat per-order startup fee (see kind). threshold_cents is the vendor-side amount in USD cents; detail is the vendor's published wording. Absent = the price scaled from the part."
+                },
+                "unit_price_cents": {
+                  "type": "integer",
+                  "description": "All-in unit price (payment-processing gross-up baked in — no separate fee line ever)"
+                },
+                "subtotal_cents": {
+                  "type": "integer"
+                },
+                "shipping_options": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "example": "standard"
+                      },
+                      "label": {
+                        "type": "string"
+                      },
+                      "cost_cents": {
+                        "type": "integer",
+                        "description": "All-in shipping cost, USD cents (payment-processing gross-up baked in; free shipping stays 0)"
+                      },
+                      "eta_date": {
+                        "type": "string",
+                        "format": "date"
+                      },
+                      "eta_business_days": {
+                        "type": "integer"
+                      }
+                    }
+                  }
+                },
+                "total_from_cents": {
+                  "type": "integer",
+                  "description": "Subtotal + cheapest shipping"
+                },
+                "preview": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "pending",
+                        "ready",
+                        "failed",
+                        "unavailable"
+                      ]
+                    },
+                    "url": {
+                      "type": "string",
+                      "format": "uri"
+                    },
+                    "source": {
+                      "type": "string",
+                      "enum": [
+                        "vendor_render",
+                        "ufp_render"
+                      ]
+                    }
+                  },
+                  "description": "Product preview for these exact options. Resolves asynchronously — poll GET /v1/quotes/{id}."
+                },
+                "attributes": {
+                  "type": "object",
+                  "properties": {
+                    "outdoor_rated": {
+                      "type": "boolean"
+                    },
+                    "submersible": {
+                      "type": "boolean"
+                    },
+                    "high_temp": {
+                      "type": "boolean"
+                    },
+                    "food_safe": {
+                      "type": "boolean"
+                    }
+                  },
+                  "additionalProperties": {
+                    "type": "boolean"
+                  },
+                  "description": "Only vendor-advertised claims appear; an absent flag means \"no claim\", never \"no\". OPEN vocabulary: beyond the named keys, any additional boolean key is a vendor-advertised claim (e.g. iso_13485: true) — same honest-claims rule"
+                },
+                "vendor_rating": {
+                  "type": "object",
+                  "properties": {
+                    "stars": {
+                      "type": "number",
+                      "example": 4.6
+                    },
+                    "review_count": {
+                      "type": "integer",
+                      "description": "Honest count of reviews on file — 0 means no one has reviewed yet"
+                    },
+                    "facets": {
+                      "type": "object",
+                      "properties": {
+                        "quality": {
+                          "type": "number"
+                        },
+                        "timeliness": {
+                          "type": "number"
+                        },
+                        "accuracy": {
+                          "type": "number"
+                        }
+                      },
+                      "description": "Facet averages over reviews that scored them"
+                    },
+                    "reliability": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "process": {
+                            "type": "string",
+                            "enum": [
+                              "fdm_print",
+                              "resin_print",
+                              "powder_print",
+                              "metal_print",
+                              "elastomer_print",
+                              "cnc",
+                              "sheetmetal",
+                              "laser_cut",
+                              "decal",
+                              "print",
+                              "apparel"
+                            ]
+                          },
+                          "material": {
+                            "type": "string"
+                          },
+                          "orders": {
+                            "type": "integer",
+                            "description": "Honest sample size — completed orders for this process+material"
+                          },
+                          "stars": {
+                            "type": "number"
+                          },
+                          "on_time_rate": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1
+                          }
+                        }
+                      },
+                      "description": "Per-process/material track record (\"prints PC reliably\") — filterable via constraints.reliability"
+                    }
+                  },
+                  "description": "Vendor star rating built from verified-purchase reviews only (see POST /v1/orders/{id}/review)"
+                },
+                "price_basis": {
+                  "type": "string",
+                  "enum": [
+                    "vendor_api",
+                    "cached_matrix",
+                    "estimate"
+                  ]
+                },
+                "fulfillment": {
+                  "type": "string",
+                  "enum": [
+                    "connected",
+                    "not_connected"
+                  ],
+                  "description": "Whether UFP's checkout reaches this vendor. \"connected\" = a real paid order has gone end to end down this vendor+process lane. \"not_connected\" = the price is real but ordering isn't wired through yet; POST /v1/checkouts refuses it before any money moves."
+                },
+                "expires_at": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "excluded_by": {
+                  "type": "object",
+                  "required": [
+                    "reason",
+                    "detail"
+                  ],
+                  "properties": {
+                    "reason": {
+                      "type": "string",
+                      "enum": [
+                        "attribute",
+                        "deadline",
+                        "budget"
+                      ]
+                    },
+                    "field": {
+                      "type": "string",
+                      "description": "The constraint field/demand key that excluded it"
+                    },
+                    "requested": {
+                      "type": "string",
+                      "description": "What the buyer asked for (stringified)"
+                    },
+                    "detail": {
+                      "type": "string",
+                      "description": "Human wording — identical to the quote note"
+                    },
+                    "earliest_eta": {
+                      "type": "string",
+                      "format": "date",
+                      "description": "Deadline misses: soonest the part could actually arrive"
+                    },
+                    "days_late": {
+                      "type": "integer",
+                      "description": "Deadline misses: calendar days earliest_eta lands past the deadline"
+                    },
+                    "cents_over": {
+                      "type": "integer",
+                      "description": "Budget misses: cheapest all-in total minus max_budget_cents"
+                    }
+                  },
+                  "description": "Why this bid sits outside the constraints, with machine fields"
+                }
+              },
+              "description": "A real vendor bid that failed exactly ONE stated constraint — context only, never orderable (checkout refuses near-miss ids). Relaxing the named constraint via a refine converts it into an ordinary offer."
+            },
+            "description": "Real bids that missed exactly one hard constraint, closest-first (capped at 6 per response) — shown for context, never mixed into offers[], never orderable as-is"
+          },
+          "routing": {
+            "type": "object",
+            "properties": {
+              "detected_file_kind": {
+                "type": "string",
+                "description": "What AFN detected the uploaded file to be (artwork, stl, step, dxf)"
+              },
+              "candidates": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "fdm_print",
+                    "resin_print",
+                    "powder_print",
+                    "metal_print",
+                    "elastomer_print",
+                    "cnc",
+                    "sheetmetal",
+                    "laser_cut",
+                    "decal",
+                    "print",
+                    "apparel"
+                  ]
+                },
+                "description": "Processes quoted live in this response"
+              },
+              "also_possible": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "process": {
+                      "type": "string",
+                      "example": "cnc"
+                    },
+                    "reason": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "description": "Processes that could make this part but have no vendor on AFN yet — each is logged as a demand signal for vendor sourcing"
+              },
+              "expected_vendors": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "vendor": {
+                      "type": "string",
+                      "example": "craftcloud"
+                    },
+                    "process": {
+                      "type": "string",
+                      "enum": [
+                        "fdm_print",
+                        "resin_print",
+                        "powder_print",
+                        "metal_print",
+                        "elastomer_print",
+                        "cnc",
+                        "sheetmetal",
+                        "laser_cut",
+                        "decal",
+                        "print",
+                        "apparel"
+                      ]
+                    },
+                    "logo_url": {
+                      "type": "string",
+                      "description": "The vendor's brand mark for the placeholder tile (same sourcing as offer.vendor_logo_url); absent when uncurated"
+                    },
+                    "expected_wait_s": {
+                      "type": "number",
+                      "description": "Expected answer time in seconds: the lane's p90 real answer latency over the last 14 days (plus queue delay behind the dispatch pool), clamped 3-75s — sized so the answer lands before a bar paced with it ends, nearly always; falls back to the process-pooled p90 (all vendors on the process), then coarse 2/8/20s health-probe buckets. Pace loading animations with it — never print it as a promise or complete a bar before the offer lands"
+                    }
+                  }
+                },
+                "description": "Who is STILL PRICING on this quote — live per read: lanes that settled (offers landed, no bid, failed, or superseded) drop out on the next read. Render placeholder tiles from it while status is \"quoting\". Health-down vendors are never dispatched, so never listed."
+              },
+              "viewer_mesh_url": {
+                "type": "string",
+                "description": "Face-classified viewer mesh for mesh/BREP uploads (stl/step/iges): a binary AFVM v1 blob — magic \"AFVM\", version, JSON header (bbox, classified faces: planes/cylinders with diameter+axis, holes), then little-endian Float32 positions, Uint32 indices, and Uint32 face-id-per-triangle. Derives lazily, so poll until 200 (the URL serves CORS on both 200 and 404). Absent for kinds with no mesh representation."
+              }
+            },
+            "description": "How the quote was dispatched (always includes expected_vendors; candidates/also_possible reflect auto-routing when `process` was omitted)"
+          },
+          "ufp_url": {
+            "type": "string",
+            "description": "Public download of this quote's .ufp part container: a plain STORE-mode ZIP holding ufp.json (the quote's CURRENT spec + constraints, pretty-printed) and design/<filename> (the design bytes verbatim) — the all-in-one part file. Re-uploadable anywhere a design file is accepted: its saved intent applies automatically as fill-if-absent defaults. Stable per quote id (refines mint child ids). Present whenever the quote has a design file."
+          },
+          "design_url": {
+            "type": "string",
+            "description": "Public download of the bare design file inside that container (the .step/.stl/artwork the network actually quotes) — 'save just the .step' without unzipping. Present alongside ufp_url."
+          },
+          "notes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Why vendors/offers were excluded, vendor outages, etc."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "QuotePreviewResponse": {
+        "type": "object",
+        "description": "The SOFT quote (POST /v1/quotes/{id}/preview): the deterministic routing half of a refine — intake sniff, process filter, health/pause gates, capability gate, envelope prune, expected-vendor sizing — run for the refined request and stopped BEFORE the shell. Nothing is created: no child quote, no vendor dispatch, no supersede epoch, no demand-ledger or corpus write, so a client may fire one per edit. expected_vendors are exactly the rows the real refine's shell would publish; notes are the shell's notes verbatim (every plan-time 'vendor <id> excluded: …' line included). An expectation, never a promise — lanes can still decline once asked.",
+        "required": [
+          "status",
+          "quote_id",
+          "process",
+          "fabricators",
+          "lanes",
+          "expected_vendors",
+          "notes"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "preview"
+            ]
+          },
+          "quote_id": {
+            "type": "string",
+            "description": "The quote the preview was planned against (the refine's parent)"
+          },
+          "process": {
+            "type": "string",
+            "enum": [
+              "fdm_print",
+              "resin_print",
+              "powder_print",
+              "metal_print",
+              "elastomer_print",
+              "cnc",
+              "sheetmetal",
+              "laser_cut",
+              "decal",
+              "print",
+              "apparel",
+              "auto"
+            ]
+          },
+          "fabricators": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Distinct fabricators across every expected lane"
+          },
+          "lanes": {
+            "type": "array",
+            "description": "Every candidate lane in routing order — zero-vendor lanes included",
+            "items": {
+              "type": "object",
+              "required": [
+                "process",
+                "vendors"
+              ],
+              "properties": {
+                "process": {
+                  "type": "string"
+                },
+                "vendors": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "quotes": {
+                  "type": "integer",
+                  "description": "Estimated quotes on the lane — one per shop for a stated material, a shop's declared material count for a defaults run. An expectation; real quotes replace it."
+                }
+              }
+            }
+          },
+          "expected_vendors": {
+            "type": "array",
+            "description": "Same rows as QuoteResponse.routing.expected_vendors would carry on the shell",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "notes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "spec_asked": {
+            "type": "object",
+            "additionalProperties": true,
+            "description": "The refined ask's articulated spec (same filter as QuoteResponse.spec_asked)"
+          }
+        }
+      },
+      "TransactionAttestation": {
+        "type": "object",
+        "required": [
+          "attestation_id",
+          "ufp_version",
+          "request",
+          "outcome",
+          "occurred_at"
+        ],
+        "properties": {
+          "attestation_id": {
+            "type": "string",
+            "description": "Vendor-generated idempotency key — resubmitting the same id updates the attestation (quoted_only → fulfilled), never duplicates"
+          },
+          "ufp_version": {
+            "type": "string",
+            "example": "0.3.0"
+          },
+          "request": {
+            "type": "object",
+            "description": "What the buyer asked for — raw, pre-resolution (demand-signal grade)",
+            "properties": {
+              "process": {
+                "type": "string",
+                "enum": [
+                  "fdm_print",
+                  "resin_print",
+                  "powder_print",
+                  "metal_print",
+                  "elastomer_print",
+                  "cnc",
+                  "sheetmetal",
+                  "laser_cut",
+                  "decal",
+                  "print",
+                  "apparel"
+                ]
+              },
+              "spec": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "constraints": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          },
+          "offer": {
+            "type": "object",
+            "description": "What was offered/made. Prices may be omitted if commercially sensitive (less credit)",
+            "properties": {
+              "spec_resolved": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "quantity": {
+                "type": "integer"
+              },
+              "subtotal_cents": {
+                "type": "integer"
+              }
+            }
+          },
+          "outcome": {
+            "type": "string",
+            "enum": [
+              "quoted_only",
+              "ordered",
+              "fulfilled",
+              "cancelled",
+              "refunded",
+              "lost_capability_gap"
+            ]
+          },
+          "gaps": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "field": {
+                  "type": "string"
+                },
+                "requested": {
+                  "description": "string or number"
+                },
+                "provided": {
+                  "description": "string or number; null = the sale was lost on this gap"
+                },
+                "reason": {
+                  "type": "string",
+                  "enum": [
+                    "vendor_minimum",
+                    "vendor_maximum",
+                    "out_of_stock",
+                    "capability_gap",
+                    "lead_time",
+                    "price",
+                    "other"
+                  ]
+                },
+                "note": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "What could not be delivered as asked — e.g. {field:\"quantity\", requested:3, provided:10, reason:\"vendor_minimum\"}. Feeds the network's demand-gap routing."
+          },
+          "occurred_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "fulfilled_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "evidence": {
+            "type": "object",
+            "additionalProperties": true,
+            "description": "Evidence bundle — mandatory when available, never necessitated: tracking (or a declared-untracked marker), request/offer/file payload hashes, result photos, invoice_ref, delivered_at, buyer_hash (HMAC — no PII), buyer_confirmation_token"
+          }
+        }
+      },
+      "AttestationReceipt": {
+        "type": "object",
+        "properties": {
+          "attestation_id": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "accepted",
+              "pending_buyer_confirmation",
+              "rejected"
+            ]
+          },
+          "reputation_credit": {
+            "type": "string",
+            "enum": [
+              "none",
+              "partial",
+              "full"
+            ]
+          },
+          "detail": {
+            "type": "string",
+            "description": "The feedback loop: exactly what would have earned more credit"
+          }
+        }
+      }
+    }
+  },
+  "security": [
+    {
+      "bearerAuth": []
+    }
+  ]
+}
