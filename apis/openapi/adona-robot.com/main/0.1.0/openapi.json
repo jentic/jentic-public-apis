@@ -1,0 +1,626 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Adona market data",
+    "description": "Candle history and live market data for data customers.\n\n**Two secrets, both on `Authorization: Bearer`.** A long-lived API key (`adk_live_…`) is exchanged at `POST /v1/tokens` for a twelve-hour access token; every other call carries that token. Sending one where the other belongs is answered by name, not by an opaque 401. The key belongs on your server: `POST /v1/tokens` refuses a browser's preflight.\n\n**Every refusal from the routes below carries a code: `{\"detail\": \"CODE\"}`**, and a 422 adds the reason: `{\"detail\": \"CODE: text\"}`. Branch on the part before the first colon. A 422 also lists the offending fields as data, `\"fields\": [{\"loc\": [\"limit\"], \"reason\": \"…\"}]` (empty when no field can be named, such as a body that is not JSON), so a client can point at the field without parsing the text. Each route lists its codes below with what to do.\n\n**Live stream.** `POST /v1/ws-ticket` returns a single-use ticket. Open `wss://<host>/v1/stream` offering TWO subprotocols: `adona.data.v1` and `ticket.<ticket>`, e.g. `new WebSocket(url, [\"adona.data.v1\", \"ticket.\" + ticket])`. The ticket never goes in the URL: a ticket sent only in the query string is ignored, and the connection is refused with no reason. Five frames are accepted: `ping`, `subscribe`, `unsubscribe`, `candle.watch`, `candle.unwatch`; anything else answers `FRAME_NOT_ALLOWED`. Channels are `quote:<SYMBOL>` and `candle:<SYMBOL>:<TIMEFRAME>`.\n\n**Close codes.** 1008 carries a reason you must not reconnect in a loop on: `CUSTOMER_ACCESS_REVOKED`, `CUSTOMER_TRIAL_EXPIRED`, `CUSTOMER_CONNECTION_LIMIT`, `EXPECTED_DATA_TOKEN`, `INVALID_TICKET` (mint a new ticket once), and `RATE_LIMITED` (more than 40 messages a second: slow down, then reconnect). 1009 `FRAME_TOO_LARGE`: a message over 16 KiB; split the subscription. 1011 is ours and temporary, whatever its reason (`CUSTOMER_ACCESS_CHECK_UNAVAILABLE`, `REDIS_NOT_AVAILABLE`, `REALTIME_HUB_NOT_AVAILABLE`): reconnect with backoff.",
+    "version": "0.1.0",
+    "contact": {
+      "name": "Adona Robot Sàrl",
+      "email": "support@adona-robot.com",
+      "url": "https://adona-robot.com/en"
+    },
+    "termsOfService": "https://adona-robot.com/en/terms",
+    "x-jentic-source-url": "https://api.adona-robot.com/v1/openapi.json"
+  },
+  "servers": [
+    {
+      "url": "https://api.adona-robot.com",
+      "description": "Production"
+    }
+  ],
+  "paths": {
+    "/v1/tokens": {
+      "post": {
+        "tags": [
+          "v1"
+        ],
+        "summary": "Exchange the API key for a twelve-hour access token",
+        "operationId": "create_token_v1_tokens_post",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TokenRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TokenResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "- `INVALID_CUSTOMER_KEY`: Unknown, revoked or missing API key. Do not retry with the same key.\n- `EXPECTED_API_KEY`: An access token was sent here; this door takes the API key (`adk_...`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CodedError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "- `CUSTOMER_TRIAL_EXPIRED`: The free trial has ended. Move to a paid plan; the same key works again.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CodedError"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "- `INVALID_END_USER_ID`: `end_user_id` is empty or longer than 128 characters.\n- `INVALID_REQUEST`: The body did not parse, or two fields are wrong at once.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CodedValidationError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "- `TOO_MANY_ATTEMPTS`: Over 300 token requests a minute for this account, or too many from one address. Wait for `Retry-After` seconds.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CodedError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "- `REDIS_NOT_AVAILABLE`: Ours, and temporary. Retry with backoff.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CodedError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/v1/candles": {
+      "get": {
+        "tags": [
+          "v1"
+        ],
+        "summary": "Candle history, one page, oldest first",
+        "description": "Candle history for the symbols this account may carry.\n\nPage backwards with `before`, which takes the previous response's\n`next_before` verbatim. A null `next_before` means the horizon, not an\nerror: history is bounded by retention and by what the archive holds.",
+        "operationId": "get_candles_v1_candles_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "symbol",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 2,
+              "title": "Symbol"
+            }
+          },
+          {
+            "name": "timeframe",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^(D1|H4|H1|M15|M5|M1|S1)$",
+              "title": "Timeframe"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 5000,
+              "minimum": 1,
+              "default": 50,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "before",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Page backwards: return bars strictly older than this instant (RFC3339).",
+              "title": "Before"
+            },
+            "description": "Page backwards: return bars strictly older than this instant (RFC3339)."
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CandlePage"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "- `MISSING_BEARER_TOKEN`: No `Authorization: Bearer` header.\n- `INVALID_ACCESS_TOKEN`: Not an access token.\n- `INVALID_JWT`: The token is malformed or expired: request a new one at `POST /v1/tokens`.\n- `EXPECTED_ACCESS_TOKEN`: The API key was sent here; exchange it at `POST /v1/tokens` first.\n- `CUSTOMER_ACCESS_REVOKED`: Access was cut, or the key was rotated. A new token from the current key; if that is refused too, stop.\n- `CUSTOMER_ID_REQUIRED`: A data token without its account claim.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CodedError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "- `EXPECTED_DATA_TOKEN`: A token from another surface. Only tokens from `POST /v1/tokens` are accepted.\n- `MARKET_DATA_SCOPE_REQUIRED`: The token's scope does not reach market data.\n- `CUSTOMER_ID_REQUIRED`: A data token without its account claim.\n- `CUSTOMER_KID_REQUIRED`: A data token without its key fingerprint.\n- `TRADER_ROLE_REQUIRED`: Not a data token, and not a trader either.\n- `MFA_REQUIRED`: Not a data token.\n- `SYMBOL_NOT_ALLOWED`: This instrument is not in your account's list.\n- `CUSTOMER_TRIAL_EXPIRED`: The free trial has ended. Move to a paid plan; the same key works again.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CodedError"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "- `TIMEFRAME_UNSUPPORTED`: Not one of S1, M1, M5, M15, H1, H4, D1.\n- `INVALID_SYMBOL`: Shorter than two characters.\n- `INVALID_LIMIT`: Outside 1 to 5000.\n- `INVALID_BEFORE`: Not an RFC3339 instant. Pass `next_before` back verbatim.\n- `INVALID_REQUEST`: Two parameters wrong at once, or one missing.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CodedValidationError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "- `CUSTOMER_MINUTE_CEILING`: Your plan's slices for this minute are spent. Wait for `Retry-After` seconds.\n- `CUSTOMER_DAILY_CAP`: The daily runaway guard is reached. Waiting seconds does not help; it reopens the next UTC day.\n- `TOO_MANY_ATTEMPTS`: Over 60 requests a minute for this end user. Wait for `Retry-After` seconds.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CodedError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "- `SYMBOL_TRANSLATION_ERROR`: Ours. Retrying does not help; tell us.\n- `REDIS_NOT_AVAILABLE`: Ours, and temporary. Retry with backoff.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CodedError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "- `CUSTOMER_ACCESS_CHECK_UNAVAILABLE`: Ours, and temporary: your token is probably fine. Retry after `Retry-After`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CodedError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/ws-ticket": {
+      "post": {
+        "tags": [
+          "v1"
+        ],
+        "summary": "A single-use ticket to open the live stream",
+        "description": "Mint a single-use ticket for this end user's socket.\n\nThe ticket carries the customer and the key fingerprint forward, so the\nconnect guard re-checks both: a key revoked between the mint and the\nconnect does not get a socket, even though the ticket itself is valid.",
+        "operationId": "issue_ticket_v1_ws_ticket_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WsTicket"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "- `MISSING_BEARER_TOKEN`: No `Authorization: Bearer` header.\n- `INVALID_ACCESS_TOKEN`: Not an access token.\n- `INVALID_JWT`: The token is malformed or expired: request a new one at `POST /v1/tokens`.\n- `EXPECTED_ACCESS_TOKEN`: The API key was sent here; exchange it at `POST /v1/tokens` first.\n- `CUSTOMER_ACCESS_REVOKED`: Access was cut, or the key was rotated. A new token from the current key; if that is refused too, stop.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CodedError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "- `EXPECTED_DATA_TOKEN`: A token from another surface. Only tokens from `POST /v1/tokens` are accepted.\n- `MARKET_DATA_SCOPE_REQUIRED`: The token's scope does not reach market data.\n- `CUSTOMER_ID_REQUIRED`: A data token without its account claim.\n- `CUSTOMER_KID_REQUIRED`: A data token without its key fingerprint.\n- `TRADER_ROLE_REQUIRED`: Not a data token, and not a trader either.\n- `MFA_REQUIRED`: Not a data token.\n- `CUSTOMER_TRIAL_EXPIRED`: The free trial has ended. Move to a paid plan; the same key works again.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CodedError"
+                }
+              }
+            }
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CodedValidationError"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "description": "- `TOO_MANY_ATTEMPTS`: Over 20 tickets a minute for this end user, or 60 for this address. Wait for `Retry-After` seconds.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CodedError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "- `REDIS_NOT_AVAILABLE`: Ours, and temporary. Retry with backoff.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CodedError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "- `CUSTOMER_ACCESS_CHECK_UNAVAILABLE`: Ours, and temporary: your token is probably fine. Retry after `Retry-After`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CodedError"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Candle": {
+        "properties": {
+          "time": {
+            "type": "string",
+            "title": "Time",
+            "description": "Bar open time, RFC3339 UTC."
+          },
+          "open": {
+            "type": "string",
+            "title": "Open"
+          },
+          "high": {
+            "type": "string",
+            "title": "High"
+          },
+          "low": {
+            "type": "string",
+            "title": "Low"
+          },
+          "close": {
+            "type": "string",
+            "title": "Close"
+          },
+          "volume": {
+            "type": "string",
+            "title": "Volume",
+            "description": "Tick volume: the number of price updates received in the bar, as a string. Not a traded volume: these markets have no central record of traded size. Some bars of the history come from another price feed and carry its tick volume, not counted the same way: the last day holding one, by the bar's open time in UTC, is `other_feed_until` per symbol and timeframe in `/symbols.json`, 2026-06-05 at the latest."
+          }
+        },
+        "type": "object",
+        "required": [
+          "time",
+          "open",
+          "high",
+          "low",
+          "close",
+          "volume"
+        ],
+        "title": "Candle",
+        "description": "One bar. Prices are STRINGS (NUMERIC(18,8) as text), never floats: convert\nat the last moment, for display.",
+        "example": {
+          "close": "1.10050000",
+          "high": "1.10120000",
+          "low": "1.09980000",
+          "open": "1.10000000",
+          "time": "2026-09-06T10:00:00Z",
+          "volume": "42"
+        }
+      },
+      "CandlePage": {
+        "properties": {
+          "symbol": {
+            "type": "string",
+            "title": "Symbol",
+            "description": "The canonical symbol the page was read for."
+          },
+          "timeframe": {
+            "type": "string",
+            "title": "Timeframe",
+            "description": "One of S1, M1, M5, M15, H1, H4, D1."
+          },
+          "candles": {
+            "items": {
+              "$ref": "#/components/schemas/Candle"
+            },
+            "type": "array",
+            "title": "Candles",
+            "description": "Ascending by time. May be empty."
+          },
+          "next_before": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Before",
+            "description": "Pass it back verbatim as `before` for the previous page. `null` means there is nothing older: stop. On S1 a page covers one day, so an empty page with a non-null cursor is an empty day (a weekend): continue."
+          }
+        },
+        "type": "object",
+        "required": [
+          "symbol",
+          "timeframe",
+          "candles",
+          "next_before"
+        ],
+        "title": "CandlePage",
+        "description": "A page of history, oldest first."
+      },
+      "CodedError": {
+        "properties": {
+          "detail": {
+            "type": "string",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "required": [
+          "detail"
+        ],
+        "title": "CodedError",
+        "description": "A refusal: a code, which a 422 follows with a colon and the reason."
+      },
+      "CodedValidationError": {
+        "properties": {
+          "detail": {
+            "type": "string",
+            "title": "Detail"
+          },
+          "fields": {
+            "items": {
+              "$ref": "#/components/schemas/FieldError"
+            },
+            "type": "array",
+            "title": "Fields"
+          }
+        },
+        "type": "object",
+        "required": [
+          "detail",
+          "fields"
+        ],
+        "title": "CodedValidationError",
+        "description": "A 422: the code and reason, and the offending fields as data (possibly none)."
+      },
+      "FieldError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Loc"
+          },
+          "reason": {
+            "type": "string",
+            "title": "Reason"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "reason"
+        ],
+        "title": "FieldError",
+        "description": "One offending field: where it is in the request, and why it was refused."
+      },
+      "TokenRequest": {
+        "properties": {
+          "end_user_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "End User Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "end_user_id"
+        ],
+        "title": "TokenRequest"
+      },
+      "TokenResponse": {
+        "properties": {
+          "access_token": {
+            "type": "string",
+            "title": "Access Token"
+          },
+          "token_type": {
+            "type": "string",
+            "title": "Token Type",
+            "default": "bearer"
+          },
+          "expires_in": {
+            "type": "integer",
+            "title": "Expires In"
+          },
+          "end_user_id": {
+            "type": "string",
+            "title": "End User Id"
+          },
+          "symbols": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Symbols"
+          }
+        },
+        "type": "object",
+        "required": [
+          "access_token",
+          "expires_in",
+          "end_user_id",
+          "symbols"
+        ],
+        "title": "TokenResponse"
+      },
+      "WsTicket": {
+        "properties": {
+          "ticket": {
+            "type": "string",
+            "title": "Ticket",
+            "description": "Single use. Open `wss://<host>/v1/stream` offering two subprotocols, `adona.data.v1` and `ticket.<ticket>`; never put the ticket in the URL."
+          },
+          "expires_in_seconds": {
+            "type": "integer",
+            "title": "Expires In Seconds",
+            "description": "Seconds before an unused ticket expires."
+          }
+        },
+        "type": "object",
+        "required": [
+          "ticket",
+          "expires_in_seconds"
+        ],
+        "title": "WsTicket"
+      }
+    },
+    "securitySchemes": {
+      "HTTPBearer": {
+        "type": "http",
+        "scheme": "bearer"
+      }
+    }
+  }
+}
