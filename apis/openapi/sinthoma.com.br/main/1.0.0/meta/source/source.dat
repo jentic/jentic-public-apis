@@ -1,0 +1,901 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Sinthoma — superfície pública para agentes (Conector MCP)",
+    "version": "1.0.0",
+    "x-politica-versao": "https://sinthoma.com.br/developers",
+    "summary": "Descoberta, metadados OAuth e transporte MCP somente leitura.",
+    "description": "Superfície pública do Sinthoma para agentes de IA. O produto é um prontuário clínico para psicólogos; o acesso de agentes ao dado clínico existe apenas via MCP (Conector), sempre autenticado, somente leitura, com consentimento do paciente e auditoria. Este documento descreve a descoberta e o transporte — e nunca cataloga as APIs internas do aplicativo autenticado. Documentação para humanas: /conector; índice para agentes: /llms.txt.",
+    "termsOfService": "https://sinthoma.com.br/termos",
+    "contact": {
+      "name": "Suporte Sinthoma",
+      "url": "https://sinthoma.com.br/contato"
+    },
+    "license": {
+      "name": "Uso do serviço conforme Termos de uso",
+      "url": "https://sinthoma.com.br/termos"
+    }
+  },
+  "servers": [
+    {
+      "url": "https://sinthoma.com.br",
+      "description": "Produção"
+    }
+  ],
+  "tags": [
+    {
+      "name": "MCP",
+      "description": "Transporte Streamable HTTP do Conector (autenticado)."
+    },
+    {
+      "name": "Descoberta",
+      "description": "Metadados públicos: OAuth e server card MCP."
+    }
+  ],
+  "paths": {
+    "/api/mcp": {
+      "post": {
+        "tags": [
+          "MCP"
+        ],
+        "operationId": "chamarTransporteMcp",
+        "summary": "Endpoint MCP (Streamable HTTP, JSON-RPC 2.0) — autenticado.",
+        "description": "Transporte Streamable HTTP do servidor MCP do Conector Sinthoma, em modo stateless. Autenticação: token pessoal `sinth_…` (Bearer) ou OAuth 2.0 (fluxo por consentimento; metadados em /.well-known/oauth-authorization-server). A descoberta das ferramentas é feita pelo próprio protocolo: chame `initialize`, depois `tools/list` e `tools/call`. Cada ferramenta exige o escopo indicado em components.schemas.FerramentasMcp e tem quota por token (429 quando esgotada). Toda leitura é auditada; nada escreve no prontuário.",
+        "security": [
+          {
+            "token_pessoal": []
+          },
+          {
+            "oauth2": [
+              "pacientes:ler",
+              "sessoes:ler",
+              "preparo:ler"
+            ]
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RequisicaoJsonRpc"
+              },
+              "examples": {
+                "initialize": {
+                  "summary": "Handshake do protocolo MCP",
+                  "value": {
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "initialize",
+                    "params": {
+                      "protocolVersion": "2026-07-28",
+                      "capabilities": {},
+                      "clientInfo": {
+                        "name": "agente-exemplo",
+                        "version": "1.0.0"
+                      }
+                    }
+                  }
+                },
+                "toolsList": {
+                  "summary": "Listar as ferramentas disponíveis",
+                  "value": {
+                    "jsonrpc": "2.0",
+                    "id": 2,
+                    "method": "tools/list"
+                  }
+                },
+                "toolsCall": {
+                  "summary": "Chamar uma ferramenta",
+                  "value": {
+                    "jsonrpc": "2.0",
+                    "id": 3,
+                    "method": "tools/call",
+                    "params": {
+                      "name": "listar_pacientes_recentes",
+                      "arguments": {
+                        "limite": 5
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Resposta JSON-RPC 2.0 (ou stream SSE para respostas longas). O campo `result` segue o protocolo MCP; em `tools/call`, erros de negócio vêm como `isError: true` dentro do resultado, não como status HTTP.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RespostaJsonRpc"
+                }
+              },
+              "text/event-stream": {
+                "schema": {
+                  "type": "string",
+                  "description": "Stream SSE do Streamable HTTP."
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sem credencial ou credencial inválida. O header WWW-Authenticate aponta os metadados do recurso (RFC 9728) em /.well-known/oauth-protected-resource. O corpo segue o RFC 6750 (formato OAuth), não o envelope JSON-RPC — o erro acontece antes de a requisição chegar ao servidor MCP.",
+            "headers": {
+              "WWW-Authenticate": {
+                "description": "Desafio Bearer com resource_metadata.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErroOAuth"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Credencial válida sem o escopo exigido pela ferramenta, ou recusa por falta de consentimento do paciente para uso de IA (a recusa é registrada). Mesmo formato OAuth do 401 (RFC 6750).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErroOAuth"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Limite de chamadas do token atingido (quota e rate limit por token). Aguarde e tente de novo; não é erro.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JsonRpcErro"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/.well-known/oauth-protected-resource": {
+      "get": {
+        "tags": [
+          "Descoberta"
+        ],
+        "operationId": "obterMetadadosRecursoProtegido",
+        "summary": "Metadados do recurso protegido (RFC 9728).",
+        "description": "Descreve o recurso /api/mcp: escopos, métodos de bearer suportados e onde está o servidor de autorização. Público, sem autenticação.",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Documento RFC 9728.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MetadadosRecursoProtegido"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "Método não suportado. A rota responde apenas a GET, HEAD e OPTIONS. O corpo segue o RFC 9457 (application/problem+json) e o header Allow lista o que é aceito.",
+            "headers": {
+              "Allow": {
+                "description": "Métodos que o recurso aceita (sempre \"GET, HEAD, OPTIONS\" aqui).",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problema"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/.well-known/oauth-protected-resource/api/mcp": {
+      "get": {
+        "tags": [
+          "Descoberta"
+        ],
+        "operationId": "obterMetadadosRecursoProtegidoApiMcp",
+        "summary": "Metadados do recurso protegido com o sufixo do caminho (RFC 9728 §3.1).",
+        "description": "Mesmo documento do endereço raiz, no formato derivado que insere o caminho do recurso depois de .well-known. Servimos os dois.",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Documento RFC 9728.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MetadadosRecursoProtegido"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "Método não suportado. A rota responde apenas a GET, HEAD e OPTIONS. O corpo segue o RFC 9457 (application/problem+json) e o header Allow lista o que é aceito.",
+            "headers": {
+              "Allow": {
+                "description": "Métodos que o recurso aceita (sempre \"GET, HEAD, OPTIONS\" aqui).",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problema"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/.well-known/oauth-authorization-server": {
+      "get": {
+        "tags": [
+          "Descoberta"
+        ],
+        "operationId": "obterMetadadosServidorAutorizacao",
+        "summary": "Metadados do servidor de autorização (RFC 8414).",
+        "description": "Endpoints authorize/token/register, PKCE S256 obrigatório e escopos suportados. Público, sem autenticação.",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Documento RFC 8414.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MetadadosServidorAutorizacao"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "Método não suportado. A rota responde apenas a GET, HEAD e OPTIONS. O corpo segue o RFC 9457 (application/problem+json) e o header Allow lista o que é aceito.",
+            "headers": {
+              "Allow": {
+                "description": "Métodos que o recurso aceita (sempre \"GET, HEAD, OPTIONS\" aqui).",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problema"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/.well-known/mcp": {
+      "get": {
+        "tags": [
+          "Descoberta"
+        ],
+        "operationId": "obterServerCardWellKnown",
+        "summary": "Server card MCP por descoberta de domínio.",
+        "description": "Card público do servidor MCP do Conector: nome, descrição, versão e endereço remoto. Não exige autenticação.",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Server card (application/json).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServerCard"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "Método não suportado. A rota responde apenas a GET, HEAD e OPTIONS. O corpo segue o RFC 9457 (application/problem+json) e o header Allow lista o que é aceito.",
+            "headers": {
+              "Allow": {
+                "description": "Métodos que o recurso aceita (sempre \"GET, HEAD, OPTIONS\" aqui).",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problema"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/mcp/server-card": {
+      "get": {
+        "tags": [
+          "Descoberta"
+        ],
+        "operationId": "obterServerCard",
+        "summary": "Server card MCP (endereço canônico do card).",
+        "description": "Mesmo documento de /.well-known/mcp, servido como application/mcp-server-card+json.",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Server card.",
+            "content": {
+              "application/mcp-server-card+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServerCard"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "Método não suportado. A rota responde apenas a GET, HEAD e OPTIONS. O corpo segue o RFC 9457 (application/problem+json) e o header Allow lista o que é aceito.",
+            "headers": {
+              "Allow": {
+                "description": "Métodos que o recurso aceita (sempre \"GET, HEAD, OPTIONS\" aqui).",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problema"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/openapi.json": {
+      "get": {
+        "tags": [
+          "Descoberta"
+        ],
+        "operationId": "obterSpecOpenapi",
+        "summary": "Este documento (OpenAPI 3.1 da superfície pública).",
+        "description": "Servido em application/vnd.oai.openapi+json. Público, sem autenticação, estático e determinístico. O documento é auto-descritivo: lista exatamente o que é contrato público — e o que NÃO é (as APIs internas do aplicativo autenticado ficam de fora de propósito).",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Este documento.",
+            "content": {
+              "application/vnd.oai.openapi+json": {
+                "schema": {
+                  "type": "object",
+                  "description": "Documento OpenAPI 3.1 (auto-referente).",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "Método não suportado. A rota responde apenas a GET, HEAD e OPTIONS. O corpo segue o RFC 9457 (application/problem+json) e o header Allow lista o que é aceito.",
+            "headers": {
+              "Allow": {
+                "description": "Métodos que o recurso aceita (sempre \"GET, HEAD, OPTIONS\" aqui).",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problema"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/openapi.json": {
+      "get": {
+        "tags": [
+          "Descoberta"
+        ],
+        "operationId": "obterSpecOpenapiV1",
+        "summary": "Alias versionado deste documento.",
+        "description": "Mesmo conteudo de /openapi.json, sob o caminho da versao 1. Fixe este endereco se voce quer a garantia de que a forma nao muda sem aviso.",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Este documento.",
+            "content": {
+              "application/vnd.oai.openapi+json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "Método não suportado. A rota responde apenas a GET, HEAD e OPTIONS. O corpo segue o RFC 9457 (application/problem+json) e o header Allow lista o que é aceito.",
+            "headers": {
+              "Allow": {
+                "description": "Métodos que o recurso aceita (sempre \"GET, HEAD, OPTIONS\" aqui).",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problema"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/mcp/server-card": {
+      "get": {
+        "tags": [
+          "Descoberta"
+        ],
+        "operationId": "obterServerCardV1",
+        "summary": "Alias versionado do server card MCP.",
+        "description": "Mesmo conteudo de /mcp/server-card, sob o caminho da versao 1. Fixe este endereco para garantir que a forma nao muda sem aviso.",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Server card do Conector.",
+            "content": {
+              "application/mcp-server-card+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServerCard"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "Método não suportado. A rota responde apenas a GET, HEAD e OPTIONS. O corpo segue o RFC 9457 (application/problem+json) e o header Allow lista o que é aceito.",
+            "headers": {
+              "Allow": {
+                "description": "Métodos que o recurso aceita (sempre \"GET, HEAD, OPTIONS\" aqui).",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problema"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "token_pessoal": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "Token pessoal do Conector (`sinth_…`), criado pela própria profissional em Configurações → Conector dentro do Sinthoma. Não há criação via API: a emissão é self-service dentro do produto, por design (auditoria e revogação)."
+      },
+      "oauth2": {
+        "type": "oauth2",
+        "description": "OAuth 2.0 com PKCE (S256) e consentimento do profissional. Registro de cliente em /oauth/register (RFC 7591); metadados completos em /.well-known/oauth-authorization-server.",
+        "flows": {
+          "authorizationCode": {
+            "authorizationUrl": "https://sinthoma.com.br/oauth/authorize",
+            "tokenUrl": "https://sinthoma.com.br/oauth/token",
+            "refreshUrl": "https://sinthoma.com.br/oauth/token",
+            "scopes": {
+              "pacientes:ler": "Ver a lista dos seus pacientes — nome, data da última sessão e total de sessões.",
+              "sessoes:ler": "Ler trechos literais do que você escreveu nos registros de um paciente específico.",
+              "preparo:ler": "Gerar a preparação de sessão de um paciente (usa análise de IA).",
+              "offline_access": "Continuar conectado sem você precisar entrar de novo a cada uso."
+            }
+          }
+        }
+      }
+    },
+    "schemas": {
+      "RequisicaoJsonRpc": {
+        "type": "object",
+        "required": [
+          "jsonrpc",
+          "method"
+        ],
+        "properties": {
+          "jsonrpc": {
+            "type": "string",
+            "const": "2.0"
+          },
+          "id": {
+            "description": "Id da requisição (número ou string). Ausente em notificações.",
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "method": {
+            "type": "string",
+            "description": "Método do protocolo MCP.",
+            "enum": [
+              "initialize",
+              "notifications/initialized",
+              "tools/list",
+              "tools/call",
+              "ping"
+            ]
+          },
+          "params": {
+            "type": "object",
+            "description": "Parâmetros do método. Em tools/call: { name, arguments } com os nomes e esquemas em components.schemas.FerramentasMcp.",
+            "additionalProperties": true
+          }
+        }
+      },
+      "RespostaJsonRpc": {
+        "type": "object",
+        "required": [
+          "jsonrpc",
+          "id"
+        ],
+        "properties": {
+          "jsonrpc": {
+            "type": "string",
+            "const": "2.0"
+          },
+          "id": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "result": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "error": {
+            "$ref": "#/components/schemas/JsonRpcErro"
+          }
+        }
+      },
+      "JsonRpcErro": {
+        "type": "object",
+        "required": [
+          "jsonrpc",
+          "error"
+        ],
+        "properties": {
+          "jsonrpc": {
+            "type": "string",
+            "const": "2.0"
+          },
+          "id": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "error": {
+            "type": "object",
+            "required": [
+              "code",
+              "message"
+            ],
+            "properties": {
+              "code": {
+                "type": "integer"
+              },
+              "message": {
+                "type": "string"
+              },
+              "data": {}
+            }
+          }
+        }
+      },
+      "ErroOAuth": {
+        "type": "object",
+        "title": "Erro OAuth (RFC 6750)",
+        "description": "Corpo do 401/403 na ENTRADA do endpoint MCP, antes de a requisição chegar ao servidor MCP: o formato é o do OAuth 2.0 Bearer (RFC 6750 §3) — e NÃO o envelope JSON-RPC. O formato é contrato: consumidores OAuth dependem dele para interpretar o desafio junto com o header WWW-Authenticate. Não carrega stack trace, caminho de arquivo ou detalhe de infraestrutura — por design.",
+        "required": [
+          "error",
+          "error_description"
+        ],
+        "properties": {
+          "error": {
+            "type": "string",
+            "description": "Código do erro OAuth; `invalid_token` para credencial ausente ou inválida."
+          },
+          "error_description": {
+            "type": "string",
+            "description": "Descrição curta e estável do motivo."
+          }
+        }
+      },
+      "Problema": {
+        "type": "object",
+        "title": "Problema HTTP (RFC 9457)",
+        "description": "Corpo `application/problem+json` dos erros das rotas de descoberta — hoje, o 405 de método não suportado. Nunca carrega stack trace, caminho de arquivo ou detalhe de infraestrutura.",
+        "required": [
+          "type",
+          "title",
+          "status"
+        ],
+        "properties": {
+          "type": {
+            "type": "string",
+            "format": "uri-reference",
+            "description": "URI que identifica o tipo do problema; aponta a documentação em /developers."
+          },
+          "title": {
+            "type": "string",
+            "description": "Resumo curto e estável do problema."
+          },
+          "status": {
+            "type": "integer",
+            "description": "O mesmo código de status HTTP da resposta."
+          },
+          "detail": {
+            "type": "string",
+            "description": "Explicação legível específica desta ocorrência."
+          },
+          "instance": {
+            "type": "string",
+            "format": "uri-reference",
+            "description": "Caminho da requisição que gerou o problema."
+          }
+        }
+      },
+      "FerramentasMcp": {
+        "type": "object",
+        "description": "As três ferramentas MCP (todas somente leitura). O esquema executável é o inputSchema devolvido por tools/list; aqui está o nível já documentado ao usuário. Conteúdo de resposta é texto para o assistente, com o trecho do prontuário da própria profissional.",
+        "properties": {
+          "listar_pacientes_recentes": {
+            "type": "object",
+            "description": "Lista os pacientes do profissional ordenados pela sessão mais recente. Devolve apenas nome, data da última sessão e total de sessões — nunca CPF, telefone, e-mail ou dado de cobrança.",
+            "properties": {
+              "limite": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 20,
+                "description": "Quantos pacientes trazer (padrão 10)."
+              }
+            }
+          },
+          "buscar_registros_do_paciente": {
+            "type": "object",
+            "description": "Busca um termo nos registros de UM paciente e devolve TRECHOS LITERAIS do que o profissional escreveu, com a sessão e a data de origem. Não resume e não interpreta. Exige consentimento de uso de IA do paciente.",
+            "properties": {
+              "paciente_id": {
+                "type": "string",
+                "format": "uuid",
+                "description": "Id do paciente. Um paciente por vez."
+              },
+              "termo": {
+                "type": "string",
+                "description": "Palavra ou expressão a procurar. Busca literal, sem curingas."
+              },
+              "limite": {
+                "type": "integer",
+                "minimum": 1,
+                "description": "Quantidade máxima de trechos."
+              }
+            }
+          },
+          "preparar_sessao": {
+            "type": "object",
+            "description": "Monta o briefing de preparação para a próxima sessão de um paciente, usando o mesmo mecanismo que o aplicativo já usa. Exige consentimento de uso de IA.",
+            "properties": {
+              "paciente_id": {
+                "type": "string",
+                "format": "uuid",
+                "description": "Id do paciente."
+              }
+            }
+          }
+        }
+      },
+      "MetadadosRecursoProtegido": {
+        "type": "object",
+        "required": [
+          "resource",
+          "authorization_servers"
+        ],
+        "properties": {
+          "resource": {
+            "type": "string",
+            "description": "URI do recurso (…/api/mcp)."
+          },
+          "resource_name": {
+            "type": "string"
+          },
+          "scopes_supported": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "pacientes:ler",
+                "sessoes:ler",
+                "preparo:ler"
+              ]
+            }
+          },
+          "bearer_methods_supported": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Sempre [\"header\"]: token no cabeçalho Authorization."
+          },
+          "authorization_servers": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uri"
+            },
+            "description": "Aponta para a origem, que publica o metadado RFC 8414."
+          }
+        },
+        "additionalProperties": true
+      },
+      "MetadadosServidorAutorizacao": {
+        "type": "object",
+        "required": [
+          "issuer",
+          "response_types_supported",
+          "authorization_endpoint",
+          "token_endpoint"
+        ],
+        "properties": {
+          "issuer": {
+            "type": "string",
+            "format": "uri"
+          },
+          "authorization_endpoint": {
+            "type": "string",
+            "format": "uri"
+          },
+          "token_endpoint": {
+            "type": "string",
+            "format": "uri"
+          },
+          "registration_endpoint": {
+            "type": "string",
+            "format": "uri",
+            "description": "Registro dinâmico de cliente (RFC 7591)."
+          },
+          "response_types_supported": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "grant_types_supported": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "code_challenge_methods_supported": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "PKCE S256 é obrigatório."
+          },
+          "token_endpoint_auth_methods_supported": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "scopes_supported": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "additionalProperties": true
+      },
+      "ServerCard": {
+        "type": "object",
+        "required": [
+          "name",
+          "title",
+          "version",
+          "remotes"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          },
+          "websiteUrl": {
+            "type": "string",
+            "format": "uri"
+          },
+          "remotes": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "type",
+                "url"
+              ],
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "streamable-http"
+                },
+                "url": {
+                  "type": "string",
+                  "format": "uri"
+                },
+                "supportedProtocolVersions": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "additionalProperties": true
+      }
+    }
+  }
+}
