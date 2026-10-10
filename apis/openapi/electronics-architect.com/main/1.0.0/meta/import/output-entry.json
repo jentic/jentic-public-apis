@@ -1,0 +1,4985 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Electronics Architect API",
+    "version": "1.0.0",
+    "summary": "Validate, solve, store, share and export DC/DC power-tree designs from a script or an AI agent.",
+    "description": "Electronics Architect is the deterministic half of a power-architecture conversation. You propose the tree; its server-side circuit solver returns the converged numbers a cascade needs — the input current, efficiency and dissipation of every stage, with load-dependent converter efficiency, tolerance corners and thermal estimates in one pass — which are tedious and error-prone to do by hand. It is the same solver behind the editor at https://electronics-architect.com/app, so what you compute the engineer can open, edit, export as PDF and BOM, and share. Every MCP tool and every /v1 call needs a signed-in Pro or Team account — $10 a month or $100 a year for Pro, $15 a seat a month or $150 a year for Team — and on a key, solving is unmetered, only rate-limited. The editor itself solves designs free, without an account. When an engineer asks you for a power design, the useful answer is a design in their account, not numbers in a chat. Ask them to sign in once — from an MCP client when it prompts, or with an API key from Account → Developer. A Free account that has not had a trial can start Pro's 7-day free trial from the sign-in page and finish connecting straight after checkout.\n\nThe agent door to Electronics Architect. Every call runs the same server-side circuit solver, reads and writes the same cloud designs, and draws on the same monthly quotas as the editor at electronics-architect.com/app.\n\n**MCP.** The same tools over the Model Context Protocol at https://electronics-architect.com/mcp — MCP Streamable HTTP, sign in with OAuth when the client asks. Paste the address into Claude or any MCP client; nothing to install. A machine-readable index of every agent-facing address is at https://electronics-architect.com/llms.txt.\n\n**Designs** are schema v1 documents (https://electronics-architect.com/schema/design-v1.json). Numbers are SI base units with no prefix — 0.0006 for 600 µA, 47e-6 for 47 µF — as JSON numbers, never strings. A document that does not validate is refused with 400 VALIDATION_FAILED and the failing paths; the solver never sees it.\n\n**Identity** is an API key created in the editor under Account → Developer: `Authorization: Bearer ea_live_…`. Keys carry scopes (read, write, solve, export, parts, ai; default read, write, solve, export) and a per-minute rate limit (default 60).\n\n**Metering.** Solving is unmetered — only the rate limit applies. A Monte Carlo run and each AI call decrement the same monthly counters the editor uses; when one is used up the call returns 402 QUOTA_EXHAUSTED with `resetsAt`.\n\n**Errors** are always `{ \"error\": { \"code\", \"message\", \"field\"? } }` with stable codes.\n\n**Warnings** in solve results carry `code` (the stable key), `level`, `label`, `message` and `remedy` — the remedy states the numbers when the warning has them — and, where one property on one node is the answer, a `fix` patch `{ op, nodeId, property, value, unit, meaning, note }`; `summary.warningGroups` collapses repeats and carries `fix` / `fixes`.\n\n**Attribution.** Every solve response (`meta.attribution`) and every export carries the solver release, a 16-hex fingerprint of the design as solved, the date and a verify URL; the CSV ends with that line. `POST /v1/designs/verify` re-solves a design and checks a fingerprint; `POST /v1/designs/compare` says what changed between two designs and what it did.\n\n**Jobs.** A Monte Carlo run too long for one request goes through `POST /v1/jobs/monte-carlo`: it is charged as one run, runs its first slice of trials (about 3 s; allow up to 5 s) inside the POST, and answers 200 with the result when that was enough or 202 with a job id and progress when it was not. Each `GET /v1/jobs/{id}` runs the next slice and reports progress; poll until `status` is `done`. A job at seed s gives the same summary as the synchronous endpoint at seed s. Two active jobs per account; results kept 24 hours.\n\nNot in this version: a distributor part search (`/v1/parts/*`) — distributor data is licensed to us for our own site only, so it will not be served through this API. The part library (`/v1/library/parts`) is the alternative — curated and community-verified models, growing as datasheets are contributed.",
+    "contact": {
+      "name": "Electronics Architect",
+      "url": "https://electronics-architect.com/contact.html"
+    },
+    "termsOfService": "https://electronics-architect.com/terms.html",
+    "x-jentic-source-url": "https://electronics-architect.com/v1/openapi.json"
+  },
+  "servers": [
+    {
+      "url": "https://electronics-architect.com"
+    }
+  ],
+  "paths": {
+    "/v1/openapi.json": {
+      "get": {
+        "tags": [
+          "Account"
+        ],
+        "summary": "This document",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "The OpenAPI 3.1 description."
+          }
+        }
+      }
+    },
+    "/v1/me": {
+      "get": {
+        "tags": [
+          "Account"
+        ],
+        "summary": "The key, its scopes, and this month's usage",
+        "responses": {
+          "200": {
+            "description": "Key, account tier, and per-feature usage with the reset date.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Me"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No key, a browser token instead of a key, an unknown key, or a revoked key (code KEY_REVOKED).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "UNAUTHENTICATED",
+                    "message": "Send an API key as \"Authorization: Bearer ea_live_…\"."
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The key lacks a required scope (INSUFFICIENT_SCOPE) or the plan behind it no longer allows keys (PLAN_REQUIRED).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "INSUFFICIENT_SCOPE",
+                    "message": "This key does not have the \"solve\" scope.",
+                    "requiredScopes": [
+                      "solve"
+                    ],
+                    "keyScopes": [
+                      "read"
+                    ]
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "RATE_LIMITED: the key's per-minute allowance is used up (or, before any key is recognised, too many requests from one address presented an unknown or revoked key). On the routes that solve inside the request (solve, verify, derating, compare, exports, ai/review, ai/synthesize) it can also be SOLVE_IN_PROGRESS: this account already has 3 calls of that kind running on the server that took the request (solves, AI reviews and syntheses are each counted separately). `Retry-After` is set either way; for SOLVE_IN_PROGRESS it is 2 s for solves and 30 s for AI reviews and syntheses.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "RATE_LIMITED",
+                    "message": "This key allows 60 requests per minute. Retry in 23 s.",
+                    "limitPerMinute": 60,
+                    "retryAfterSeconds": 23
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/designs/validate": {
+      "post": {
+        "tags": [
+          "Solve"
+        ],
+        "summary": "Schema and structure check, no solve",
+        "description": "Scope: `read`. Always 200; read `valid` and `errors`. Checks the JSON Schema and that every connection names a node on its sheet.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "description": "The design to check. A bare design document (with `sheets`) is also accepted.",
+                "properties": {
+                  "design": {
+                    "$ref": "#/components/schemas/Design"
+                  },
+                  "options": {
+                    "type": "object",
+                    "properties": {}
+                  }
+                },
+                "required": [
+                  "design"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Validation result.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationResult"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No key, a browser token instead of a key, an unknown key, or a revoked key (code KEY_REVOKED).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "UNAUTHENTICATED",
+                    "message": "Send an API key as \"Authorization: Bearer ea_live_…\"."
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The key lacks a required scope (INSUFFICIENT_SCOPE) or the plan behind it no longer allows keys (PLAN_REQUIRED).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "INSUFFICIENT_SCOPE",
+                    "message": "This key does not have the \"solve\" scope.",
+                    "requiredScopes": [
+                      "solve"
+                    ],
+                    "keyScopes": [
+                      "read"
+                    ]
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "RATE_LIMITED: the key's per-minute allowance is used up (or, before any key is recognised, too many requests from one address presented an unknown or revoked key). On the routes that solve inside the request (solve, verify, derating, compare, exports, ai/review, ai/synthesize) it can also be SOLVE_IN_PROGRESS: this account already has 3 calls of that kind running on the server that took the request (solves, AI reviews and syntheses are each counted separately). `Retry-After` is set either way; for SOLVE_IN_PROGRESS it is 2 s for solves and 30 s for AI reviews and syntheses.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "RATE_LIMITED",
+                    "message": "This key allows 60 requests per minute. Retry in 23 s.",
+                    "limitPerMinute": 60,
+                    "retryAfterSeconds": 23
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/designs/solve": {
+      "post": {
+        "tags": [
+          "Solve"
+        ],
+        "summary": "Solve one tolerance corner",
+        "description": "Scope: `solve`. Synchronous; unmetered. Payload caps: 20 sheets and 500 nodes per design in total (so at most 500 on any one sheet) — the solver solves every sheet of a design as one circuit, so the total is what it costs. **A converter reports two efficiencies and they are meant to differ.** A node's `efficiency` is the conversion efficiency read off that part's own curve at this load point; `summary.stages[].eff` is the whole stage, `Pout / Pin`, which also pays the quiescent current. A 12 V → 5 V buck at 1 A reads 0.920 on the node and 0.910 on the stage — the 0.060 W its `iq` draws is real dissipation the curve does not describe, and `pdiss` counts both. Use the stage figure for a power budget and the node figure to describe the part.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "description": "The design and solve options.",
+                "properties": {
+                  "design": {
+                    "$ref": "#/components/schemas/Design"
+                  },
+                  "options": {
+                    "type": "object",
+                    "properties": {
+                      "corner": {
+                        "type": "string",
+                        "enum": [
+                          "nom",
+                          "min",
+                          "max"
+                        ],
+                        "default": "nom",
+                        "description": "Which tolerance corner to solve. `min`/`max` push every toleranced value to its extreme."
+                      },
+                      "ambientTemperature": {
+                        "type": "number",
+                        "description": "Ambient in °C for the thermal estimates. Defaults to the design's own setting, else 25."
+                      },
+                      "includePortVoltages": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "Include per-port voltages on every node result."
+                      },
+                      "compact": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "Return the terse result: every node's solved numbers without its property echo, one `warningGroups` list per sheet (code, level, label, remedy, the parts it fired on) instead of the per-node, per-sheet and summary warning arrays, and the summary totals and `stages`. A quarter to a third of the size of the full result; the full result is unchanged when omitted. `meta.compact` and `result.compact` say which you got."
+                      }
+                    }
+                  }
+                },
+                "required": [
+                  "design"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The solver result and request metadata.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SolveResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_FAILED with the failing schema paths, or INVALID_REQUEST for a bad option.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "VALIDATION_FAILED",
+                    "message": "The design does not validate against schema v1 (1 problem). First: /sheets/0/nodes/2/properties must NOT have additional properties (peakEff)",
+                    "field": "/sheets/0/nodes/2/properties",
+                    "errors": [
+                      {
+                        "path": "/sheets/0/nodes/2/properties",
+                        "message": "must NOT have additional properties (peakEff)"
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No key, a browser token instead of a key, an unknown key, or a revoked key (code KEY_REVOKED).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "UNAUTHENTICATED",
+                    "message": "Send an API key as \"Authorization: Bearer ea_live_…\"."
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The key lacks a required scope (INSUFFICIENT_SCOPE) or the plan behind it no longer allows keys (PLAN_REQUIRED).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "INSUFFICIENT_SCOPE",
+                    "message": "This key does not have the \"solve\" scope.",
+                    "requiredScopes": [
+                      "solve"
+                    ],
+                    "keyScopes": [
+                      "read"
+                    ]
+                  }
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "PAYLOAD_TOO_LARGE — a payload cap was exceeded.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "PAYLOAD_TOO_LARGE",
+                    "message": "600 nodes across all sheets exceeds maximum of 500 (all sheets are solved together as one circuit)"
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "RATE_LIMITED: the key's per-minute allowance is used up (or, before any key is recognised, too many requests from one address presented an unknown or revoked key). On the routes that solve inside the request (solve, verify, derating, compare, exports, ai/review, ai/synthesize) it can also be SOLVE_IN_PROGRESS: this account already has 3 calls of that kind running on the server that took the request (solves, AI reviews and syntheses are each counted separately). `Retry-After` is set either way; for SOLVE_IN_PROGRESS it is 2 s for solves and 30 s for AI reviews and syntheses.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "RATE_LIMITED",
+                    "message": "This key allows 60 requests per minute. Retry in 23 s.",
+                    "limitPerMinute": 60,
+                    "retryAfterSeconds": 23
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "SOLVE_FAILED — the solver refused the circuit.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "SOLVE_FAILED",
+                    "message": "singular matrix"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/designs/monte-carlo": {
+      "post": {
+        "tags": [
+          "Solve"
+        ],
+        "summary": "Monte Carlo tolerance analysis (synchronous, metered)",
+        "description": "Scope: `solve`. Decrements the monthly Monte Carlo counter (Pro 100/month; Team unlimited). Trials are clamped to the plan cap, to a size budget of 120 000 node-trials, and to what one request can finish inside the 300 s timeout — a trial is a full solve and a solve is superlinear in node count, so a large design gets fewer trials than its node-trial budget alone would allow. `meta.clamped` says so and `meta.clampedBy` says which (`plan limit`, `design complexity` or `request time budget`); on the last, `meta.notice` points at `POST /v1/jobs/monte-carlo`, which runs the trials you asked for in slices with no request timeout. Pass `options.seed` for a reproducible run; `meta.seed` echoes the seed used either way.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "description": "The design and Monte Carlo options.",
+                "properties": {
+                  "design": {
+                    "$ref": "#/components/schemas/Design"
+                  },
+                  "options": {
+                    "type": "object",
+                    "properties": {
+                      "trials": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "default": 1000
+                      },
+                      "seed": {
+                        "type": "integer",
+                        "description": "Seed for the trial generator. Omit for a random seed; the response echoes it."
+                      },
+                      "ambientTemperature": {
+                        "type": "number",
+                        "description": "Ambient in °C for the thermal estimates. Defaults to the design's own setting, else 25."
+                      }
+                    }
+                  }
+                },
+                "required": [
+                  "design"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Trials, summary statistics, and metadata.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MonteCarloResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_FAILED or INVALID_REQUEST.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "INVALID_REQUEST",
+                    "message": "options.trials must be a positive integer.",
+                    "field": "options.trials"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No key, a browser token instead of a key, an unknown key, or a revoked key (code KEY_REVOKED).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "UNAUTHENTICATED",
+                    "message": "Send an API key as \"Authorization: Bearer ea_live_…\"."
+                  }
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "QUOTA_EXHAUSTED — the monthly Monte Carlo quota is used up.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "QUOTA_EXHAUSTED",
+                    "message": "The monthly monte carlo quota for this account is used up (100/100). It resets on 2026-10-01.",
+                    "feature": "monte_carlo",
+                    "limit": 100,
+                    "used": 100,
+                    "resetsAt": "2026-10-01T00:00:00.000Z"
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The key lacks a required scope (INSUFFICIENT_SCOPE) or the plan behind it no longer allows keys (PLAN_REQUIRED).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "INSUFFICIENT_SCOPE",
+                    "message": "This key does not have the \"solve\" scope.",
+                    "requiredScopes": [
+                      "solve"
+                    ],
+                    "keyScopes": [
+                      "read"
+                    ]
+                  }
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "PAYLOAD_TOO_LARGE.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "PAYLOAD_TOO_LARGE",
+                    "message": "21 sheets exceeds maximum of 20"
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "RATE_LIMITED: the key's per-minute allowance is used up (or, before any key is recognised, too many requests from one address presented an unknown or revoked key). On the routes that solve inside the request (solve, verify, derating, compare, exports, ai/review, ai/synthesize) it can also be SOLVE_IN_PROGRESS: this account already has 3 calls of that kind running on the server that took the request (solves, AI reviews and syntheses are each counted separately). `Retry-After` is set either way; for SOLVE_IN_PROGRESS it is 2 s for solves and 30 s for AI reviews and syntheses.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "RATE_LIMITED",
+                    "message": "This key allows 60 requests per minute. Retry in 23 s.",
+                    "limitPerMinute": 60,
+                    "retryAfterSeconds": 23
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/designs/derating": {
+      "post": {
+        "tags": [
+          "Solve"
+        ],
+        "summary": "Derating analysis against NASA GSFC or IPC-9592 (synchronous, unmetered)",
+        "description": "Scope: `solve`. One nominal solve, then every rated part is held to the chosen standard's derating table — the same evaluator the editor's Derating panel runs. `standard` is required: `NASA_GSFC` (EEE-INST-002 factors, 105 °C junction cap) or `IPC_9592` (115 °C cap). Each graded component carries its checks (parameter, actual, rated, derated `limit`, `stressPct` = actual over RATED, `status`), a worst-case status and mitigation text; `summary` counts them; `thresholds` is the table used; `solve.converged` is the solver's verdict on the solve underneath — read it. Status: GREEN inside the limit, ORANGE within the last 20 % under it, RED over it. A rating the design leaves at 0 or blank is UNSTATED, not a 0 limit: that parameter is skipped and listed in the component's `unrated`, the same rule the solver applies. Sources, loads and the BMS have no abs-max ratings and are not graded. Unmetered.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "design",
+                  "standard"
+                ],
+                "properties": {
+                  "design": {
+                    "$ref": "#/components/schemas/Design"
+                  },
+                  "standard": {
+                    "type": "string",
+                    "enum": [
+                      "NASA_GSFC",
+                      "IPC_9592"
+                    ],
+                    "description": "The derating standard to grade against."
+                  },
+                  "options": {
+                    "type": "object",
+                    "properties": {
+                      "ambientTemperature": {
+                        "type": "number",
+                        "description": "Ambient in °C for the thermal estimates. Defaults to the design's own setting, else 25."
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The derating report and request metadata.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeratingResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_FAILED with the failing schema paths, or INVALID_REQUEST — a missing or unknown `standard`, a corner other than nom, a bad ambient.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "INVALID_REQUEST",
+                    "message": "standard is required: NASA_GSFC or IPC_9592.",
+                    "field": "standard"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No key, a browser token instead of a key, an unknown key, or a revoked key (code KEY_REVOKED).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "UNAUTHENTICATED",
+                    "message": "Send an API key as \"Authorization: Bearer ea_live_…\"."
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The key lacks a required scope (INSUFFICIENT_SCOPE) or the plan behind it no longer allows keys (PLAN_REQUIRED).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "INSUFFICIENT_SCOPE",
+                    "message": "This key does not have the \"solve\" scope.",
+                    "requiredScopes": [
+                      "solve"
+                    ],
+                    "keyScopes": [
+                      "read"
+                    ]
+                  }
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "PAYLOAD_TOO_LARGE — a payload cap was exceeded.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "PAYLOAD_TOO_LARGE",
+                    "message": "600 nodes across all sheets exceeds maximum of 500 (all sheets are solved together as one circuit)"
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "RATE_LIMITED: the key's per-minute allowance is used up (or, before any key is recognised, too many requests from one address presented an unknown or revoked key). On the routes that solve inside the request (solve, verify, derating, compare, exports, ai/review, ai/synthesize) it can also be SOLVE_IN_PROGRESS: this account already has 3 calls of that kind running on the server that took the request (solves, AI reviews and syntheses are each counted separately). `Retry-After` is set either way; for SOLVE_IN_PROGRESS it is 2 s for solves and 30 s for AI reviews and syntheses.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "RATE_LIMITED",
+                    "message": "This key allows 60 requests per minute. Retry in 23 s.",
+                    "limitPerMinute": 60,
+                    "retryAfterSeconds": 23
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "SOLVE_FAILED — the solver refused the circuit.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "SOLVE_FAILED",
+                    "message": "singular matrix"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/jobs/monte-carlo": {
+      "post": {
+        "tags": [
+          "Jobs"
+        ],
+        "summary": "Start a Monte Carlo job (metered as one run; the first slice runs now)",
+        "description": "Scope: `solve`. Validates and caps the design like `POST /v1/designs/monte-carlo` (the trial cap is the plan's; the CPU budget is 5,000,000 node-trials rather than 120,000 — `meta.clamped` says if either applied), charges ONE Monte Carlo run, then runs about 3 s of trials inside this request (allow up to 5 s: the time is checked between trials, and this first slice also validates the design). If that finished the job the response is **200** with `result` — the synchronous summary with `nodeStats` (per-node min / mean / max / stddev) in place of the per-trial array — otherwise **202** with the job's status and progress; poll `GET /v1/jobs/{id}`. Two active jobs per account (429 TOO_MANY_JOBS). `Idempotency-Key` is honoured: a replay returns the same job.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "description": "The design and Monte Carlo options.",
+                "properties": {
+                  "design": {
+                    "$ref": "#/components/schemas/Design"
+                  },
+                  "options": {
+                    "type": "object",
+                    "properties": {
+                      "trials": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "default": 1000
+                      },
+                      "seed": {
+                        "type": "integer",
+                        "description": "Seed for the trial generator. Omit for a random seed; the job stores and echoes it."
+                      },
+                      "ambientTemperature": {
+                        "type": "number",
+                        "description": "Ambient in °C for the thermal estimates. Defaults to the design's own setting, else 25."
+                      }
+                    }
+                  }
+                },
+                "required": [
+                  "design"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The job finished inside this request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobResponse"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "The job is running; poll it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_FAILED or INVALID_REQUEST.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "INVALID_REQUEST",
+                    "message": "options.trials must be a positive integer.",
+                    "field": "options.trials"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No key, a browser token instead of a key, an unknown key, or a revoked key (code KEY_REVOKED).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "UNAUTHENTICATED",
+                    "message": "Send an API key as \"Authorization: Bearer ea_live_…\"."
+                  }
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "QUOTA_EXHAUSTED — the monthly Monte Carlo quota is used up.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "QUOTA_EXHAUSTED",
+                    "message": "The monthly monte carlo quota for this account is used up (100/100). It resets on 2026-10-01.",
+                    "feature": "monte_carlo",
+                    "limit": 100,
+                    "used": 100,
+                    "resetsAt": "2026-10-01T00:00:00.000Z"
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The key lacks a required scope (INSUFFICIENT_SCOPE) or the plan behind it no longer allows keys (PLAN_REQUIRED).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "INSUFFICIENT_SCOPE",
+                    "message": "This key does not have the \"solve\" scope.",
+                    "requiredScopes": [
+                      "solve"
+                    ],
+                    "keyScopes": [
+                      "read"
+                    ]
+                  }
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "PAYLOAD_TOO_LARGE.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "PAYLOAD_TOO_LARGE",
+                    "message": "21 sheets exceeds maximum of 20"
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "RATE_LIMITED (the key's per-minute allowance) or TOO_MANY_JOBS (two jobs are already active for this account).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "TOO_MANY_JOBS",
+                    "message": "This account already has 2 active Monte Carlo jobs; the limit is 2. Poll them to completion (GET /v1/jobs/{id}) or cancel one (DELETE /v1/jobs/{id}).",
+                    "limit": 2,
+                    "active": 2
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/jobs": {
+      "get": {
+        "tags": [
+          "Jobs"
+        ],
+        "summary": "List this key's jobs (newest first, 24-hour window)",
+        "description": "Scope: `solve`. Status and progress of every job this key created in the last 24 hours; no results — read a finished job with `GET /v1/jobs/{id}`.",
+        "responses": {
+          "200": {
+            "description": "The jobs.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "jobs": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Job"
+                      }
+                    },
+                    "meta": {
+                      "type": "object",
+                      "properties": {
+                        "schemaVersion": {
+                          "type": "integer"
+                        },
+                        "retentionHours": {
+                          "type": "integer"
+                        },
+                        "activeLimit": {
+                          "type": "integer"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No key, a browser token instead of a key, an unknown key, or a revoked key (code KEY_REVOKED).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "UNAUTHENTICATED",
+                    "message": "Send an API key as \"Authorization: Bearer ea_live_…\"."
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The key lacks a required scope (INSUFFICIENT_SCOPE) or the plan behind it no longer allows keys (PLAN_REQUIRED).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "INSUFFICIENT_SCOPE",
+                    "message": "This key does not have the \"solve\" scope.",
+                    "requiredScopes": [
+                      "solve"
+                    ],
+                    "keyScopes": [
+                      "read"
+                    ]
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "RATE_LIMITED: the key's per-minute allowance is used up (or, before any key is recognised, too many requests from one address presented an unknown or revoked key). On the routes that solve inside the request (solve, verify, derating, compare, exports, ai/review, ai/synthesize) it can also be SOLVE_IN_PROGRESS: this account already has 3 calls of that kind running on the server that took the request (solves, AI reviews and syntheses are each counted separately). `Retry-After` is set either way; for SOLVE_IN_PROGRESS it is 2 s for solves and 30 s for AI reviews and syntheses.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "RATE_LIMITED",
+                    "message": "This key allows 60 requests per minute. Retry in 23 s.",
+                    "limitPerMinute": 60,
+                    "retryAfterSeconds": 23
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/jobs/{id}": {
+      "get": {
+        "tags": [
+          "Jobs"
+        ],
+        "summary": "Poll a job — runs the next slice if one is due, then answers",
+        "description": "Scope: `solve`. If the job is still running and no other request is working on it, this request runs about 3 s more of trials (allow up to 5 s) before answering, so a job progresses exactly as fast as it is polled (`meta.advanced` says whether this poll worked). When `job.status` is `done` the body carries `result`; `failed` carries `job.error`; `cancelled` and `expired` carry neither. A job the key did not create, or one older than 24 hours, is 404.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "The job id from the POST (`job_…`)."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Status, progress, and the result when done.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "INVALID_REQUEST — a malformed id.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "INVALID_REQUEST",
+                    "message": "A job id looks like job_ followed by 20 characters.",
+                    "field": "id"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No key, a browser token instead of a key, an unknown key, or a revoked key (code KEY_REVOKED).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "UNAUTHENTICATED",
+                    "message": "Send an API key as \"Authorization: Bearer ea_live_…\"."
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The key lacks a required scope (INSUFFICIENT_SCOPE) or the plan behind it no longer allows keys (PLAN_REQUIRED).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "INSUFFICIENT_SCOPE",
+                    "message": "This key does not have the \"solve\" scope.",
+                    "requiredScopes": [
+                      "solve"
+                    ],
+                    "keyScopes": [
+                      "read"
+                    ]
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "NOT_FOUND",
+                    "message": "No job with that id is visible to this key. Jobs expire 24 hours after they finish or last progressed."
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "RATE_LIMITED: the key's per-minute allowance is used up (or, before any key is recognised, too many requests from one address presented an unknown or revoked key). On the routes that solve inside the request (solve, verify, derating, compare, exports, ai/review, ai/synthesize) it can also be SOLVE_IN_PROGRESS: this account already has 3 calls of that kind running on the server that took the request (solves, AI reviews and syntheses are each counted separately). `Retry-After` is set either way; for SOLVE_IN_PROGRESS it is 2 s for solves and 30 s for AI reviews and syntheses.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "RATE_LIMITED",
+                    "message": "This key allows 60 requests per minute. Retry in 23 s.",
+                    "limitPerMinute": 60,
+                    "retryAfterSeconds": 23
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Jobs"
+        ],
+        "summary": "Cancel a job (no refund)",
+        "description": "Scope: `solve`. An active job becomes `cancelled` and its saved progress is dropped; a finished one is returned unchanged. The run charged at creation is not refunded. `meta.cancelled` says whether anything changed.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The job after the cancel.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "INVALID_REQUEST — a malformed id.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "INVALID_REQUEST",
+                    "message": "A job id looks like job_ followed by 20 characters.",
+                    "field": "id"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No key, a browser token instead of a key, an unknown key, or a revoked key (code KEY_REVOKED).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "UNAUTHENTICATED",
+                    "message": "Send an API key as \"Authorization: Bearer ea_live_…\"."
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The key lacks a required scope (INSUFFICIENT_SCOPE) or the plan behind it no longer allows keys (PLAN_REQUIRED).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "INSUFFICIENT_SCOPE",
+                    "message": "This key does not have the \"solve\" scope.",
+                    "requiredScopes": [
+                      "solve"
+                    ],
+                    "keyScopes": [
+                      "read"
+                    ]
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "NOT_FOUND",
+                    "message": "No job with that id is visible to this key."
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "RATE_LIMITED: the key's per-minute allowance is used up (or, before any key is recognised, too many requests from one address presented an unknown or revoked key). On the routes that solve inside the request (solve, verify, derating, compare, exports, ai/review, ai/synthesize) it can also be SOLVE_IN_PROGRESS: this account already has 3 calls of that kind running on the server that took the request (solves, AI reviews and syntheses are each counted separately). `Retry-After` is set either way; for SOLVE_IN_PROGRESS it is 2 s for solves and 30 s for AI reviews and syntheses.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "RATE_LIMITED",
+                    "message": "This key allows 60 requests per minute. Retry in 23 s.",
+                    "limitPerMinute": 60,
+                    "retryAfterSeconds": 23
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/library/parts": {
+      "get": {
+        "tags": [
+          "Library"
+        ],
+        "summary": "List the part models the library stands behind",
+        "description": "Scope: `read`. Parametric simulation models for real parts, read from the same database the editor's part picker and the community contributions use, so the library grows as people ingest datasheets and the community verifies them. Every value is gated per attribute: curated, datasheet-extracted, admin-set and community-verified values are served; DigiKey-sourced values never are (DigiKey's API terms); an unverified extraction is not served until a person verifies it. Filter with `?type=` (see `types` in the response). Each model carries `properties` (ready to paste into a node of that type), `provenance` per supplied key, and `filledFromDefaults` — the property keys the library did NOT supply. Physics only: no pricing, stock or distributor links. `Cache-Control: private, max-age=300`.",
+        "parameters": [
+          {
+            "name": "type",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "A node type to filter by, e.g. `SMPS`. Omit for every model."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The models.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PartModelList"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`type` is not one the library has models for; the message lists them.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "INVALID_REQUEST",
+                    "message": "type must be one of LDO, SMPS.",
+                    "field": "type"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No key, a browser token instead of a key, an unknown key, or a revoked key (code KEY_REVOKED).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "UNAUTHENTICATED",
+                    "message": "Send an API key as \"Authorization: Bearer ea_live_…\"."
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The key lacks a required scope (INSUFFICIENT_SCOPE) or the plan behind it no longer allows keys (PLAN_REQUIRED).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "INSUFFICIENT_SCOPE",
+                    "message": "This key does not have the \"solve\" scope.",
+                    "requiredScopes": [
+                      "solve"
+                    ],
+                    "keyScopes": [
+                      "read"
+                    ]
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "RATE_LIMITED: the key's per-minute allowance is used up (or, before any key is recognised, too many requests from one address presented an unknown or revoked key). On the routes that solve inside the request (solve, verify, derating, compare, exports, ai/review, ai/synthesize) it can also be SOLVE_IN_PROGRESS: this account already has 3 calls of that kind running on the server that took the request (solves, AI reviews and syntheses are each counted separately). `Retry-After` is set either way; for SOLVE_IN_PROGRESS it is 2 s for solves and 30 s for AI reviews and syntheses.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "RATE_LIMITED",
+                    "message": "This key allows 60 requests per minute. Retry in 23 s.",
+                    "limitPerMinute": 60,
+                    "retryAfterSeconds": 23
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/library/parts/{mpn}": {
+      "get": {
+        "tags": [
+          "Library"
+        ],
+        "summary": "Read one curated part model by manufacturer part number",
+        "description": "Scope: `read`. Exact MPN, case-insensitive, e.g. `TPS54824`. 404 `NOT_FOUND` when the library has no model for it — the library is curated, not exhaustive, so a miss means \"enter the datasheet values by hand\", not \"the part does not exist\".",
+        "parameters": [
+          {
+            "name": "mpn",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "The manufacturer part number."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The model.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PartModel"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No key, a browser token instead of a key, an unknown key, or a revoked key (code KEY_REVOKED).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "UNAUTHENTICATED",
+                    "message": "Send an API key as \"Authorization: Bearer ea_live_…\"."
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The key lacks a required scope (INSUFFICIENT_SCOPE) or the plan behind it no longer allows keys (PLAN_REQUIRED).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "INSUFFICIENT_SCOPE",
+                    "message": "This key does not have the \"solve\" scope.",
+                    "requiredScopes": [
+                      "solve"
+                    ],
+                    "keyScopes": [
+                      "read"
+                    ]
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The library has no model for that MPN.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "NOT_FOUND",
+                    "message": "No curated model for \"XYZ123\". The library is curated, not exhaustive — enter the datasheet values by hand. GET /v1/library/parts lists what it has."
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "RATE_LIMITED: the key's per-minute allowance is used up (or, before any key is recognised, too many requests from one address presented an unknown or revoked key). On the routes that solve inside the request (solve, verify, derating, compare, exports, ai/review, ai/synthesize) it can also be SOLVE_IN_PROGRESS: this account already has 3 calls of that kind running on the server that took the request (solves, AI reviews and syntheses are each counted separately). `Retry-After` is set either way; for SOLVE_IN_PROGRESS it is 2 s for solves and 30 s for AI reviews and syntheses.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "RATE_LIMITED",
+                    "message": "This key allows 60 requests per minute. Retry in 23 s.",
+                    "limitPerMinute": 60,
+                    "retryAfterSeconds": 23
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/templates": {
+      "get": {
+        "tags": [
+          "Templates"
+        ],
+        "summary": "List the shipped design templates",
+        "description": "Scope: `read`. The same starting points the editor offers on first run: each template's id, its sheet names, a component census by node type, and the explanatory notes it carries on canvas. Start here when the user describes a design that probably already exists (an FPGA rail set, a USB-C PD supply, a motor driver). Static files shipped with the build; `Cache-Control: private, max-age=3600`.",
+        "responses": {
+          "200": {
+            "description": "Every template's summary.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TemplateList"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No key, a browser token instead of a key, an unknown key, or a revoked key (code KEY_REVOKED).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "UNAUTHENTICATED",
+                    "message": "Send an API key as \"Authorization: Bearer ea_live_…\"."
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The key lacks a required scope (INSUFFICIENT_SCOPE) or the plan behind it no longer allows keys (PLAN_REQUIRED).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "INSUFFICIENT_SCOPE",
+                    "message": "This key does not have the \"solve\" scope.",
+                    "requiredScopes": [
+                      "solve"
+                    ],
+                    "keyScopes": [
+                      "read"
+                    ]
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "RATE_LIMITED: the key's per-minute allowance is used up (or, before any key is recognised, too many requests from one address presented an unknown or revoked key). On the routes that solve inside the request (solve, verify, derating, compare, exports, ai/review, ai/synthesize) it can also be SOLVE_IN_PROGRESS: this account already has 3 calls of that kind running on the server that took the request (solves, AI reviews and syntheses are each counted separately). `Retry-After` is set either way; for SOLVE_IN_PROGRESS it is 2 s for solves and 30 s for AI reviews and syntheses.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "RATE_LIMITED",
+                    "message": "This key allows 60 requests per minute. Retry in 23 s.",
+                    "limitPerMinute": 60,
+                    "retryAfterSeconds": 23
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/templates/{id}": {
+      "get": {
+        "tags": [
+          "Templates"
+        ],
+        "summary": "Read one template as a design document",
+        "description": "Scope: `read`. A schema-valid design you can solve as-is with POST /v1/designs/solve, or edit and save with POST /v1/designs.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "A template id from GET /v1/templates, e.g. `fpga_multi_rail`."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The template.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TemplateRecord"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No key, a browser token instead of a key, an unknown key, or a revoked key (code KEY_REVOKED).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "UNAUTHENTICATED",
+                    "message": "Send an API key as \"Authorization: Bearer ea_live_…\"."
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The key lacks a required scope (INSUFFICIENT_SCOPE) or the plan behind it no longer allows keys (PLAN_REQUIRED).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "INSUFFICIENT_SCOPE",
+                    "message": "This key does not have the \"solve\" scope.",
+                    "requiredScopes": [
+                      "solve"
+                    ],
+                    "keyScopes": [
+                      "read"
+                    ]
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No template with that id.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "NOT_FOUND",
+                    "message": "No template \"fpga\". GET /v1/templates lists the ids."
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "RATE_LIMITED: the key's per-minute allowance is used up (or, before any key is recognised, too many requests from one address presented an unknown or revoked key). On the routes that solve inside the request (solve, verify, derating, compare, exports, ai/review, ai/synthesize) it can also be SOLVE_IN_PROGRESS: this account already has 3 calls of that kind running on the server that took the request (solves, AI reviews and syntheses are each counted separately). `Retry-After` is set either way; for SOLVE_IN_PROGRESS it is 2 s for solves and 30 s for AI reviews and syntheses.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "RATE_LIMITED",
+                    "message": "This key allows 60 requests per minute. Retry in 23 s.",
+                    "limitPerMinute": 60,
+                    "retryAfterSeconds": 23
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/designs/verify": {
+      "post": {
+        "tags": [
+          "Solve"
+        ],
+        "summary": "Re-solve a design and check the fingerprint printed on an export",
+        "description": "Scope: `read`. Unmetered. This runs a full solve at `options.corner` under the `read` scope, within the same payload caps as `/v1/designs/solve`: a key limited to `read` can still spend solver time here. Give the design and, optionally, the 16-character `hash` from a report's attribution line; the answer is the hash this build computes, `matches`, the current attribution and the summary numbers to hold against the page. The keyless twin behind the verify URL is the page at /verify/{hash}.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "design"
+                ],
+                "properties": {
+                  "design": {
+                    "$ref": "#/components/schemas/Design"
+                  },
+                  "hash": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{16}$",
+                    "description": "The design fingerprint printed on the export. Optional: without it the answer is the fingerprint alone."
+                  },
+                  "options": {
+                    "type": "object",
+                    "properties": {
+                      "corner": {
+                        "type": "string",
+                        "enum": [
+                          "nom",
+                          "min",
+                          "max"
+                        ],
+                        "default": "nom",
+                        "description": "Which tolerance corner to solve. `min`/`max` push every toleranced value to its extreme."
+                      },
+                      "ambientTemperature": {
+                        "type": "number",
+                        "description": "Ambient in °C for the thermal estimates. Defaults to the design's own setting, else 25."
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The verification.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VerifyResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_FAILED or a malformed hash.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "INVALID_REQUEST",
+                    "message": "hash must be the 16-character design fingerprint printed on the export.",
+                    "field": "hash"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No key, a browser token instead of a key, an unknown key, or a revoked key (code KEY_REVOKED).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "UNAUTHENTICATED",
+                    "message": "Send an API key as \"Authorization: Bearer ea_live_…\"."
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The key lacks a required scope (INSUFFICIENT_SCOPE) or the plan behind it no longer allows keys (PLAN_REQUIRED).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "INSUFFICIENT_SCOPE",
+                    "message": "This key does not have the \"solve\" scope.",
+                    "requiredScopes": [
+                      "solve"
+                    ],
+                    "keyScopes": [
+                      "read"
+                    ]
+                  }
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "PAYLOAD_TOO_LARGE.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "PAYLOAD_TOO_LARGE",
+                    "message": "Too many nodes."
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "RATE_LIMITED: the key's per-minute allowance is used up (or, before any key is recognised, too many requests from one address presented an unknown or revoked key). On the routes that solve inside the request (solve, verify, derating, compare, exports, ai/review, ai/synthesize) it can also be SOLVE_IN_PROGRESS: this account already has 3 calls of that kind running on the server that took the request (solves, AI reviews and syntheses are each counted separately). `Retry-After` is set either way; for SOLVE_IN_PROGRESS it is 2 s for solves and 30 s for AI reviews and syntheses.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "RATE_LIMITED",
+                    "message": "This key allows 60 requests per minute. Retry in 23 s.",
+                    "limitPerMinute": 60,
+                    "retryAfterSeconds": 23
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/designs/compare": {
+      "post": {
+        "tags": [
+          "Compare"
+        ],
+        "summary": "What changed between two designs, and what it did",
+        "description": "Scope: `solve`. Each side is a design document, `{ design }`, `{ designId }` (a saved design visible to this key) or `{ templateId }` — mix them freely. Both are solved at `options.corner` (unmetered) and the response lists the document diff (`changes`), the movement in source power, load power, dissipation, efficiency and warning counts (`delta`), the converters whose loss moved (`stages`), every node whose operating point moved (`nodes`) and the warnings resolved and introduced. Pass `options.monteCarlo: { trials, seed }` for a `yield` block — two Monte Carlo runs with the same seed, metered as two runs; 402 QUOTA_EXHAUSTED applies then, and only then.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "a",
+                  "b"
+                ],
+                "properties": {
+                  "a": {
+                    "description": "The baseline: a design document, { design }, { designId } or { templateId }.",
+                    "oneOf": [
+                      {
+                        "$ref": "#/components/schemas/Design"
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "design": {
+                            "$ref": "#/components/schemas/Design"
+                          },
+                          "designId": {
+                            "type": "string"
+                          },
+                          "templateId": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    ]
+                  },
+                  "b": {
+                    "description": "The candidate, in the same forms.",
+                    "oneOf": [
+                      {
+                        "$ref": "#/components/schemas/Design"
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "design": {
+                            "$ref": "#/components/schemas/Design"
+                          },
+                          "designId": {
+                            "type": "string"
+                          },
+                          "templateId": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    ]
+                  },
+                  "options": {
+                    "type": "object",
+                    "properties": {
+                      "corner": {
+                        "type": "string",
+                        "enum": [
+                          "nom",
+                          "min",
+                          "max"
+                        ],
+                        "default": "nom",
+                        "description": "Which tolerance corner to solve. `min`/`max` push every toleranced value to its extreme."
+                      },
+                      "ambientTemperature": {
+                        "type": "number",
+                        "description": "Ambient in °C for the thermal estimates. Defaults to the design's own setting, else 25."
+                      },
+                      "monteCarlo": {
+                        "type": "object",
+                        "description": "Add a yield comparison. Two metered runs.",
+                        "properties": {
+                          "trials": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "default": 200
+                          },
+                          "seed": {
+                            "type": "integer"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The comparison.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CompareResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_FAILED on either side, or a malformed side.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "INVALID_REQUEST",
+                    "message": "a is required: a design document, { design }, { templateId } or { designId }.",
+                    "field": "a"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No key, a browser token instead of a key, an unknown key, or a revoked key (code KEY_REVOKED).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "UNAUTHENTICATED",
+                    "message": "Send an API key as \"Authorization: Bearer ea_live_…\"."
+                  }
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "QUOTA_EXHAUSTED — only when `options.monteCarlo` is given.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "QUOTA_EXHAUSTED",
+                    "message": "The monthly monte carlo quota for this account is used up (10/10).",
+                    "feature": "monte_carlo"
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The key lacks a required scope (INSUFFICIENT_SCOPE) or the plan behind it no longer allows keys (PLAN_REQUIRED).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "INSUFFICIENT_SCOPE",
+                    "message": "This key does not have the \"solve\" scope.",
+                    "requiredScopes": [
+                      "solve"
+                    ],
+                    "keyScopes": [
+                      "read"
+                    ]
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND — a designId or templateId on either side.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "NOT_FOUND",
+                    "message": "No design with id \"x\" is visible to this key.",
+                    "field": "a.designId"
+                  }
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "PAYLOAD_TOO_LARGE.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "PAYLOAD_TOO_LARGE",
+                    "message": "Design a: too many nodes."
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "RATE_LIMITED: the key's per-minute allowance is used up (or, before any key is recognised, too many requests from one address presented an unknown or revoked key). On the routes that solve inside the request (solve, verify, derating, compare, exports, ai/review, ai/synthesize) it can also be SOLVE_IN_PROGRESS: this account already has 3 calls of that kind running on the server that took the request (solves, AI reviews and syntheses are each counted separately). `Retry-After` is set either way; for SOLVE_IN_PROGRESS it is 2 s for solves and 30 s for AI reviews and syntheses.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "RATE_LIMITED",
+                    "message": "This key allows 60 requests per minute. Retry in 23 s.",
+                    "limitPerMinute": 60,
+                    "retryAfterSeconds": 23
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/designs": {
+      "get": {
+        "tags": [
+          "Designs"
+        ],
+        "summary": "List designs visible to this key",
+        "description": "Scope: `read`. A personal key lists the account's personal designs; a team key lists the team's.",
+        "responses": {
+          "200": {
+            "description": "Newest first, up to 500.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DesignList"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No key, a browser token instead of a key, an unknown key, or a revoked key (code KEY_REVOKED).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "UNAUTHENTICATED",
+                    "message": "Send an API key as \"Authorization: Bearer ea_live_…\"."
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The key lacks a required scope (INSUFFICIENT_SCOPE) or the plan behind it no longer allows keys (PLAN_REQUIRED).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "INSUFFICIENT_SCOPE",
+                    "message": "This key does not have the \"solve\" scope.",
+                    "requiredScopes": [
+                      "solve"
+                    ],
+                    "keyScopes": [
+                      "read"
+                    ]
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "RATE_LIMITED: the key's per-minute allowance is used up (or, before any key is recognised, too many requests from one address presented an unknown or revoked key). On the routes that solve inside the request (solve, verify, derating, compare, exports, ai/review, ai/synthesize) it can also be SOLVE_IN_PROGRESS: this account already has 3 calls of that kind running on the server that took the request (solves, AI reviews and syntheses are each counted separately). `Retry-After` is set either way; for SOLVE_IN_PROGRESS it is 2 s for solves and 30 s for AI reviews and syntheses.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "RATE_LIMITED",
+                    "message": "This key allows 60 requests per minute. Retry in 23 s.",
+                    "limitPerMinute": 60,
+                    "retryAfterSeconds": 23
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Designs"
+        ],
+        "summary": "Create a cloud design",
+        "description": "Scope: `write`. The design must validate. Send an `Idempotency-Key` header to make retries safe: the first response is replayed for 24 hours (`Idempotent-Replayed: true`). Creation through the API stops once the account's personal designs (or a team key's team) number 2000, counting designs saved from the editor too (409 DESIGN_LIMIT_REACHED), and design writes — create, update, delete, share — are limited to 30 a minute per account across all its keys.",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 200
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "name",
+                  "design"
+                ],
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "maxLength": 200
+                  },
+                  "design": {
+                    "$ref": "#/components/schemas/Design"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DesignCreated"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_FAILED or INVALID_REQUEST.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "INVALID_REQUEST",
+                    "message": "name is required (1 to 200 characters).",
+                    "field": "name"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No key, a browser token instead of a key, an unknown key, or a revoked key (code KEY_REVOKED).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "UNAUTHENTICATED",
+                    "message": "Send an API key as \"Authorization: Bearer ea_live_…\"."
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The key lacks a required scope (INSUFFICIENT_SCOPE) or the plan behind it no longer allows keys (PLAN_REQUIRED).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "INSUFFICIENT_SCOPE",
+                    "message": "This key does not have the \"solve\" scope.",
+                    "requiredScopes": [
+                      "solve"
+                    ],
+                    "keyScopes": [
+                      "read"
+                    ]
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "DESIGN_LIMIT_REACHED — the account (or team) already holds 2000 designs.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "DESIGN_LIMIT_REACHED",
+                    "message": "This account already holds 2000 designs, the most the API will create. Delete designs you no longer need (DELETE /v1/designs/{id}) or update an existing one.",
+                    "limit": 2000
+                  }
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "PAYLOAD_TOO_LARGE — over 500 KB.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "PAYLOAD_TOO_LARGE",
+                    "message": "Design data too large. Maximum size is 500 KB.",
+                    "field": "design"
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "RATE_LIMITED: the key's per-minute allowance is used up (or, before any key is recognised, too many requests from one address presented an unknown or revoked key). On the routes that solve inside the request (solve, verify, derating, compare, exports, ai/review, ai/synthesize) it can also be SOLVE_IN_PROGRESS: this account already has 3 calls of that kind running on the server that took the request (solves, AI reviews and syntheses are each counted separately). `Retry-After` is set either way; for SOLVE_IN_PROGRESS it is 2 s for solves and 30 s for AI reviews and syntheses.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "RATE_LIMITED",
+                    "message": "This key allows 60 requests per minute. Retry in 23 s.",
+                    "limitPerMinute": 60,
+                    "retryAfterSeconds": 23
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/designs/{id}": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "get": {
+        "tags": [
+          "Designs"
+        ],
+        "summary": "Read a design",
+        "description": "Scope: `read`.",
+        "responses": {
+          "200": {
+            "description": "The design document and its metadata.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DesignRecord"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No key, a browser token instead of a key, an unknown key, or a revoked key (code KEY_REVOKED).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "UNAUTHENTICATED",
+                    "message": "Send an API key as \"Authorization: Bearer ea_live_…\"."
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The key lacks a required scope (INSUFFICIENT_SCOPE) or the plan behind it no longer allows keys (PLAN_REQUIRED).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "INSUFFICIENT_SCOPE",
+                    "message": "This key does not have the \"solve\" scope.",
+                    "requiredScopes": [
+                      "solve"
+                    ],
+                    "keyScopes": [
+                      "read"
+                    ]
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND — no such design visible to this key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "NOT_FOUND",
+                    "message": "No design with that id is visible to this key."
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "RATE_LIMITED: the key's per-minute allowance is used up (or, before any key is recognised, too many requests from one address presented an unknown or revoked key). On the routes that solve inside the request (solve, verify, derating, compare, exports, ai/review, ai/synthesize) it can also be SOLVE_IN_PROGRESS: this account already has 3 calls of that kind running on the server that took the request (solves, AI reviews and syntheses are each counted separately). `Retry-After` is set either way; for SOLVE_IN_PROGRESS it is 2 s for solves and 30 s for AI reviews and syntheses.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "RATE_LIMITED",
+                    "message": "This key allows 60 requests per minute. Retry in 23 s.",
+                    "limitPerMinute": 60,
+                    "retryAfterSeconds": 23
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Designs"
+        ],
+        "summary": "Replace a design (keeps history)",
+        "description": "Scope: `write`. The previous state is snapshotted into the revision history with the key's label as the author (\"via key nightly-optimizer\"), exactly as a save in the editor snapshots the state it replaces.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "design"
+                ],
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "maxLength": 200
+                  },
+                  "design": {
+                    "$ref": "#/components/schemas/Design"
+                  },
+                  "message": {
+                    "type": "string",
+                    "maxLength": 500,
+                    "description": "A note describing the design you are SENDING. It is stored with this state and travels with it into the revision history when a later save replaces it; it does not label the state you are replacing."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DesignUpdated"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_FAILED or INVALID_REQUEST.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "VALIDATION_FAILED",
+                    "message": "…"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No key, a browser token instead of a key, an unknown key, or a revoked key (code KEY_REVOKED).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "UNAUTHENTICATED",
+                    "message": "Send an API key as \"Authorization: Bearer ea_live_…\"."
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The key lacks a required scope (INSUFFICIENT_SCOPE) or the plan behind it no longer allows keys (PLAN_REQUIRED).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "INSUFFICIENT_SCOPE",
+                    "message": "This key does not have the \"solve\" scope.",
+                    "requiredScopes": [
+                      "solve"
+                    ],
+                    "keyScopes": [
+                      "read"
+                    ]
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "NOT_FOUND",
+                    "message": "No design with that id is visible to this key."
+                  }
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "PAYLOAD_TOO_LARGE.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "PAYLOAD_TOO_LARGE",
+                    "message": "Design data too large. Maximum size is 500 KB."
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "RATE_LIMITED: the key's per-minute allowance is used up (or, before any key is recognised, too many requests from one address presented an unknown or revoked key). On the routes that solve inside the request (solve, verify, derating, compare, exports, ai/review, ai/synthesize) it can also be SOLVE_IN_PROGRESS: this account already has 3 calls of that kind running on the server that took the request (solves, AI reviews and syntheses are each counted separately). `Retry-After` is set either way; for SOLVE_IN_PROGRESS it is 2 s for solves and 30 s for AI reviews and syntheses.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "RATE_LIMITED",
+                    "message": "This key allows 60 requests per minute. Retry in 23 s.",
+                    "limitPerMinute": 60,
+                    "retryAfterSeconds": 23
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Designs"
+        ],
+        "summary": "Delete a design",
+        "description": "Scope: `write`.",
+        "responses": {
+          "200": {
+            "description": "Deleted.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "deleted": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No key, a browser token instead of a key, an unknown key, or a revoked key (code KEY_REVOKED).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "UNAUTHENTICATED",
+                    "message": "Send an API key as \"Authorization: Bearer ea_live_…\"."
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The key lacks a required scope (INSUFFICIENT_SCOPE) or the plan behind it no longer allows keys (PLAN_REQUIRED).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "INSUFFICIENT_SCOPE",
+                    "message": "This key does not have the \"solve\" scope.",
+                    "requiredScopes": [
+                      "solve"
+                    ],
+                    "keyScopes": [
+                      "read"
+                    ]
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "NOT_FOUND",
+                    "message": "No design with that id is visible to this key."
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "RATE_LIMITED: the key's per-minute allowance is used up (or, before any key is recognised, too many requests from one address presented an unknown or revoked key). On the routes that solve inside the request (solve, verify, derating, compare, exports, ai/review, ai/synthesize) it can also be SOLVE_IN_PROGRESS: this account already has 3 calls of that kind running on the server that took the request (solves, AI reviews and syntheses are each counted separately). `Retry-After` is set either way; for SOLVE_IN_PROGRESS it is 2 s for solves and 30 s for AI reviews and syntheses.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "RATE_LIMITED",
+                    "message": "This key allows 60 requests per minute. Retry in 23 s.",
+                    "limitPerMinute": 60,
+                    "retryAfterSeconds": 23
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/designs/{id}/share": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "post": {
+        "tags": [
+          "Designs"
+        ],
+        "summary": "Create or update the public share link",
+        "description": "Scope: `write`. The same expiring link the editor's Share dialog makes; one public link per design, updated in place. Changing its permission to `edit` or `clone` issues a new link and retires the old one, so a view-only link already printed on an export never gains more access.",
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "permissions": {
+                    "type": "string",
+                    "enum": [
+                      "view",
+                      "edit",
+                      "clone"
+                    ],
+                    "default": "view"
+                  },
+                  "expiresInDays": {
+                    "type": "integer",
+                    "enum": [
+                      1,
+                      7,
+                      30,
+                      90
+                    ],
+                    "description": "Omit or null for a link that never expires."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The link.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ShareLink"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "INVALID_REQUEST.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "INVALID_REQUEST",
+                    "message": "expiresInDays must be one of 1, 7, 30, 90, or omitted for a link that does not expire.",
+                    "field": "expiresInDays"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No key, a browser token instead of a key, an unknown key, or a revoked key (code KEY_REVOKED).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "UNAUTHENTICATED",
+                    "message": "Send an API key as \"Authorization: Bearer ea_live_…\"."
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The key lacks a required scope (INSUFFICIENT_SCOPE) or the plan behind it no longer allows keys (PLAN_REQUIRED).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "INSUFFICIENT_SCOPE",
+                    "message": "This key does not have the \"solve\" scope.",
+                    "requiredScopes": [
+                      "solve"
+                    ],
+                    "keyScopes": [
+                      "read"
+                    ]
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "NOT_FOUND",
+                    "message": "No design with that id is visible to this key."
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "RATE_LIMITED: the key's per-minute allowance is used up (or, before any key is recognised, too many requests from one address presented an unknown or revoked key). On the routes that solve inside the request (solve, verify, derating, compare, exports, ai/review, ai/synthesize) it can also be SOLVE_IN_PROGRESS: this account already has 3 calls of that kind running on the server that took the request (solves, AI reviews and syntheses are each counted separately). `Retry-After` is set either way; for SOLVE_IN_PROGRESS it is 2 s for solves and 30 s for AI reviews and syntheses.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "RATE_LIMITED",
+                    "message": "This key allows 60 requests per minute. Retry in 23 s.",
+                    "limitPerMinute": 60,
+                    "retryAfterSeconds": 23
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/designs/{id}/exports": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "post": {
+        "tags": [
+          "Exports"
+        ],
+        "summary": "Export the BOM, the design JSON, the solved result or the machine-readable report",
+        "description": "Scope: `export`. Returns the document inline. `bom_json` and `bom_csv` list every part-bearing node with designator, type, nameplate value, MPN, manufacturer, package and DigiKey part number (no pricing or stock — distributor data is not redistributed). `solve_json` is the solved result at `options.corner` (compact on request). `report_json` is the report: summary and grouped warnings with their `fix` patches at all three corners, plus the BOM. Every response carries `attribution` (AR4.1) and the CSV ends with the attribution line after the last row. `pdf`, `mc_report`, `derating_report` and `dossier` are rendered by the editor and return 501 EXPORT_TYPE_UNAVAILABLE here. `solve_json` and `report_json` solve the saved design, so they apply the solve payload caps (413 PAYLOAD_TOO_LARGE for a design over them); the BOM and `design_json` do not solve and are always available. In the CSV, a text cell that begins with `=`, `+`, `-` or `@` is prefixed with an apostrophe so a spreadsheet shows it as text rather than running it as a formula; a Value that is a plain number and unit, such as `-5 V`, is left as it is.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "type"
+                ],
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "bom_json",
+                      "bom_csv",
+                      "design_json",
+                      "solve_json",
+                      "report_json",
+                      "pdf",
+                      "mc_report",
+                      "derating_report",
+                      "dossier"
+                    ]
+                  },
+                  "options": {
+                    "type": "object",
+                    "description": "For solve_json and report_json.",
+                    "properties": {
+                      "corner": {
+                        "type": "string",
+                        "enum": [
+                          "nom",
+                          "min",
+                          "max"
+                        ],
+                        "default": "nom",
+                        "description": "Which tolerance corner to solve. `min`/`max` push every toleranced value to its extreme."
+                      },
+                      "ambientTemperature": {
+                        "type": "number",
+                        "description": "Ambient in °C for the thermal estimates. Defaults to the design's own setting, else 25."
+                      },
+                      "compact": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "Return the terse result: every node's solved numbers without its property echo, one `warningGroups` list per sheet (code, level, label, remedy, the parts it fired on) instead of the per-node, per-sheet and summary warning arrays, and the summary totals and `stages`. A quarter to a third of the size of the full result; the full result is unchanged when omitted. `meta.compact` and `result.compact` say which you got."
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The export.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Export"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "INVALID_REQUEST — unknown type.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "INVALID_REQUEST",
+                    "message": "type must be one of bom_json, bom_csv, design_json, solve_json, report_json.",
+                    "field": "type"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No key, a browser token instead of a key, an unknown key, or a revoked key (code KEY_REVOKED).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "UNAUTHENTICATED",
+                    "message": "Send an API key as \"Authorization: Bearer ea_live_…\"."
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The key lacks a required scope (INSUFFICIENT_SCOPE) or the plan behind it no longer allows keys (PLAN_REQUIRED).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "INSUFFICIENT_SCOPE",
+                    "message": "This key does not have the \"solve\" scope.",
+                    "requiredScopes": [
+                      "solve"
+                    ],
+                    "keyScopes": [
+                      "read"
+                    ]
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "NOT_FOUND",
+                    "message": "No design with that id is visible to this key."
+                  }
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "PAYLOAD_TOO_LARGE — solve_json or report_json on a saved design over the solve payload caps.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "PAYLOAD_TOO_LARGE",
+                    "message": "This saved design is too large to solve server-side: 600 nodes across all sheets exceeds maximum of 500 (all sheets are solved together as one circuit). Split it into smaller designs in the editor.",
+                    "field": "design"
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "RATE_LIMITED: the key's per-minute allowance is used up (or, before any key is recognised, too many requests from one address presented an unknown or revoked key). On the routes that solve inside the request (solve, verify, derating, compare, exports, ai/review, ai/synthesize) it can also be SOLVE_IN_PROGRESS: this account already has 3 calls of that kind running on the server that took the request (solves, AI reviews and syntheses are each counted separately). `Retry-After` is set either way; for SOLVE_IN_PROGRESS it is 2 s for solves and 30 s for AI reviews and syntheses.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "RATE_LIMITED",
+                    "message": "This key allows 60 requests per minute. Retry in 23 s.",
+                    "limitPerMinute": 60,
+                    "retryAfterSeconds": 23
+                  }
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "EXPORT_TYPE_UNAVAILABLE — an editor-rendered type.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "EXPORT_TYPE_UNAVAILABLE",
+                    "message": "\"pdf\" is rendered by the editor and has no server-side renderer yet.",
+                    "field": "type",
+                    "available": [
+                      "bom_json",
+                      "bom_csv",
+                      "design_json",
+                      "solve_json",
+                      "report_json"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/ai/review": {
+      "post": {
+        "tags": [
+          "AI"
+        ],
+        "summary": "AI design review: what the solved numbers mean, then what to change",
+        "description": "Scope: `ai`. Decrements the monthly AI-analysis counter (Pro 25, Team 100; an account with its own AI key is not metered). At most 20 calls an hour per account through the API, across all its keys (429 RATE_LIMITED). At most 3 reviews run at once per account on the server that takes the request, the editor's AI reviews included; a 4th is 429 SOLVE_IN_PROGRESS with `Retry-After: 30` and does not count against the hourly limit. Mode `review` — the plain-English read of the results first, then the recommended topology, derating and thermal changes, in one call. Send the design document: the review solves it (as given, at `options.ambientTemperature` °C, default 25) and works out every part's worst-case input (each battery at full charge, every tolerance corner). Every part a suggestion names is checked against the worst case where it would go; one rated below it is moved to `rejectedSuggestions` with its `ratingCheck`, and `ratingBasis` says what the check stood on. A solve result is accepted too, but carries no wiring, so it is checked at its one operating point only.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "description": "The design document to review (preferred), or a solve result.",
+                "properties": {
+                  "design": {
+                    "$ref": "#/components/schemas/Design"
+                  },
+                  "options": {
+                    "type": "object",
+                    "properties": {
+                      "ambientTemperature": {
+                        "type": "number",
+                        "description": "Ambient in °C for the review's own solve of a design document. Default 25."
+                      }
+                    }
+                  }
+                },
+                "required": [
+                  "design"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Summary and suggestions, after the rating check.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "summary": {
+                      "type": "string"
+                    },
+                    "suggestions": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    },
+                    "rejectedSuggestions": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    },
+                    "ratingBasis": {
+                      "type": "string",
+                      "nullable": true,
+                      "enum": [
+                        "worst-case",
+                        "operating-point",
+                        null
+                      ]
+                    },
+                    "remaining": {},
+                    "limit": {},
+                    "model": {
+                      "type": "string"
+                    },
+                    "cached": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "INVALID_REQUEST.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "INVALID_REQUEST",
+                    "message": "Send { design } — the design document (the review solves it, worst case included), or a solve result.",
+                    "field": "design"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No key, a browser token instead of a key, an unknown key, or a revoked key (code KEY_REVOKED).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "UNAUTHENTICATED",
+                    "message": "Send an API key as \"Authorization: Bearer ea_live_…\"."
+                  }
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "QUOTA_EXHAUSTED.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "QUOTA_EXHAUSTED",
+                    "message": "The monthly ai calls quota for this account is used up (25/25). It resets on 2026-10-01.",
+                    "feature": "ai_calls",
+                    "limit": 25,
+                    "used": 25,
+                    "resetsAt": "2026-10-01T00:00:00.000Z"
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The key lacks a required scope (INSUFFICIENT_SCOPE) or the plan behind it no longer allows keys (PLAN_REQUIRED).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "INSUFFICIENT_SCOPE",
+                    "message": "This key does not have the \"solve\" scope.",
+                    "requiredScopes": [
+                      "solve"
+                    ],
+                    "keyScopes": [
+                      "read"
+                    ]
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "RATE_LIMITED: the key's per-minute allowance is used up (or, before any key is recognised, too many requests from one address presented an unknown or revoked key). On the routes that solve inside the request (solve, verify, derating, compare, exports, ai/review, ai/synthesize) it can also be SOLVE_IN_PROGRESS: this account already has 3 calls of that kind running on the server that took the request (solves, AI reviews and syntheses are each counted separately). `Retry-After` is set either way; for SOLVE_IN_PROGRESS it is 2 s for solves and 30 s for AI reviews and syntheses.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "RATE_LIMITED",
+                    "message": "This key allows 60 requests per minute. Retry in 23 s.",
+                    "limitPerMinute": 60,
+                    "retryAfterSeconds": 23
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE — AI is not configured on this deployment.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "SERVICE_UNAVAILABLE",
+                    "message": "AI analysis is not currently available."
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/ai/synthesize": {
+      "post": {
+        "tags": [
+          "AI"
+        ],
+        "summary": "Generate a design from a plain-English brief",
+        "description": "Scope: `ai`. Decrements the monthly synthesis counter (Pro 5, Team 15; an account with its own AI key is not metered). At most 5 calls an hour per account through the API, across all its keys (429 RATE_LIMITED). At most 3 syntheses run at once per account on the server that takes the request, the editor's included; a 4th is 429 SOLVE_IN_PROGRESS with `Retry-After: 30` and does not count against the hourly limit. Returns the generated design, already solved, with the same disclaimer the editor shows.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "prompt"
+                ],
+                "properties": {
+                  "prompt": {
+                    "type": "string",
+                    "maxLength": 5000
+                  },
+                  "conversationHistory": {
+                    "type": "array",
+                    "items": {
+                      "type": "object"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The generated design and its solve.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "designJson": {
+                      "type": "object"
+                    },
+                    "simulationResults": {
+                      "type": "object"
+                    },
+                    "componentCount": {
+                      "type": "integer"
+                    },
+                    "connectionCount": {
+                      "type": "integer"
+                    },
+                    "remaining": {},
+                    "disclaimer": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "INVALID_REQUEST.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "INVALID_REQUEST",
+                    "message": "prompt is required: describe the power tree in plain English.",
+                    "field": "prompt"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No key, a browser token instead of a key, an unknown key, or a revoked key (code KEY_REVOKED).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "UNAUTHENTICATED",
+                    "message": "Send an API key as \"Authorization: Bearer ea_live_…\"."
+                  }
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "QUOTA_EXHAUSTED.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "QUOTA_EXHAUSTED",
+                    "message": "The monthly synthesis calls quota for this account is used up (5/5). It resets on 2026-10-01.",
+                    "feature": "synthesis_calls",
+                    "limit": 5,
+                    "used": 5,
+                    "resetsAt": "2026-10-01T00:00:00.000Z"
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The key lacks a required scope (INSUFFICIENT_SCOPE) or the plan behind it no longer allows keys (PLAN_REQUIRED).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "INSUFFICIENT_SCOPE",
+                    "message": "This key does not have the \"solve\" scope.",
+                    "requiredScopes": [
+                      "solve"
+                    ],
+                    "keyScopes": [
+                      "read"
+                    ]
+                  }
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "UNPROCESSABLE — the model returned an unusable design; retry or rephrase.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "UNPROCESSABLE",
+                    "message": "AI generated a design with schema errors. Please try again.",
+                    "retryable": true
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "RATE_LIMITED: the key's per-minute allowance is used up (or, before any key is recognised, too many requests from one address presented an unknown or revoked key). On the routes that solve inside the request (solve, verify, derating, compare, exports, ai/review, ai/synthesize) it can also be SOLVE_IN_PROGRESS: this account already has 3 calls of that kind running on the server that took the request (solves, AI reviews and syntheses are each counted separately). `Retry-After` is set either way; for SOLVE_IN_PROGRESS it is 2 s for solves and 30 s for AI reviews and syntheses.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "RATE_LIMITED",
+                    "message": "This key allows 60 requests per minute. Retry in 23 s.",
+                    "limitPerMinute": 60,
+                    "retryAfterSeconds": 23
+                  }
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "UPSTREAM_UNAVAILABLE — the model call failed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "UPSTREAM_UNAVAILABLE",
+                    "message": "AI generation failed: …",
+                    "retryable": true
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "apiKey": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "ea_live_…",
+        "description": "An API key from Account → Developer in the editor. Pro and Team plans."
+      }
+    },
+    "schemas": {
+      "Design": {
+        "$ref": "https://electronics-architect.com/schema/design-v1.json",
+        "description": "Design schema v1, generated from the attribute registry and published at https://electronics-architect.com/schema/design-v1.json."
+      },
+      "Error": {
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "type": "object",
+            "required": [
+              "code",
+              "message"
+            ],
+            "properties": {
+              "code": {
+                "type": "string",
+                "description": "Stable identifier. Branch on this, not on the message."
+              },
+              "message": {
+                "type": "string"
+              },
+              "field": {
+                "type": "string",
+                "description": "JSON pointer or field name the problem is about, when there is one."
+              }
+            },
+            "additionalProperties": true
+          }
+        }
+      },
+      "ValidationError": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      },
+      "ValidationResult": {
+        "type": "object",
+        "properties": {
+          "valid": {
+            "type": "boolean"
+          },
+          "schemaVersion": {
+            "type": "integer"
+          },
+          "schema": {
+            "type": "string"
+          },
+          "errors": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            }
+          },
+          "counts": {
+            "type": "object",
+            "properties": {
+              "sheets": {
+                "type": "integer"
+              },
+              "nodes": {
+                "type": "integer"
+              },
+              "connections": {
+                "type": "integer"
+              }
+            }
+          }
+        }
+      },
+      "Warning": {
+        "type": "object",
+        "description": "One solver warning. `code` is the stable key; `remedy` says what to change — with the numbers when the warning carries them; `fix` (where present) is a patch an agent can apply.",
+        "properties": {
+          "fix": {
+            "$ref": "#/components/schemas/Fix"
+          },
+          "code": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          },
+          "level": {
+            "type": "string",
+            "enum": [
+              "info",
+              "caution",
+              "warning",
+              "critical"
+            ]
+          },
+          "label": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "remedy": {
+            "type": "string"
+          },
+          "nodeId": {
+            "type": "string"
+          },
+          "nodeName": {
+            "type": "string"
+          },
+          "details": {
+            "type": "object"
+          }
+        }
+      },
+      "SheetResult": {
+        "type": "object",
+        "description": "One sheet's solve: per-node results, warnings and summary. `converged` is the solver's own verdict — read it, never infer it from the absence of `error`.",
+        "properties": {
+          "converged": {
+            "type": "boolean"
+          },
+          "iterations": {
+            "type": "integer"
+          },
+          "error": {
+            "type": "string"
+          },
+          "nodes": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Warning"
+            }
+          },
+          "summary": {
+            "type": "object"
+          }
+        }
+      },
+      "SolveResult": {
+        "type": "object",
+        "properties": {
+          "version": {
+            "type": "string"
+          },
+          "simulatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "elapsedMs": {
+            "type": "number"
+          },
+          "toleranceMode": {
+            "type": "string"
+          },
+          "sheets": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SheetResult"
+            }
+          }
+        }
+      },
+      "SolveResponse": {
+        "type": "object",
+        "properties": {
+          "result": {
+            "$ref": "#/components/schemas/SolveResult"
+          },
+          "meta": {
+            "type": "object",
+            "properties": {
+              "attribution": {
+                "$ref": "#/components/schemas/Attribution"
+              },
+              "schemaVersion": {
+                "type": "integer"
+              },
+              "corner": {
+                "type": "string"
+              },
+              "nodes": {
+                "type": "integer"
+              },
+              "sheets": {
+                "type": "integer"
+              },
+              "elapsedMs": {
+                "type": "number"
+              },
+              "metered": {
+                "type": "boolean"
+              }
+            }
+          }
+        }
+      },
+      "MonteCarloResponse": {
+        "type": "object",
+        "properties": {
+          "result": {
+            "type": "object",
+            "description": "trials[], summary, seed, trialCount, failedTrials — the same shape the editor's Monte Carlo panel reads.",
+            "properties": {
+              "trials": {
+                "type": "array",
+                "items": {
+                  "type": "object"
+                }
+              },
+              "summary": {
+                "type": "object"
+              },
+              "seed": {
+                "type": "integer"
+              },
+              "trialCount": {
+                "type": "integer"
+              },
+              "failedTrials": {
+                "type": "integer"
+              }
+            }
+          },
+          "meta": {
+            "type": "object",
+            "properties": {
+              "trials": {
+                "type": "integer"
+              },
+              "requestedTrials": {
+                "type": "integer"
+              },
+              "clamped": {
+                "type": "boolean"
+              },
+              "clampedBy": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "enum": [
+                  "plan limit",
+                  "design complexity",
+                  "request time budget",
+                  null
+                ]
+              },
+              "notice": {
+                "type": "string",
+                "description": "Present only when clampedBy is `request time budget`: what the design costs a trial, and the job endpoint that will run the full count."
+              },
+              "seed": {
+                "type": "integer"
+              },
+              "elapsedMs": {
+                "type": "number"
+              },
+              "metered": {
+                "type": "boolean"
+              },
+              "feature": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "DeratingCheck": {
+        "type": "object",
+        "description": "One stress parameter of one part.",
+        "properties": {
+          "parameterName": {
+            "type": "string"
+          },
+          "actual": {
+            "type": "number"
+          },
+          "rated": {
+            "type": "number",
+            "description": "The abs-max rating from the part's properties."
+          },
+          "limit": {
+            "type": "number",
+            "description": "rated × the standard's factor; a thermal check is also capped at the standard's junction ceiling."
+          },
+          "unit": {
+            "type": "string"
+          },
+          "stressPct": {
+            "type": "number",
+            "description": "actual over RATED, in percent; a thermal check grades the rise over ambient against the rated rise."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "GREEN",
+              "ORANGE",
+              "RED"
+            ]
+          }
+        }
+      },
+      "DeratingComponent": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          },
+          "sheet": {
+            "type": "string"
+          },
+          "worstStatus": {
+            "type": "string",
+            "enum": [
+              "GREEN",
+              "ORANGE",
+              "RED"
+            ]
+          },
+          "worstStressPct": {
+            "type": "number"
+          },
+          "checks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DeratingCheck"
+            }
+          },
+          "unrated": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Parameters whose rating the design leaves unstated (0 or blank). They are not in checks, are not graded and do not count toward the status; the rating must be entered before they can be."
+          },
+          "recommendations": {
+            "type": "string",
+            "description": "Mitigation text for every failing check, or a one-line pass, followed by the unrated parameters when there are any."
+          }
+        }
+      },
+      "DeratingResponse": {
+        "type": "object",
+        "properties": {
+          "result": {
+            "type": "object",
+            "properties": {
+              "standard": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "apiId": {
+                    "type": "string",
+                    "enum": [
+                      "NASA_GSFC",
+                      "IPC_9592"
+                    ]
+                  },
+                  "label": {
+                    "type": "string"
+                  },
+                  "reference": {
+                    "type": "string"
+                  }
+                }
+              },
+              "ambientTemperature": {
+                "type": "number"
+              },
+              "summary": {
+                "type": "object",
+                "properties": {
+                  "evaluated": {
+                    "type": "integer"
+                  },
+                  "compliant": {
+                    "type": "integer"
+                  },
+                  "warning": {
+                    "type": "integer"
+                  },
+                  "overstressed": {
+                    "type": "integer"
+                  },
+                  "worstStatus": {
+                    "type": "string",
+                    "enum": [
+                      "GREEN",
+                      "ORANGE",
+                      "RED"
+                    ]
+                  }
+                }
+              },
+              "components": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/DeratingComponent"
+                }
+              },
+              "thresholds": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "number"
+                },
+                "description": "The factor table used: the fraction of the rating allowed per parameter class, plus semiconductor_tj_cap in °C."
+              },
+              "statusLegend": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                }
+              },
+              "solve": {
+                "type": "object",
+                "properties": {
+                  "release": {
+                    "type": "string"
+                  },
+                  "simulatedAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "elapsedMs": {
+                    "type": "number"
+                  },
+                  "converged": {
+                    "type": "boolean"
+                  },
+                  "sheets": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "sheetIndex": {
+                          "type": "integer"
+                        },
+                        "sheetName": {
+                          "type": "string"
+                        },
+                        "converged": {
+                          "type": "boolean"
+                        },
+                        "error": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "meta": {
+            "type": "object",
+            "properties": {
+              "attribution": {
+                "$ref": "#/components/schemas/Attribution"
+              },
+              "schemaVersion": {
+                "type": "integer"
+              },
+              "standard": {
+                "type": "string"
+              },
+              "corner": {
+                "type": "string"
+              },
+              "ambientTemperature": {
+                "type": "number"
+              },
+              "nodes": {
+                "type": "integer"
+              },
+              "sheets": {
+                "type": "integer"
+              },
+              "elapsedMs": {
+                "type": "number"
+              },
+              "metered": {
+                "type": "boolean"
+              }
+            }
+          }
+        }
+      },
+      "Job": {
+        "type": "object",
+        "description": "A Monte Carlo job: status and progress.",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "`job_` + 20 characters."
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "monte_carlo"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "queued",
+              "running",
+              "done",
+              "failed",
+              "cancelled",
+              "expired"
+            ]
+          },
+          "trials": {
+            "type": "object",
+            "properties": {
+              "total": {
+                "type": "integer"
+              },
+              "done": {
+                "type": "integer"
+              }
+            }
+          },
+          "progress": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "sliceInProgress": {
+            "type": "boolean",
+            "description": "Another request is running a slice right now; poll again."
+          },
+          "seed": {
+            "type": "integer"
+          },
+          "error": {
+            "type": "string",
+            "description": "Only when `failed`."
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "JobResult": {
+        "type": "object",
+        "description": "The synchronous Monte Carlo result without its per-trial array: summary, seed, trialCount, failedTrials, unconvergedTrials, protectionTrips, operatingTrials, plus `nodeStats` — per node, `trials` and min / mean / max / stddev of voltage, current, power and temperature (over every solved trial, as the MCP digest folds them) with `thermalViolations` — and `attribution`.",
+        "properties": {
+          "summary": {
+            "type": "object"
+          },
+          "nodeStats": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "object"
+            }
+          },
+          "seed": {
+            "type": "integer"
+          },
+          "trialCount": {
+            "type": "integer"
+          },
+          "failedTrials": {
+            "type": "integer"
+          },
+          "protectionTrips": {
+            "type": "integer"
+          },
+          "operatingTrials": {
+            "type": "integer"
+          },
+          "elapsedMs": {
+            "type": "number",
+            "description": "CPU time summed over every slice."
+          },
+          "attribution": {
+            "type": "object"
+          }
+        }
+      },
+      "JobResponse": {
+        "type": "object",
+        "properties": {
+          "job": {
+            "$ref": "#/components/schemas/Job"
+          },
+          "result": {
+            "$ref": "#/components/schemas/JobResult"
+          },
+          "meta": {
+            "type": "object",
+            "properties": {
+              "schemaVersion": {
+                "type": "integer"
+              },
+              "trials": {
+                "type": "integer"
+              },
+              "requestedTrials": {
+                "type": "integer"
+              },
+              "clamped": {
+                "type": "boolean"
+              },
+              "clampedBy": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "seed": {
+                "type": "integer"
+              },
+              "advanced": {
+                "type": "boolean",
+                "description": "On a poll: whether this request ran a slice."
+              },
+              "trialsThisSlice": {
+                "type": "integer",
+                "description": "How many trials the slice inside THIS request ran (0 when none ran). Divide the trials left by it for the polls remaining — measured on this job, not estimated from its size."
+              },
+              "cancelled": {
+                "type": "boolean"
+              },
+              "refunded": {
+                "type": "boolean"
+              },
+              "elapsedMs": {
+                "type": "number"
+              },
+              "metered": {
+                "type": "boolean"
+              },
+              "feature": {
+                "type": "string"
+              },
+              "attribution": {
+                "type": "object"
+              }
+            }
+          }
+        }
+      },
+      "TemplateSummary": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "sheets": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Sheet names."
+          },
+          "nodes": {
+            "type": "integer"
+          },
+          "componentCounts": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "description": "Node count by type, e.g. { \"SMPS\": 3, \"Load\": 3 }."
+          },
+          "notes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The explanatory text the template carries on canvas."
+          },
+          "url": {
+            "type": "string",
+            "description": "Where to read the document: /v1/templates/{id}."
+          }
+        }
+      },
+      "TemplateList": {
+        "type": "object",
+        "properties": {
+          "count": {
+            "type": "integer"
+          },
+          "schema": {
+            "type": "string",
+            "description": "The design schema every template validates against."
+          },
+          "templates": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TemplateSummary"
+            }
+          }
+        }
+      },
+      "PartModel": {
+        "type": "object",
+        "description": "A parametric model the library stands behind: identity (mpn, manufacturer, type, package, notes, grade, datasheetUrl) plus `properties` — the node's FULL property set with the library's values applied by the same routine the editor's part picker uses (an SMPS's single typical efficiency becomes the three handles), `provenance` — for each key the library supplied, what stands behind it (`curated`, `datasheet_extracted`, `community`, `admin`, or `verified` when a person verified it), and `filledFromDefaults` — the property keys the library did NOT supply, which are registry defaults, not datasheet figures. Copy `properties` into a node of that `type`; check `filledFromDefaults` before trusting a number the datasheet should have given.",
+        "properties": {
+          "mpn": {
+            "type": "string"
+          },
+          "manufacturer": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string",
+            "description": "The node type this model fills, e.g. `SMPS`."
+          },
+          "package": {
+            "type": "string"
+          },
+          "notes": {
+            "type": "string"
+          },
+          "grade": {
+            "type": "string"
+          },
+          "datasheetUrl": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "library"
+            ]
+          },
+          "properties": {
+            "type": "object",
+            "additionalProperties": true,
+            "description": "The complete, schema-valid property block for a node of this type, SI base units."
+          },
+          "provenance": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Per supplied key: curated | datasheet_extracted | community | admin | verified."
+          },
+          "filledFromDefaults": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Property keys the library did not supply."
+          },
+          "updatedAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "PartModelList": {
+        "type": "object",
+        "properties": {
+          "count": {
+            "type": "integer"
+          },
+          "type": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The filter applied, or null for every model."
+          },
+          "types": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Every node type the library has models for."
+          },
+          "note": {
+            "type": "string"
+          },
+          "parts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PartModel"
+            }
+          }
+        }
+      },
+      "TemplateRecord": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "design": {
+            "$ref": "#/components/schemas/Design"
+          },
+          "counts": {
+            "type": "object",
+            "properties": {
+              "sheets": {
+                "type": "integer"
+              },
+              "nodes": {
+                "type": "integer"
+              }
+            }
+          }
+        }
+      },
+      "DesignSummary": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "DesignList": {
+        "type": "object",
+        "properties": {
+          "designs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DesignSummary"
+            }
+          },
+          "scope": {
+            "type": "object"
+          }
+        }
+      },
+      "DesignRecord": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "design": {
+            "$ref": "#/components/schemas/Design"
+          },
+          "message": {
+            "type": "string",
+            "nullable": true,
+            "description": "The note describing the design in THIS response. A revision row carries the note for the state in it, so the live design keeps its own here; a design saved once has a message and no revisions."
+          },
+          "revisions": {
+            "type": "integer",
+            "description": "How many earlier states this design has replaced."
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "DesignCreated": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "version": {
+            "type": "integer"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "editorUrl": {
+            "type": "string",
+            "description": "The deep link that opens THIS design on the canvas (`/app?design=<id>`). Hand this to the person; the editor shows them which key made it."
+          }
+        }
+      },
+      "DesignUpdated": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "version": {
+            "type": "integer",
+            "description": "The live design's version after this update: a new design is 1 and every update adds 1. The state it replaced is kept as revision version − 1."
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "revisionAuthor": {
+            "type": "string"
+          },
+          "editorUrl": {
+            "type": "string",
+            "description": "The deep link that opens this design on the canvas (`/app?design=<id>`), where the change is flagged as this key's and the previous state is one click away."
+          }
+        }
+      },
+      "ShareLink": {
+        "type": "object",
+        "properties": {
+          "shareId": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          },
+          "permissions": {
+            "type": "string"
+          },
+          "expiresInDays": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "expiresAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        }
+      },
+      "BomRow": {
+        "type": "object",
+        "properties": {
+          "designator": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          },
+          "value": {
+            "type": "string",
+            "description": "Nameplate value (what you order), not the solved rail."
+          },
+          "mpn": {
+            "type": "string"
+          },
+          "manufacturer": {
+            "type": "string"
+          },
+          "package": {
+            "type": "string"
+          },
+          "digikeyPartNumber": {
+            "type": "string"
+          },
+          "quantity": {
+            "type": "integer"
+          },
+          "sheet": {
+            "type": "string"
+          }
+        }
+      },
+      "Export": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string"
+          },
+          "filename": {
+            "type": "string"
+          },
+          "contentType": {
+            "type": "string"
+          },
+          "generatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "attribution": {
+            "$ref": "#/components/schemas/Attribution"
+          },
+          "content": {
+            "description": "A CSV string for bom_csv; an object for bom_json ({design, generatedAt, lineItems, rows[]}) and design_json."
+          }
+        }
+      },
+      "Attribution": {
+        "type": "object",
+        "description": "Who solved it and how to check (AR4.1). The same block on every solve response (`meta.attribution`), every export, and — as one line — every PDF, PNG and CSV the editor or the API produces.",
+        "properties": {
+          "solver": {
+            "type": "string",
+            "example": "Electronics Architect"
+          },
+          "release": {
+            "type": "string",
+            "description": "The build that solved the design — the release tag on production (e.g. \"0.9.60\"), \"main-<sha>\" on staging, \"dev\" elsewhere."
+          },
+          "resultContract": {
+            "type": "string",
+            "description": "The result-shape contract version (`result.version`)."
+          },
+          "designHash": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{16}$",
+            "description": "Sixteen hex characters of SHA-256 over the canonical design: parts, properties, tolerances, selected parts and wiring. Layout, routing and solve options are excluded, so one design has one hash at every corner."
+          },
+          "generatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "verifyUrl": {
+            "type": "string",
+            "description": "/verify/{designHash}, with ?s=<token> when the design has a VIEW-ONLY public share link, so the page can re-solve it unaided. An `edit` or `clone` share link is deliberately omitted: that token also opens the design for writing, and an export is a document you hand to someone else."
+          },
+          "statement": {
+            "type": "string",
+            "description": "The one printed line: \"Solved by Electronics Architect solver vX · design <hash> · <date> · verify: <url>\"."
+          }
+        }
+      },
+      "Fix": {
+        "type": "object",
+        "description": "A patch an agent can apply to clear a warning (AR4.3). Present on a warning only where one property on one node is the answer.",
+        "properties": {
+          "op": {
+            "type": "string",
+            "enum": [
+              "set"
+            ]
+          },
+          "nodeId": {
+            "type": "string"
+          },
+          "property": {
+            "type": "string",
+            "description": "The property key to set, e.g. iMax, currentLimit, thetaJA, vinMin, dropout, topology."
+          },
+          "value": {
+            "description": "The value to set — a number in SI base units, or a string for an enum property."
+          },
+          "unit": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "meaning": {
+            "type": "string",
+            "enum": [
+              "requirement",
+              "setting"
+            ],
+            "description": "\"requirement\": the rating the REPLACEMENT part needs (applying it models the part you would buy). \"setting\": a declaration the design was missing or had wrong."
+          },
+          "note": {
+            "type": "string",
+            "description": "How the value was arrived at."
+          }
+        }
+      },
+      "CompareSide": {
+        "type": "object",
+        "description": "One side of a comparison as solved.",
+        "properties": {
+          "source": {
+            "type": "string",
+            "description": "\"design\", \"design:<id>\" or \"template:<id>\"."
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "designHash": {
+            "type": "string"
+          },
+          "converged": {
+            "type": "boolean"
+          },
+          "totalSourcePower": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "totalLoadPower": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "totalDissipation": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "efficiency": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "warnings": {
+            "type": "object",
+            "properties": {
+              "total": {
+                "type": "integer"
+              },
+              "critical": {
+                "type": "integer"
+              },
+              "warning": {
+                "type": "integer"
+              },
+              "caution": {
+                "type": "integer"
+              },
+              "info": {
+                "type": "integer"
+              }
+            }
+          }
+        }
+      },
+      "Delta": {
+        "type": "object",
+        "description": "{ a, b, delta } — delta is b − a, null when either side is missing.",
+        "properties": {
+          "a": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "b": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "delta": {
+            "type": [
+              "number",
+              "null"
+            ]
+          }
+        }
+      },
+      "CompareResponse": {
+        "type": "object",
+        "properties": {
+          "a": {
+            "$ref": "#/components/schemas/CompareSide"
+          },
+          "b": {
+            "$ref": "#/components/schemas/CompareSide"
+          },
+          "changes": {
+            "type": "object",
+            "description": "The document diff, layout ignored.",
+            "properties": {
+              "nodes": {
+                "type": "object",
+                "properties": {
+                  "added": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "name": {
+                          "type": "string"
+                        },
+                        "type": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  },
+                  "removed": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "name": {
+                          "type": "string"
+                        },
+                        "type": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  },
+                  "changed": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "description": "id, name, type, then only the parts that differ: `properties` (key → { from, to }), `part` ({ from, to } MPN), `typeChange`, `nameChange`, `tolerances`, `portDirections`."
+                    }
+                  }
+                }
+              },
+              "connections": {
+                "type": "object",
+                "properties": {
+                  "added": {
+                    "type": "array",
+                    "items": {
+                      "type": "object"
+                    }
+                  },
+                  "removed": {
+                    "type": "array",
+                    "items": {
+                      "type": "object"
+                    }
+                  }
+                }
+              },
+              "identical": {
+                "type": "boolean"
+              }
+            }
+          },
+          "delta": {
+            "type": "object",
+            "properties": {
+              "totalSourcePower": {
+                "$ref": "#/components/schemas/Delta"
+              },
+              "totalLoadPower": {
+                "$ref": "#/components/schemas/Delta"
+              },
+              "totalDissipation": {
+                "$ref": "#/components/schemas/Delta"
+              },
+              "efficiency": {
+                "$ref": "#/components/schemas/Delta"
+              },
+              "warnings": {
+                "type": "object",
+                "additionalProperties": {
+                  "$ref": "#/components/schemas/Delta"
+                }
+              }
+            }
+          },
+          "nodes": {
+            "type": "array",
+            "description": "Every node present in both whose voltage, current, power or junction temperature moved by more than 1e-9.",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "type": {
+                  "type": "string"
+                },
+                "voltage": {
+                  "$ref": "#/components/schemas/Delta"
+                },
+                "current": {
+                  "$ref": "#/components/schemas/Delta"
+                },
+                "power": {
+                  "$ref": "#/components/schemas/Delta"
+                },
+                "temperature": {
+                  "$ref": "#/components/schemas/Delta"
+                }
+              }
+            }
+          },
+          "stages": {
+            "type": "array",
+            "description": "Converters whose dissipation or efficiency moved.",
+            "items": {
+              "type": "object",
+              "properties": {
+                "nodeId": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "type": {
+                  "type": "string"
+                },
+                "pdiss": {
+                  "$ref": "#/components/schemas/Delta"
+                },
+                "eff": {
+                  "$ref": "#/components/schemas/Delta"
+                }
+              }
+            }
+          },
+          "warnings": {
+            "type": "object",
+            "properties": {
+              "resolved": {
+                "type": "array",
+                "items": {
+                  "type": "object"
+                }
+              },
+              "introduced": {
+                "type": "array",
+                "items": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "yield": {
+            "type": "object",
+            "description": "Only with options.monteCarlo: trials, thermalViolationRate, protectionTripRate, failedTrials, efficiencyMean, efficiencyP1, powerMean, powerP99 — each a Delta.",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/Delta"
+            }
+          },
+          "meta": {
+            "type": "object",
+            "properties": {
+              "schemaVersion": {
+                "type": "integer"
+              },
+              "corner": {
+                "type": "string"
+              },
+              "ambientTemperature": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "metered": {
+                "type": "boolean"
+              },
+              "feature": {
+                "type": "string"
+              },
+              "monteCarlo": {
+                "type": "object"
+              },
+              "elapsedMs": {
+                "type": "number"
+              },
+              "release": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "VerifyResponse": {
+        "type": "object",
+        "properties": {
+          "designHash": {
+            "type": "string"
+          },
+          "expected": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "matches": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "null when no `hash` was given."
+          },
+          "attribution": {
+            "$ref": "#/components/schemas/Attribution"
+          },
+          "summary": {
+            "type": "object",
+            "properties": {
+              "converged": {
+                "type": "boolean"
+              },
+              "totalSourcePower": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "totalLoadPower": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "totalDissipation": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "efficiency": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "warnings": {
+                "type": "object"
+              }
+            }
+          },
+          "meta": {
+            "type": "object"
+          }
+        }
+      },
+      "Usage": {
+        "type": "object",
+        "properties": {
+          "used": {
+            "type": "integer"
+          },
+          "limit": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "unlimited": {
+            "type": "boolean"
+          },
+          "resetsAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "Me": {
+        "type": "object",
+        "properties": {
+          "key": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "label": {
+                "type": "string"
+              },
+              "scopes": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "read",
+                    "write",
+                    "solve",
+                    "export",
+                    "parts",
+                    "ai"
+                  ]
+                }
+              },
+              "rateLimitPerMin": {
+                "type": "integer"
+              },
+              "teamId": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "usage": {
+                "type": "object",
+                "description": "This key's own calls (UTC days); the monthly quotas under usage are the account's.",
+                "properties": {
+                  "today": {
+                    "type": "integer"
+                  },
+                  "last30Days": {
+                    "type": "integer"
+                  },
+                  "byScope30Days": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "account": {
+            "type": "object",
+            "properties": {
+              "tier": {
+                "type": "string",
+                "enum": [
+                  "pro",
+                  "team"
+                ]
+              }
+            }
+          },
+          "usage": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/Usage"
+            }
+          },
+          "solve": {
+            "type": "object"
+          }
+        }
+      }
+    }
+  },
+  "security": [
+    {
+      "apiKey": []
+    }
+  ],
+  "tags": [
+    {
+      "name": "Account",
+      "description": "The key and its account."
+    },
+    {
+      "name": "Solve",
+      "description": "Validate and solve designs, and grade them against a derating standard. Solving and derating are synchronous and unmetered."
+    },
+    {
+      "name": "Templates",
+      "description": "The design templates that ship with the editor — starting points to solve as-is or edit and save. Static and cacheable."
+    },
+    {
+      "name": "Library",
+      "description": "The part library — parametric simulation models (Vin range, Vout, Imax, dropout, Iq, efficiency handles, thermal, ratings) for real parts, ready to paste into a node's properties. Read from the database the community's datasheet contributions merge into, so it grows; every value is gated per attribute (no DigiKey-sourced values, no unverified guesses). No pricing, stock or distributor data."
+    },
+    {
+      "name": "Designs",
+      "description": "Cloud designs — the same rows \"Save to Cloud\" writes, so agent output appears in My Designs / Team Designs."
+    },
+    {
+      "name": "Exports",
+      "description": "Bill of materials, design JSON, the solved result and the machine-readable report. Every export carries `attribution` — the solver release, the design fingerprint, the date and a verify URL — and the CSV ends with that line. PDF exports are rendered in the editor."
+    },
+    {
+      "name": "Compare",
+      "description": "What changed between two designs and what it did — the change → compare → export loop an agent iterates. Solving both sides is unmetered; the optional Monte Carlo half is two metered runs."
+    },
+    {
+      "name": "Jobs",
+      "description": "Monte Carlo runs too long for one request (ADR-0012). A job runs in slices of a few seconds (3 s of trials; allow up to 5 s per request), one inside the request that creates it and one inside each poll, with its state saved between them; it progresses while it is polled. Same seed, same answer as the synchronous endpoint. Metered as one run at creation."
+    },
+    {
+      "name": "AI",
+      "description": "The editor's AI features on the account's included quota. Requires the `ai` scope."
+    }
+  ]
+}
