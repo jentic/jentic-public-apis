@@ -1,0 +1,3405 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Skylit Public API",
+    "version": "1.1.0",
+    "summary": "Options-Greeks heatmaps as a public HTTP API.",
+    "description": "Skylit exposes its real-time options-Greeks (gamma / vanna) heatmaps as a\nversioned public HTTP API, per strike, with the live velocity metric and\nSkylit's node classification (King / Gatekeeper / etc.).\n\n**Authentication.** Send your Skylit API key as a bearer token:\n\n    Authorization: Bearer <key>\n\nA request without an `Authorization` header gets `401`; an invalid,\nrevoked or expired key gets `403`.\n\nThe gateway also accepts the bare key in the same header\n(`Authorization: <key>`); `Bearer` is the documented form. The key is not\nread from `X-API-Key` or the query string: those requests get `401`.\n\n**Credit metering.** Every chargeable request debits a fixed cost from\nyour credit balance:\n\n| Endpoint        | Cost |\n|-----------------|-----:|\n| `/v1/heatmap`    | 1   |\n| `/v1/gex/levels` | 1   |\n| `/v1/historical` | 5   |\n| `/v1/historical/range` | 25 |\n| `/v1/stats/daily` | 5  |\n| `/v1/stream`     | 1 per symbol to open + 1 per symbol per minute open |\n| `/v1/account`, `/v1/symbols`, `/v1/openapi.json` | 0 |\n\n`/v1/openapi.json` (this document) needs no key.\n\n**Failed calls are free:** a request answered with any 4xx or 5xx status is\nrefunded, and its `X-Credits-Remaining` already reflects the refund.\n\nNew API accounts start with 5,000 credits; Pro, Protégé and Quant also get\n25,000 included credits each month (`GET /v1/account` shows the balance).\nEvery chargeable response\ncarries `X-Credits-Remaining: <balance>`. Out of credits → `402`\n`insufficient_credits`; an admin-suspended account → `403`\n`account_suspended`. Top up via your account console.\n\n**Rate limits.** Each key has a requests-per-minute limit set by the\naccount's plan (Pro, Protégé and Quant: 120 per key; invite: 60 per key),\ncounted across every Skylit API host. `GET /v1/account` returns it as\n`limits.requestsPerMinute`; read it instead of hard-coding a number. Over\nit the gateway answers `429` `rate_limited`. Responses carry\n`X-RateLimit-Limit` (the key's limit), `X-RateLimit-Remaining` (requests\nleft in the current window) and `X-RateLimit-Reset` (Unix time, in\nseconds, when the window resets). The gateway's `429` has no `Retry-After`: wait until\n`X-RateLimit-Reset`. `429`s from the API itself (concurrency and stream\nlimits) carry `Retry-After`.\n\n**Attribution.** Every response carries\n`X-Skylit-Attribution: Data: Skylit (https://skylit.ai/?utm_source=api&utm_medium=attribution)`, JSON success\nresponses carry `meta.attribution`, and `/v1/stream`'s `connected` event\ncarries the same object. When you share or publish Skylit data, credit\n\"Data: Skylit\" (https://www.skylit.ai/api-terms#attribution).\n\n**Symbols.** Multi-symbol routes take at most 10 distinct symbols per\nrequest; more is a `400` `invalid_parameter` (never silently truncated).\nUnknown symbols in a list are omitted from `data.symbols`; if none of the\nrequested symbols is available the response is `404` `symbol_not_found`.\n\nLive streams (`/v1/stream`) cost 1 credit per symbol to open plus 1 per\nsymbol per minute connected, and close after one hour.\n\n**Resolution.** The heatmap is a 1-second time series. `/v1/heatmap` and\n`/v1/historical` return the single snapshot at or before the requested\ninstant (`/v1/historical` to the second); `/v1/historical/range` returns\nevery snapshot in a window of up to 15 minutes. History goes back to\n2023-03-28; `meta.resolution` reports the resolution actually served:\n`\"1s\"`, or `\"1m\"` for the older history that is only stored once a minute.\n\n**Board size.** By default `/v1/heatmap` returns 92 strikes around spot\nand the nearest 5 expirations, and leaves out interior strikes whose cells\nare all negligible. `maxStrikes=all&maxExpirations=all&includeEmpty=true`\nreturns the full board exactly as stored. Limits above a cap are a `400`,\nnever a silent reduction.\n\n**Compression.** Send `Accept-Encoding: gzip` and JSON responses come back\ngzip-compressed (typically 3-5x smaller). Streams are never compressed.\n\n**Velocity is live-only.** The `velocityPct` field is present on\n`/v1/heatmap` (live) and absent on `/v1/historical` (replay).\n\n**Response shape.** Success → `{ \"data\": ..., \"meta\": { ... } }`; errors →\n`{ \"error\": { \"code\": \"...\", \"message\": \"...\" } }`, including the ones\nthe gateway sends itself (`401`, `403`, `429`, `504`). Unknown paths are\n`404` `not_found`. camelCase throughout.\n`data.symbols` is always an array (one element per requested symbol), so a\nsingle-symbol call and a multi-symbol \"Trinity\" call share one shape.\n",
+    "x-jentic-source-url": "https://www.skylit.ai/docs/openapi.yaml"
+  },
+  "servers": [
+    {
+      "url": "https://api.skylit.ai",
+      "description": "Production"
+    }
+  ],
+  "paths": {
+    "/v1/heatmap": {
+      "get": {
+        "summary": "Live per-strike heatmap (one or more symbols)",
+        "operationId": "getHeatmap",
+        "x-credits": 1,
+        "tags": [
+          "Heatmap"
+        ],
+        "description": "Current per-strike heatmap for one or more symbols at the latest\nsnapshot. Includes the live `velocityPct` per strike. Pass multiple\ncomma-separated symbols for a single cross-asset call (the app's\nTrinity is `SPXW,SPY,QQQ`; `SPX` is the monthlies only), and\n`expirations` to net each strike over specific expiration dates instead\nof the nearest `maxExpirations`. A call that cannot finish within 20\nseconds answers `504` `gateway_timeout` (refunded); retry, or request\nfewer symbols.\n",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Symbols"
+          },
+          {
+            "$ref": "#/components/parameters/Metric"
+          },
+          {
+            "$ref": "#/components/parameters/MaxStrikes"
+          },
+          {
+            "$ref": "#/components/parameters/MaxExpirations"
+          },
+          {
+            "$ref": "#/components/parameters/IncludeEmpty"
+          },
+          {
+            "$ref": "#/components/parameters/Expirations"
+          },
+          {
+            "$ref": "#/components/parameters/Layout"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Live heatmap snapshot(s).",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "example": "private, max-age=5"
+                }
+              },
+              "X-RateLimit-Limit": {
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "X-RateLimit-Remaining": {
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "X-RateLimit-Reset": {
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": [
+                        "symbols"
+                      ],
+                      "properties": {
+                        "symbols": {
+                          "type": "array",
+                          "items": {
+                            "$ref": "#/components/schemas/SymbolHeatmap"
+                          }
+                        }
+                      }
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/Meta"
+                    }
+                  }
+                },
+                "examples": {
+                  "live": {
+                    "summary": "SPY live (truncated)",
+                    "value": {
+                      "data": {
+                        "symbols": [
+                          {
+                            "symbol": "SPY",
+                            "asOf": "2026-05-22T14:31:00Z",
+                            "spot": 591.23,
+                            "previousClose": 589.1,
+                            "priceChange": 2.13,
+                            "priceChangePercent": 0.36,
+                            "expirations": [
+                              "2026-05-22",
+                              "2026-05-23",
+                              "2026-05-30"
+                            ],
+                            "strikes": [
+                              {
+                                "strike": 590,
+                                "value": 1894300.4,
+                                "nodeType": "king",
+                                "velocityPct": 12.4
+                              },
+                              {
+                                "strike": 595,
+                                "value": 642100.2,
+                                "nodeType": "gatekeeper",
+                                "velocityPct": -3.1
+                              },
+                              {
+                                "strike": 585,
+                                "value": 88010,
+                                "nodeType": "normal",
+                                "velocityPct": 0.4
+                              }
+                            ]
+                          }
+                        ]
+                      },
+                      "meta": {
+                        "metric": "gamma",
+                        "resolution": "1s",
+                        "mode": "live",
+                        "cached": false
+                      }
+                    }
+                  },
+                  "singleExpiration": {
+                    "summary": "SPY netted over one expiration (`expirations=2026-05-23`)",
+                    "value": {
+                      "data": {
+                        "symbols": [
+                          {
+                            "symbol": "SPY",
+                            "asOf": "2026-05-22T14:31:00Z",
+                            "spot": 591.23,
+                            "previousClose": 589.1,
+                            "priceChange": 2.13,
+                            "priceChangePercent": 0.36,
+                            "expirations": [
+                              "2026-05-23"
+                            ],
+                            "strikes": [
+                              {
+                                "strike": 590,
+                                "value": 412880.1,
+                                "nodeType": "king",
+                                "velocityPct": 8.2
+                              },
+                              {
+                                "strike": 595,
+                                "value": 121400.7,
+                                "nodeType": "gatekeeper",
+                                "velocityPct": -1.4
+                              }
+                            ]
+                          }
+                        ]
+                      },
+                      "meta": {
+                        "metric": "gamma",
+                        "resolution": "1s",
+                        "mode": "live",
+                        "cached": false
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "402": {
+            "$ref": "#/components/responses/PaymentRequired"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "504": {
+            "$ref": "#/components/responses/GatewayTimeout"
+          }
+        }
+      }
+    },
+    "/v1/historical": {
+      "get": {
+        "summary": "Replay — per-strike heatmap at a past instant (one or more symbols)",
+        "operationId": "getHistoricalHeatmap",
+        "x-credits": 5,
+        "tags": [
+          "Heatmap"
+        ],
+        "description": "The latest snapshot at or before `at` for one or more symbols — same\nshape as `/v1/heatmap` minus `velocityPct` (velocity is live-only),\nincluding `layout=matrix` for the per-expiration grid. Precision is\n1 second where 1-second history exists for that day and 1 minute\notherwise; `meta.resolution` says which. `at` may go back to\n2023-03-28, where heatmap history begins (coverage per symbol varies;\n`/v1/symbols` lists each symbol's first date). If no snapshot exists\nat/near that instant the response is `404` with `code: no_data`.\nA read that cannot finish within 20 seconds answers `504`\n`gateway_timeout` (refunded); retry, or request fewer symbols.\n",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Symbols"
+          },
+          {
+            "name": "at",
+            "in": "query",
+            "required": true,
+            "description": "RFC3339 instant to replay (e.g. `2026-03-05T10:01:00Z`). Not before 2023-03-28.",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/Metric"
+          },
+          {
+            "$ref": "#/components/parameters/MaxStrikes"
+          },
+          {
+            "$ref": "#/components/parameters/MaxExpirations"
+          },
+          {
+            "$ref": "#/components/parameters/IncludeEmpty"
+          },
+          {
+            "$ref": "#/components/parameters/Expirations"
+          },
+          {
+            "$ref": "#/components/parameters/Layout"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Historical heatmap snapshot(s).",
+            "headers": {
+              "X-RateLimit-Limit": {
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "X-RateLimit-Remaining": {
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "X-RateLimit-Reset": {
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": [
+                        "symbols"
+                      ],
+                      "properties": {
+                        "symbols": {
+                          "type": "array",
+                          "items": {
+                            "$ref": "#/components/schemas/SymbolHeatmap"
+                          }
+                        }
+                      }
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/Meta"
+                    }
+                  }
+                },
+                "examples": {
+                  "replay": {
+                    "summary": "SPY at a past minute (truncated)",
+                    "value": {
+                      "data": {
+                        "symbols": [
+                          {
+                            "symbol": "SPY",
+                            "asOf": "2026-03-05T10:01:00Z",
+                            "spot": 512.4,
+                            "previousClose": 510.02,
+                            "priceChange": 2.38,
+                            "priceChangePercent": 0.47,
+                            "expirations": [
+                              "2026-03-05",
+                              "2026-03-06"
+                            ],
+                            "strikes": [
+                              {
+                                "strike": 512,
+                                "value": 1500200,
+                                "nodeType": "king"
+                              },
+                              {
+                                "strike": 515,
+                                "value": 410000,
+                                "nodeType": "gatekeeper"
+                              }
+                            ]
+                          }
+                        ]
+                      },
+                      "meta": {
+                        "metric": "gamma",
+                        "resolution": "1s",
+                        "mode": "historical",
+                        "cached": false
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "402": {
+            "$ref": "#/components/responses/PaymentRequired"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "description": "No snapshot at/near the requested instant, none of the requested\nsymbols is available, or none of the requested `expirations` exist\nin that snapshot.\n",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "examples": {
+                  "symbolNotFound": {
+                    "value": {
+                      "error": {
+                        "code": "symbol_not_found",
+                        "message": "Symbol \"ZZZZQ\" is not available."
+                      }
+                    }
+                  },
+                  "noData": {
+                    "value": {
+                      "error": {
+                        "code": "no_data",
+                        "message": "No snapshot available for SPY at 2025-01-01T10:01:00Z."
+                      }
+                    }
+                  },
+                  "expirationNotFound": {
+                    "value": {
+                      "error": {
+                        "code": "expiration_not_found",
+                        "message": "None of the requested expirations are available for SPY. Available: 2026-03-05, 2026-03-06, 2026-03-07."
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "504": {
+            "$ref": "#/components/responses/GatewayTimeout"
+          }
+        }
+      }
+    },
+    "/v1/historical/range": {
+      "get": {
+        "summary": "Replay — every snapshot in a window (up to 15 minutes, 5 symbols)",
+        "operationId": "getHistoricalRange",
+        "x-credits": 25,
+        "tags": [
+          "Heatmap"
+        ],
+        "description": "Every snapshot between `from` and `to` (inclusive) for up to 5\nsymbols, at the stored resolution — one per second where 1-second\nhistory exists (`meta.resolution: \"1s\"`), otherwise one per minute.\nEach frame's `values[i]` is the net exposure at\n`axes[frame.axis].strikes[i]`, summed over that axis's expirations —\nthe same number `/v1/historical` reports as `strikes[i].value` for\nthat instant. Axes are listed once and referenced by id; a new axis\nappears only when the visible strikes or expirations change (the\nstrike window follows spot). Plain JSON numbers; responses are\ngzip-compressed when the request sends `Accept-Encoding: gzip`.\n\n**Cost:** 25 credits per call.\n",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Symbols"
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "required": true,
+            "description": "RFC3339 start of the window (inclusive). Up to 365 days back.",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "required": true,
+            "description": "RFC3339 end of the window (inclusive). At most 15 minutes after `from`, not in the future.",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/Metric"
+          },
+          {
+            "$ref": "#/components/parameters/MaxStrikes"
+          },
+          {
+            "$ref": "#/components/parameters/MaxExpirations"
+          },
+          {
+            "$ref": "#/components/parameters/Expirations"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Every snapshot in the window, per symbol.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": [
+                        "from",
+                        "to",
+                        "symbols"
+                      ],
+                      "properties": {
+                        "from": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "to": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "symbols": {
+                          "type": "array",
+                          "items": {
+                            "$ref": "#/components/schemas/SymbolRange"
+                          }
+                        }
+                      }
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/Meta"
+                    }
+                  }
+                },
+                "examples": {
+                  "range": {
+                    "summary": "SPY, two seconds (truncated)",
+                    "value": {
+                      "data": {
+                        "from": "2026-03-05T14:30:00Z",
+                        "to": "2026-03-05T14:30:01Z",
+                        "symbols": [
+                          {
+                            "symbol": "SPY",
+                            "axes": [
+                              {
+                                "id": 0,
+                                "strikes": [
+                                  510,
+                                  512,
+                                  515
+                                ],
+                                "expirations": [
+                                  "2026-03-05",
+                                  "2026-03-06"
+                                ]
+                              }
+                            ],
+                            "frames": [
+                              {
+                                "asOf": "2026-03-05T14:30:00.000Z",
+                                "axis": 0,
+                                "spot": 512.4,
+                                "previousClose": 510.02,
+                                "values": [
+                                  88010,
+                                  1500200,
+                                  410000
+                                ]
+                              },
+                              {
+                                "asOf": "2026-03-05T14:30:01.000Z",
+                                "axis": 0,
+                                "spot": 512.43,
+                                "previousClose": 510.02,
+                                "values": [
+                                  87120.5,
+                                  1502113.2,
+                                  409877.1
+                                ]
+                              }
+                            ]
+                          }
+                        ]
+                      },
+                      "meta": {
+                        "metric": "gamma",
+                        "resolution": "1s",
+                        "mode": "historical",
+                        "cached": false
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/v1/stream": {
+      "get": {
+        "summary": "Live SSE stream (up to 10 symbols per connection)",
+        "operationId": "streamHeatmap",
+        "x-credits": 1,
+        "x-credits-per-minute": 1,
+        "tags": [
+          "Heatmap"
+        ],
+        "description": "A **Server-Sent Events** (`text/event-stream`) feed of live per-strike\nheatmaps. Two wire formats:\n\n- **v2** (default with `symbols=`, or `format=v2`): up to 10 symbols on\n  one connection, camelCase events matching `SymbolHeatmap`, resumable\n  with `Last-Event-ID`.\n- **v1** (default with `symbol=`): the original single-symbol format,\n  unchanged.\n\n### v2 events\n\nEvery event names its `symbol` (except connection-level events).\n\n| Event | `id:` | Payload |\n|---|---|---|\n| `connected` | — | `{format:\"v2\", symbols, metric, creditsRemaining, creditsPerMinute, maxDurationSeconds}` |\n| `resumed` | yes | Only when `Last-Event-ID` was sent. See *Resume*. |\n| `snapshot` | yes | `StreamSnapshot` (= `SymbolHeatmap` + `lagged`). Once per symbol on connect, then on every board change. |\n| `velocity` | yes | `StreamVelocity`: per-node velocity for the stream's `metric`, when it changes (checked every ~3s). |\n| `symbol_unavailable` | — | `{symbol, reason: \"no_live_board\" \\| \"expiration_not_found\", message}`; a `snapshot` follows once a board exists. |\n| `credits` | — | `{remaining, charged}` after each per-minute debit. |\n| `closed` | — | `{reason: \"insufficient_credits\" \\| \"account_suspended\" \\| \"key_revoked\" \\| \"monthly_cap_reached\" \\| \"credit_check_failed\"}`; stream ends. `key_revoked`: an API key on the account was revoked after this stream opened (streams opened on another still-valid key close too; reconnect to continue). `monthly_cap_reached`: the account's monthly spend cap was reached. |\n| `reconnect` | yes | `{reason: \"max_duration\" \\| \"server_shutdown\"}`; stream ends, reconnect with `Last-Event-ID`. |\n| `: ping` | — | SSE comment every 15s so idle proxies (CloudFront: 60s) keep the connection. |\n\nSnapshots differ from `/v1/heatmap` in two ways: `spot` is the board's\nown spot, and strikes carry no `velocityPct` (use the `velocity`\nevent). Within a symbol, `asOf` never goes backwards; a board already\nsent is never re-sent.\n\n**Event ids (resume cursor).** The `id:` is the connection's position\nin **every** symbol, not just the event's: a comma-separated list of\n`SYMBOL:asOfUnixMs`, e.g. `SPY:1790000000123,QQQ:1790000000456`.\n`asOfUnixMs` is the board's publish timestamp, identical on every\nserver, so a cursor resumes on any pod. Per symbol it never decreases\nand strictly increases with each `snapshot` for that symbol.\n\n**Resume.** Reconnect with header `Last-Event-ID: <last id>` (browsers'\n`EventSource` does this automatically) or `?lastEventId=`. The server\nkeeps no event history: boards are full state, so it sends the\n`resumed` event and then a fresh `snapshot` for every symbol that has a\nlive board, whether or not it changed. Per symbol `status` is:\n`unchanged` (no board was published during the gap — nothing missed),\n`advanced` (at least one board was published; intermediate boards are\n**not** replayed, only the latest), `unknown` (symbol not in the\ncursor), or `unavailable` (no live board right now). `gapCovered` is\ntrue only if every symbol is `unchanged`; `stateRestored` is true when\nevery symbol received a current snapshot. Velocity is not replayed; the\nlatest reading is re-sent when this server has one.\n\n**Backpressure.** A client that reads slower than boards are published\nis never queued behind: each symbol holds at most one pending board, a\nnewer board replaces it, and the board that is finally sent carries\n`lagged: true`. A client that stops reading for 30s is disconnected.\n\n**Pricing (v2).** `N` = number of symbols. `N` credits on connect\n(charged before the SSE upgrade, so an under-funded client gets a clean\n`402`), then `N` credits per minute open — 1 credit ($0.001) per symbol\nper minute, i.e. $0.06 per symbol-hour, plus $0.001 per symbol to open.\nMinutes are charged in advance and a partial minute is not refunded.\n\n**Limits.** At most 10 symbols per connection (more → `400`). At most\n25 symbols per customer per server across all open streams (a v1\nstream counts as 1); over it → `429` `stream_limit_reached` with\n`Retry-After: 2` (a just-closed stream frees its symbols within about\na second). v1 also keeps its 5-streams cap. Each server streams a\nbounded number of **distinct** symbols across all customers (default\n20); a v2 stream that would add a new symbol beyond that gets `503`\n`stream_capacity` with `Retry-After: 5` — retry (you may land on\nanother server). Symbols already being streamed are always admitted.\nStreams end after 1 hour with `reconnect`.\n\n### v1 events (single symbol, unchanged)\n\n`connected` `{symbol, creditsRemaining}`, `initial_data`,\n`snapshot_update`, `velocity_update` (internal PascalCase board shape),\n`credits`, `closed`, `reconnect`, and a `: keepalive` comment every\n30s. 1 credit to open + 1 per minute. v1 rejects `expirations`.\n\n> OpenAPI cannot fully model an event stream. See\n> https://www.skylit.ai/docs/api-reference/rate-limits-and-retries (Streams).\n",
+        "parameters": [
+          {
+            "name": "symbols",
+            "in": "query",
+            "required": false,
+            "description": "Comma-separated tickers, up to 10 (e.g. `SPY,QQQ,IWM`). Selects format v2 by default. Unknown symbols → `404`.",
+            "schema": {
+              "type": "string",
+              "example": "SPY,QQQ,IWM"
+            }
+          },
+          {
+            "name": "symbol",
+            "in": "query",
+            "required": false,
+            "description": "Single ticker. Selects the legacy v1 format unless `format=v2`. Send `symbol` or `symbols`, not both.",
+            "schema": {
+              "type": "string",
+              "example": "SPY"
+            }
+          },
+          {
+            "name": "format",
+            "in": "query",
+            "required": false,
+            "description": "Wire format. Defaults to `v2` with `symbols=` and `v1` with `symbol=`. `v1` is single-symbol only.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "v1",
+                "v2"
+              ]
+            }
+          },
+          {
+            "name": "lastEventId",
+            "in": "query",
+            "required": false,
+            "description": "v2 resume cursor, for clients that cannot set the `Last-Event-ID` header. The header wins if both are sent.",
+            "schema": {
+              "type": "string",
+              "example": "SPY:1790000000123,QQQ:1790000000456"
+            }
+          },
+          {
+            "name": "Last-Event-ID",
+            "in": "header",
+            "required": false,
+            "description": "v2 resume cursor — the last `id:` received.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/Metric"
+          },
+          {
+            "$ref": "#/components/parameters/MaxStrikes"
+          },
+          {
+            "$ref": "#/components/parameters/MaxExpirations"
+          },
+          {
+            "$ref": "#/components/parameters/IncludeEmpty"
+          },
+          {
+            "name": "expirations",
+            "in": "query",
+            "required": false,
+            "description": "v2 only — same meaning as on `/v1/heatmap`. Rejected with `400` on v1.",
+            "schema": {
+              "type": "string",
+              "example": "2026-05-22,2026-05-29"
+            }
+          },
+          {
+            "name": "layout",
+            "in": "query",
+            "required": false,
+            "description": "v2 only — `matrix` adds the per-expiration grid to each snapshot, as on `/v1/heatmap`.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "net",
+                "matrix"
+              ],
+              "default": "net"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "An SSE stream of heatmap events.",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "type": "string",
+                  "description": "v2 frames, e.g.\n\n    event: snapshot\n    id: SPY:1790000000123,QQQ:1790000000456\n    data: {StreamSnapshot}\n\n`snapshot` data matches #/components/schemas/StreamSnapshot,\n`velocity` data #/components/schemas/StreamVelocity, and\n`resumed` data #/components/schemas/StreamResumed.\n"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "402": {
+            "$ref": "#/components/responses/PaymentRequired"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/v1/gex/levels": {
+      "get": {
+        "operationId": "getLevels",
+        "x-credits": 1,
+        "summary": "Key levels (classified nodes) for one or more symbols",
+        "description": "The strikes Skylit classifies as nodes (king, gatekeeper, pika, barney,\nsignificant) for up to 10 symbols, strongest first, with each level's\ndistance from spot. Same live source, filters and 5-second cache as\n`/v1/heatmap`; 1 credit per request.\n\nEach symbol also carries `summary`: total net exposure, the strongest\npositive and negative strikes (the walls), and the flip level where\ncumulative net exposure changes sign. It is computed from the strikes\nthis request returned, so widen `maxStrikes` for a wider view.\n\nA call that cannot finish within 20 seconds answers `504`\n`gateway_timeout` (refunded); retry, or request fewer symbols.\n",
+        "tags": [
+          "Heatmap"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Symbols"
+          },
+          {
+            "$ref": "#/components/parameters/Metric"
+          },
+          {
+            "$ref": "#/components/parameters/MaxStrikes"
+          },
+          {
+            "$ref": "#/components/parameters/MaxExpirations"
+          },
+          {
+            "$ref": "#/components/parameters/IncludeEmpty"
+          },
+          {
+            "$ref": "#/components/parameters/Expirations"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Levels per symbol.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "symbols": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "symbol": {
+                                "type": "string"
+                              },
+                              "asOf": {
+                                "type": "string",
+                                "format": "date-time"
+                              },
+                              "spot": {
+                                "type": "number"
+                              },
+                              "previousClose": {
+                                "type": "number"
+                              },
+                              "kingNode": {
+                                "description": "The strongest king node, or null when none is classified.",
+                                "nullable": true,
+                                "allOf": [
+                                  {
+                                    "$ref": "#/components/schemas/Level"
+                                  }
+                                ]
+                              },
+                              "levels": {
+                                "type": "array",
+                                "items": {
+                                  "$ref": "#/components/schemas/Level"
+                                }
+                              },
+                              "summary": {
+                                "$ref": "#/components/schemas/LevelsSummary"
+                              }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/Meta"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "402": {
+            "$ref": "#/components/responses/PaymentRequired"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "504": {
+            "$ref": "#/components/responses/GatewayTimeout"
+          }
+        }
+      }
+    },
+    "/v1/account": {
+      "get": {
+        "operationId": "getAccount",
+        "x-credits": 0,
+        "summary": "Your balance and limits",
+        "description": "The calling key's account: status, balance (credits and US dollars at\n$0.001 per credit), whether usage is unlimited, and the limits that\napply. Free.\n",
+        "tags": [
+          "Account"
+        ],
+        "responses": {
+          "200": {
+            "description": "Account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "customerId": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "active",
+                            "suspended"
+                          ]
+                        },
+                        "apiEligible": {
+                          "type": "boolean"
+                        },
+                        "unlimited": {
+                          "type": "boolean"
+                        },
+                        "creditsBalance": {
+                          "type": "integer"
+                        },
+                        "balanceUsd": {
+                          "type": "number"
+                        },
+                        "limits": {
+                          "type": "object",
+                          "properties": {
+                            "requestsPerMinute": {
+                              "type": "integer"
+                            },
+                            "symbolsPerHeatmapCall": {
+                              "type": "integer"
+                            },
+                            "symbolsPerStream": {
+                              "type": "integer"
+                            },
+                            "streamSymbolsConcurrent": {
+                              "type": "integer",
+                              "description": "Symbols you may hold open at once across all streams (per server)."
+                            },
+                            "historicalInFlight": {
+                              "type": "integer"
+                            },
+                            "activeKeys": {
+                              "type": "integer"
+                            },
+                            "streamMaxDurationMinutes": {
+                              "type": "integer"
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/v1/stats/daily": {
+      "get": {
+        "operationId": "getDailyStats",
+        "x-credits": 5,
+        "summary": "Daily statistics per symbol (ranking and spot range)",
+        "tags": [
+          "Heatmap"
+        ],
+        "description": "Per symbol and US trading session (ET): board spot open/high/low/close,\nthe smallest and largest single cell of the session, and the mean and\nmaximum over the session's frames of `max(|smallest cell|, |largest cell|)`\n(a measure of how concentrated the exposure is, useful for ranking a\nuniverse). Computed from 1-minute history, so every frame is one minute\napart (`frames` counts them). Weight `peakAbsMean` by `frames` to\naverage across days.\n\n**Sessions.** `date` is the ET session date. By default a row covers\nthe regular session, 09:30-16:00 ET (frames stamped 09:30 up to\n15:59); `extended=true` covers 04:00-20:00 ET instead, including\npre- and post-market. Weekends and NYSE market holidays have no\nsession and no row, including for indices whose heatmap updates\naround the clock (SPX, SPXW, NDX, VIX). On early-close days the\nsession simply has fewer frames. `firstAt`/`lastAt` are UTC\ntimestamps. Today's row has `complete: false` until 30 minutes after\nthe session ends, and changes as the session goes on.\n\nUp to 50 symbols, 31 calendar days and 400 symbol-sessions (symbols x\ntrading days) per call. Sessions with no data are omitted; a symbol\nwith none is omitted. Served from the historical file store; finished\nsessions are cached, so repeat and overlapping calls are fast.\n**Cost:** 5 credits per call.\n",
+        "parameters": [
+          {
+            "name": "symbols",
+            "in": "query",
+            "required": true,
+            "description": "Comma-separated tickers (up to 50).",
+            "schema": {
+              "type": "string",
+              "example": "SPY,QQQ,NVDA"
+            }
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "required": true,
+            "description": "First session date (`YYYY-MM-DD`, ET), not before 2023-03-28.",
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "required": false,
+            "description": "Last session date (`YYYY-MM-DD`, ET), inclusive. Default today (ET); at most 31 calendar days after `from`.",
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
+          },
+          {
+            "name": "extended",
+            "in": "query",
+            "required": false,
+            "description": "Cover the extended session (04:00-20:00 ET) instead of the regular session (09:30-16:00 ET).",
+            "schema": {
+              "type": "boolean",
+              "default": false
+            }
+          },
+          {
+            "$ref": "#/components/parameters/Metric"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Daily statistics.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": [
+                        "from",
+                        "to",
+                        "symbols"
+                      ],
+                      "properties": {
+                        "from": {
+                          "type": "string",
+                          "format": "date"
+                        },
+                        "to": {
+                          "type": "string",
+                          "format": "date"
+                        },
+                        "symbols": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "required": [
+                              "symbol",
+                              "days"
+                            ],
+                            "properties": {
+                              "symbol": {
+                                "type": "string"
+                              },
+                              "days": {
+                                "type": "array",
+                                "items": {
+                                  "$ref": "#/components/schemas/DailyStat"
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/Meta"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "402": {
+            "$ref": "#/components/responses/PaymentRequired"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "504": {
+            "$ref": "#/components/responses/GatewayTimeout"
+          }
+        }
+      }
+    },
+    "/v1/symbols": {
+      "get": {
+        "operationId": "listSymbols",
+        "x-credits": 0,
+        "summary": "Symbol catalog",
+        "tags": [
+          "Meta"
+        ],
+        "description": "Every symbol the API serves: whether it is an index, previous tickers\nafter a rename (still accepted as input), the metrics available, and\nthe UTC dates its history covers (`null` when coverage could not be\nread). History dates are refreshed every few hours. Free.\n",
+        "responses": {
+          "200": {
+            "description": "Symbol catalog.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": [
+                        "symbols"
+                      ],
+                      "properties": {
+                        "symbols": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "required": [
+                              "symbol",
+                              "isIndex",
+                              "metrics",
+                              "history"
+                            ],
+                            "properties": {
+                              "symbol": {
+                                "type": "string"
+                              },
+                              "isIndex": {
+                                "type": "boolean"
+                              },
+                              "previousNames": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                }
+                              },
+                              "metrics": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string",
+                                  "enum": [
+                                    "gamma",
+                                    "vanna"
+                                  ]
+                                }
+                              },
+                              "history": {
+                                "type": "object",
+                                "nullable": true,
+                                "required": [
+                                  "from",
+                                  "to"
+                                ],
+                                "properties": {
+                                  "from": {
+                                    "type": "string",
+                                    "format": "date"
+                                  },
+                                  "to": {
+                                    "type": "string",
+                                    "format": "date"
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/v1/vol/iv": {
+      "get": {
+        "operationId": "getVolIv",
+        "x-credits": 1,
+        "summary": "Implied volatility (SVX) per symbol",
+        "tags": [
+          "Tempest"
+        ],
+        "description": "SVX, Tempest's constant-maturity implied volatility per symbol (a VIX-style\nvariance-strip reading on the symbol's own option chain), in annualised vol\npoints: `svx1d`, `svx9`, `svx30`, `svx3m`, `svx6m`, each also weekend-adjusted\n(`*_adj`, the weekly calendar pattern removed). Plus IV rank and percentile\n(`iv_rank`, `iv_pct`, over the trailing year, on the adjusted reading),\n1y/3y/5y percentiles per tenor (`pct_by`), the one-year range, the ratio to the\nVIX (`ratio_vix`, `ratio_z`), term slope and curve state, and historical\nmean-reversion odds (`reversion`). `quality` / `thin` flag shallow chains.\nResponse: `data.symbols[]` has `symbol`, `asOf`, `sessionDate`, `stale` and `iv`.\nSymbols Tempest does not cover are listed in `data.missing`. **Cost:** 1 credit per call (up to 10 symbols).\n",
+        "parameters": [
+          {
+            "name": "symbols",
+            "in": "query",
+            "required": true,
+            "description": "Comma-separated Tempest symbols (up to 10). Tempest keys the S&P complex on the option root `SPXW` and Nasdaq-100 on `NDXP`; see `/v1/vol/symbols`.",
+            "schema": {
+              "type": "string",
+              "example": "NVDA,SPY"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VolSymbolsResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "402": {
+            "$ref": "#/components/responses/PaymentRequired"
+          },
+          "403": {
+            "$ref": "#/components/responses/VolForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/VolUnavailable"
+          },
+          "504": {
+            "$ref": "#/components/responses/GatewayTimeout"
+          }
+        }
+      }
+    },
+    "/v1/vol/term": {
+      "get": {
+        "operationId": "getVolTerm",
+        "x-credits": 1,
+        "summary": "Implied-volatility term structure per symbol",
+        "tags": [
+          "Tempest"
+        ],
+        "description": "The symbol's implied-volatility term structure: one row per listed expiry\nused (days to expiry and the implied vol there), for contango/backwardation\nreads. The headline slope and curve state are in `/v1/vol/iv`.\nOptional `term.earnings_context` describes scheduled earnings exposure in the\ncalendar-day 9-day and 30-day readings. `overlap_9d` and `overlap_30d` are\n`none` (before the known report), `partial` (spans the report), `full`\n(includes it), or null (unavailable). A report beyond nine days can already\noverlap the 9-day reading. This does not attribute premium or predict a flip.\n`date` and `timing` (`bmo` / `amc`) describe the recorded report, which can\nchange; `within_9d` is nullable. `status` is `scheduled`, `limited`,\n`calendar_unavailable`, `no_report`, `timing_unknown`, or `report_passed`.\nMissing fields and nulls must not be treated as `none`.\nResponse: `data.symbols[]` has `symbol`, `asOf`, `sessionDate`, `stale` and `term`.\nSymbols Tempest does not cover are listed in `data.missing`. **Cost:** 1 credit per call (up to 10 symbols).\n",
+        "parameters": [
+          {
+            "name": "symbols",
+            "in": "query",
+            "required": true,
+            "description": "Comma-separated Tempest symbols (up to 10). Tempest keys the S&P complex on the option root `SPXW` and Nasdaq-100 on `NDXP`; see `/v1/vol/symbols`.",
+            "schema": {
+              "type": "string",
+              "example": "NVDA,SPY"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VolSymbolsResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "402": {
+            "$ref": "#/components/responses/PaymentRequired"
+          },
+          "403": {
+            "$ref": "#/components/responses/VolForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/VolUnavailable"
+          },
+          "504": {
+            "$ref": "#/components/responses/GatewayTimeout"
+          }
+        }
+      }
+    },
+    "/v1/vol/cones": {
+      "get": {
+        "operationId": "getVolCones",
+        "x-credits": 1,
+        "summary": "Expected-move cones per symbol",
+        "tags": [
+          "Tempest"
+        ],
+        "description": "Tempest Cones: the move the options market prices for each horizon\n(`close`, `1d`, `week`, `opex`, `30d`), as 1-sigma percent and price bands\naround spot (from implied variance), plus the level set drawn on the\nchart. A horizon that does not exist at that moment (the `close`\nhorizon after hours) is null.\n**Two different questions.** `horizons[]` is priced from the current\nspot: how much further options price the move from *now* to each\nsettle. It moves with price, so it is not a budget to measure a move\nagainst. `levels[]` is priced at a past close and does not move\nintraday: read how far a move has gone against `hi1` / `lo1` (1-sigma)\nand `hi2` / `lo2` (2-sigma).\n\n**Levels** (`levels[]`): `day` (the prior close, to today's close),\n`week` (last week's final close, to this week's last close) and `month`\n(the last monthly options expiration's close, to the next monthly\nexpiration's close). Each has `name`, `label`, `anchor`, `priced_at`,\n`until`, `em1_pct` and `hi1`/`lo1`/`hi2`/`lo2`. A level is absent when\nits anchor close has no reading.\n\n**Per horizon** (`horizons[]`): `name`, `minutes` to the settle,\n`em1_pct` (1-sigma, % of spot), `em1` / `em2` (1- and 2-sigma in price),\n`realized_em_pct` (20-day realized vol over the same span). Optional,\nnull when not available, and absent on older readings:\n- `up1_pct`, `dn1_pct`, `up2_pct`, `dn2_pct`: the move to each side in %\n  of spot as the options' skew prices it (put skew makes the downside\n  wider). Null: read `em1_pct` both ways.\n- `tail_src`: how the 2-sigma sides were read: `quantile` (from the\n  fitted smile, within the quoted strikes) or `wing` (twice the 1-sigma\n  side, which understates a steep tail).\n- `skew_expiry`: the expiration whose smile set that shape.\n- `events[]`: scheduled events inside the horizon (after `asOf`, at or\n  before the settle), each `{kind, label, at, timing, jump_pct,\n  var_share}`: `kind` is `earnings`, `fomc`, `cpi` or `nfp`; `at` is the\n  ISO-8601 instant it is modelled at; earnings add `timing` (`bmo` /\n  `amc`), `jump_pct` (the report's own implied move, %) and `var_share`\n  (the share of the horizon's priced variance that is the report, 0-1).\n- `event_adjusted`: true when this horizon's move includes an earnings\n  report.\nResponse: `data.symbols[]` has `symbol`, `asOf`, `sessionDate`, `stale` and `cones`.\nSymbols Tempest does not cover are listed in `data.missing`. **Cost:** 1 credit per call (up to 10 symbols).\n",
+        "parameters": [
+          {
+            "name": "symbols",
+            "in": "query",
+            "required": true,
+            "description": "Comma-separated Tempest symbols (up to 10). Tempest keys the S&P complex on the option root `SPXW` and Nasdaq-100 on `NDXP`; see `/v1/vol/symbols`.",
+            "schema": {
+              "type": "string",
+              "example": "NVDA,SPY"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VolSymbolsResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "402": {
+            "$ref": "#/components/responses/PaymentRequired"
+          },
+          "403": {
+            "$ref": "#/components/responses/VolForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/VolUnavailable"
+          },
+          "504": {
+            "$ref": "#/components/responses/GatewayTimeout"
+          }
+        }
+      }
+    },
+    "/v1/vol/sigma": {
+      "get": {
+        "operationId": "getVolSigma",
+        "x-credits": 1,
+        "summary": "Move in units of the implied move (Sigma) per symbol",
+        "tags": [
+          "Tempest"
+        ],
+        "description": "Tempest Sigma: today's move in units of the one-day move priced at the prior\nclose (`running_sigma`), the move budget remaining, theoretical vs\nhistorical odds of 1- and 2-sigma days, and the last 60 sessions' sigma\nreadings (`days`).\nResponse: `data.symbols[]` has `symbol`, `asOf`, `sessionDate`, `stale` and `sigma`.\nSymbols Tempest does not cover are listed in `data.missing`. **Cost:** 1 credit per call (up to 10 symbols).\n",
+        "parameters": [
+          {
+            "name": "symbols",
+            "in": "query",
+            "required": true,
+            "description": "Comma-separated Tempest symbols (up to 10). Tempest keys the S&P complex on the option root `SPXW` and Nasdaq-100 on `NDXP`; see `/v1/vol/symbols`.",
+            "schema": {
+              "type": "string",
+              "example": "NVDA,SPY"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VolSymbolsResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "402": {
+            "$ref": "#/components/responses/PaymentRequired"
+          },
+          "403": {
+            "$ref": "#/components/responses/VolForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/VolUnavailable"
+          },
+          "504": {
+            "$ref": "#/components/responses/GatewayTimeout"
+          }
+        }
+      }
+    },
+    "/v1/vol/surface": {
+      "get": {
+        "operationId": "getVolSurface",
+        "x-credits": 3,
+        "summary": "Volatility surface and skew per symbol",
+        "tags": [
+          "Tempest"
+        ],
+        "description": "Tempest Surface: 30-day 25-delta risk reversal (`rr25_30`) and butterfly\n(`bf25_30`), ATM vol, skew percentile over the year and a per-symbol SKEW\nindex, plus a smile per expiry (`expiries[]`: strikes/deltas and implied vols).\nHeavier than the headline readings, so priced as analytics.\nResponse: `data.symbols[]` has `symbol`, `asOf`, `sessionDate`, `stale` and `surface`.\nSymbols Tempest does not cover are listed in `data.missing`. **Cost:** 3 credits per call (up to 10 symbols).\n",
+        "parameters": [
+          {
+            "name": "symbols",
+            "in": "query",
+            "required": true,
+            "description": "Comma-separated Tempest symbols (up to 10). Tempest keys the S&P complex on the option root `SPXW` and Nasdaq-100 on `NDXP`; see `/v1/vol/symbols`.",
+            "schema": {
+              "type": "string",
+              "example": "NVDA,SPY"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VolSymbolsResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "402": {
+            "$ref": "#/components/responses/PaymentRequired"
+          },
+          "403": {
+            "$ref": "#/components/responses/VolForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/VolUnavailable"
+          },
+          "504": {
+            "$ref": "#/components/responses/GatewayTimeout"
+          }
+        }
+      }
+    },
+    "/v1/vol/tilt": {
+      "get": {
+        "operationId": "getVolTilt",
+        "x-credits": 1,
+        "summary": "Call-vs-put premium imbalance (Tilt) per symbol",
+        "tags": [
+          "Tempest"
+        ],
+        "description": "Tempest Tilt: the one-strike-OTM call vs put premium imbalance at the\nheadline expiry as raw and forward-adjusted ratios, which side is cheap,\nits z-score and percentile over the year, each contract's strike, spread\nand distance from its running premium low (percent), and a row per nearby\nexpiry. Contract prices (mids, the premium low itself), open interest and\nvolume are not served. `liquid` is false on chains too thin to read.\nResponse: `data.symbols[]` has `symbol`, `asOf`, `sessionDate`, `stale` and `tilt`.\nSymbols Tempest does not cover are listed in `data.missing`. **Cost:** 1 credit per call (up to 10 symbols).\n",
+        "parameters": [
+          {
+            "name": "symbols",
+            "in": "query",
+            "required": true,
+            "description": "Comma-separated Tempest symbols (up to 10). Tempest keys the S&P complex on the option root `SPXW` and Nasdaq-100 on `NDXP`; see `/v1/vol/symbols`.",
+            "schema": {
+              "type": "string",
+              "example": "NVDA,SPY"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VolSymbolsResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "402": {
+            "$ref": "#/components/responses/PaymentRequired"
+          },
+          "403": {
+            "$ref": "#/components/responses/VolForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/VolUnavailable"
+          },
+          "504": {
+            "$ref": "#/components/responses/GatewayTimeout"
+          }
+        }
+      }
+    },
+    "/v1/vol/events": {
+      "get": {
+        "operationId": "getVolEvents",
+        "x-credits": 1,
+        "summary": "Event (earnings) implied move and VRP per symbol",
+        "tags": [
+          "Tempest"
+        ],
+        "description": "Optional `events.earnings_context` carries the same scheduled-exposure metadata\ndocumented on `/v1/vol/term`; it is not an earnings-premium estimate.\nTempest Catalyst: the next earnings date and timing, the move priced into it\n(`implied_move_pct`, from the implied-variance term structure across the event;\nnull when only a straddle estimate exists, `estimate: true`), the median and mean past earnings moves and how the\nimplied move compares, the report-by-report record, and the volatility risk\npremium (`vrp`: expected VRP and its percentile, 20-day realized vol,\ntrailing overpaid share). `events` is null for symbols without a scheduled event.\nResponse: `data.symbols[]` has `symbol`, `asOf`, `sessionDate`, `stale` and `events`.\nSymbols Tempest does not cover are listed in `data.missing`. **Cost:** 1 credit per call (up to 10 symbols).\n",
+        "parameters": [
+          {
+            "name": "symbols",
+            "in": "query",
+            "required": true,
+            "description": "Comma-separated Tempest symbols (up to 10). Tempest keys the S&P complex on the option root `SPXW` and Nasdaq-100 on `NDXP`; see `/v1/vol/symbols`.",
+            "schema": {
+              "type": "string",
+              "example": "NVDA,SPY"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VolSymbolsResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "402": {
+            "$ref": "#/components/responses/PaymentRequired"
+          },
+          "403": {
+            "$ref": "#/components/responses/VolForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/VolUnavailable"
+          },
+          "504": {
+            "$ref": "#/components/responses/GatewayTimeout"
+          }
+        }
+      }
+    },
+    "/v1/vol/snapshot": {
+      "get": {
+        "operationId": "getVolSnapshot",
+        "x-credits": 5,
+        "summary": "Every Tempest module per symbol",
+        "tags": [
+          "Tempest"
+        ],
+        "description": "Every per-symbol module in one call: `iv`, `term`, `cones`, `sigma`,\n`surface`, `tilt` and `events` (see each endpoint for the fields).\n**Cost:** 5 credits per call (up to 10 symbols).\n",
+        "parameters": [
+          {
+            "name": "symbols",
+            "in": "query",
+            "required": true,
+            "description": "Comma-separated Tempest symbols (up to 10). Tempest keys the S&P complex on the option root `SPXW` and Nasdaq-100 on `NDXP`; see `/v1/vol/symbols`.",
+            "schema": {
+              "type": "string",
+              "example": "NVDA,SPY"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VolSymbolsResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "402": {
+            "$ref": "#/components/responses/PaymentRequired"
+          },
+          "403": {
+            "$ref": "#/components/responses/VolForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/VolUnavailable"
+          },
+          "504": {
+            "$ref": "#/components/responses/GatewayTimeout"
+          }
+        }
+      }
+    },
+    "/v1/vol/market": {
+      "get": {
+        "operationId": "getVolMarket",
+        "x-credits": 1,
+        "summary": "The S&P volatility complex",
+        "tags": [
+          "Tempest"
+        ],
+        "description": "The market-wide volatility read: VIX1D, VIX9D, VIX, VIX3M, VIX6M, VVIX\nand SKEW (computed by Tempest from SPX and VIX option chains), their\nratios and one-year percentiles, the VIX-forward curve state and roll\n(`vx_curve_state`, `vx_roll_pct`, `vx_m1_vs_vix_pct`; the curve's price\npoints are not served), regime and crowded-calm flags,\nMag-7 vs QQQ dispersion, a Fear & Greed score with its components, and\n120 sessions of history for the main series. **Cost:** 1 credit.\n",
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VolObjectResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "402": {
+            "$ref": "#/components/responses/PaymentRequired"
+          },
+          "403": {
+            "$ref": "#/components/responses/VolForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/VolUnavailable"
+          },
+          "504": {
+            "$ref": "#/components/responses/GatewayTimeout"
+          }
+        }
+      }
+    },
+    "/v1/vol/screener": {
+      "get": {
+        "operationId": "getVolScreener",
+        "x-credits": 5,
+        "summary": "Screen the whole Tempest universe (Radar)",
+        "tags": [
+          "Tempest"
+        ],
+        "description": "Rows can include `earnings_overlap_9d` and `earnings_overlap_30d`, with\n`none`, `partial`, `full`, or null as documented on `/v1/vol/term`.\nThese are optional calendar-day exposure labels, not forecast signals.\nTempest Radar: one row per covered symbol with its headline readings\n(SVX term and percentiles, IV rank, ratio to VIX, term slope, skew,\ntilt, expected move, running sigma and odds, next event and VRP,\noptions volume, sector, `quality`). Thin chains are not ranked.\nFilter with `min_<field>` / `max_<field>` on any sortable field, and\n`curve`, `sector`, `quality` (exact match). Unknown parameters are a\n`400`. Rows missing the sort field sort last. **Cost:** 5 credits per\ncall (up to 500 rows).\n",
+        "parameters": [
+          {
+            "name": "sort",
+            "in": "query",
+            "description": "Field to sort by (default `svx30`): svx30, svx1d, svx30_pct_1y,\nsvx1d_pct_1y, svx9_pct_1y, svx3m_pct_1y, iv_rank, iv_pct, ratio_vix,\nterm_slope, rr25_30, skew_pct_1y, tilt_21, tilt_z, tilt_pct_1y,\nem_1d_pct, running_sigma, sigma_odds_pct, expected_vrp,\nevent_move_pct, days_to_event, opt_vol, spot, spot_vol_corr,\ncheap_from_low_pct, day_pace, day_reprice.\n`day_pace` is today's move against the priced one-day move for the\ntime elapsed, in sigma; `day_reprice` is the one-day range options\nprice now over what they priced at the prior close for the rest of\nthe day (above 1: implied vol bid). Both are null outside regular\nhours.\n",
+            "schema": {
+              "type": "string",
+              "default": "svx30"
+            }
+          },
+          {
+            "name": "order",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "asc",
+                "desc"
+              ],
+              "default": "desc"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 500,
+              "default": 50
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0
+            }
+          },
+          {
+            "name": "min_iv_rank",
+            "in": "query",
+            "description": "Example bound; every sortable field accepts `min_` and `max_`.",
+            "schema": {
+              "type": "number"
+            }
+          },
+          {
+            "name": "curve",
+            "in": "query",
+            "description": "Curve state, e.g. `contango` or `backwardation`.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VolScreenerResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "402": {
+            "$ref": "#/components/responses/PaymentRequired"
+          },
+          "403": {
+            "$ref": "#/components/responses/VolForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/VolUnavailable"
+          },
+          "504": {
+            "$ref": "#/components/responses/GatewayTimeout"
+          }
+        }
+      }
+    },
+    "/v1/vol/history": {
+      "get": {
+        "operationId": "getVolHistory",
+        "x-credits": 3,
+        "x-credits-per-symbol-day": 0.1,
+        "summary": "Daily Tempest history per symbol",
+        "tags": [
+          "Tempest"
+        ],
+        "description": "One row per stored session, at that session's close (15:59 ET): OHLC,\nSVX per tenor and weekend-adjusted, ATM vol, term slope,\n30-day risk reversal / butterfly / ATM vol / skew slope, tilt, chain\ndepth (`n_used`), `calc_v`. Columnar: `dates[]` plus one array per\nfield in `columns`. Every value was knowable at that session's close;\nfeatures from session D predict D+1 onward. History starts where\nTempest's backfill does (up to about two years); `/v1/vol/symbols`\nshows each symbol's last stored session.\n\n**Expected move at each close.** Every row also carries the\none-standard-deviation (1-sigma) move options priced at that session's\nclose for the span to the next session's close, so each past day's\npriced range can be replayed:\n\n| Column | Meaning |\n|---|---|\n| `em_1d_pct` | The 1-sigma move, in % of that session's close |\n| `em_1d` | The same move in $ (`close * em_1d_pct / 100`) |\n| `range_1d_low` | `close - em_1d` |\n| `range_1d_high` | `close + em_1d` |\n| `em_1d_event` | `1` when an earnings report falls inside the span and its priced move is counted in full, else `0` |\n\nIt is the same next-day move as the Tempest cone at that close: the\nnearest expiry's priced variance, split by trading time, so a Friday\nclose prices the weekend. The band is symmetric (no skew). The values\nare `null` where a session has no reading, and for `VIX`.\n\n**Cost:** per symbol-day: 1 credit per 10 symbol-weekdays in the\nrequested window, rounded up, minimum 1 (1 symbol x the default month\nis 3; 10 symbols x one year is 261). Computed from the request, so\nknown before the call; holidays are not discounted.\n",
+        "parameters": [
+          {
+            "name": "symbols",
+            "in": "query",
+            "required": true,
+            "description": "Comma-separated Tempest symbols (up to 10). Tempest keys the S&P complex on the option root `SPXW` and Nasdaq-100 on `NDXP`; see `/v1/vol/symbols`.",
+            "schema": {
+              "type": "string",
+              "example": "NVDA,SPY"
+            }
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "description": "First session (`YYYY-MM-DD`, ET). Default one month before `to`.",
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "description": "Last session, inclusive. Default today (ET). At most 800 calendar days after `from`.",
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
+          },
+          {
+            "name": "fields",
+            "in": "query",
+            "description": "Comma-separated columns to return (default all).",
+            "schema": {
+              "type": "string",
+              "example": "svx30,svx30_adj,close"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VolHistoryResponse"
+                },
+                "examples": {
+                  "expectedMove": {
+                    "summary": "SPY, two sessions, fields=close,svx1d,em_1d_pct,em_1d,range_1d_low,range_1d_high,em_1d_event",
+                    "value": {
+                      "data": {
+                        "from": "2026-09-30",
+                        "to": "2026-10-01",
+                        "symbols": [
+                          {
+                            "symbol": "SPY",
+                            "dates": [
+                              "2026-09-30",
+                              "2026-10-01"
+                            ],
+                            "columns": {
+                              "close": [
+                                762.34,
+                                764.1
+                              ],
+                              "svx1d": [
+                                15.2843,
+                                16.5274
+                              ],
+                              "em_1d_pct": [
+                                0.8003,
+                                0.8654
+                              ],
+                              "em_1d": [
+                                6.101,
+                                6.6124
+                              ],
+                              "range_1d_low": [
+                                756.239,
+                                757.4876
+                              ],
+                              "range_1d_high": [
+                                768.441,
+                                770.7124
+                              ],
+                              "em_1d_event": [
+                                0,
+                                0
+                              ]
+                            }
+                          }
+                        ],
+                        "missing": []
+                      },
+                      "meta": {
+                        "module": "history",
+                        "sessionDate": "2026-10-01",
+                        "marketState": "closed",
+                        "frozen": true,
+                        "cached": false
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "402": {
+            "$ref": "#/components/responses/PaymentRequired"
+          },
+          "403": {
+            "$ref": "#/components/responses/VolForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/VolUnavailable"
+          },
+          "504": {
+            "$ref": "#/components/responses/GatewayTimeout"
+          }
+        }
+      }
+    },
+    "/v1/vol/derived": {
+      "get": {
+        "operationId": "getVolDerived",
+        "x-credits": 3,
+        "summary": "Realized vs implied and the usual range (one year)",
+        "tags": [
+          "Tempest"
+        ],
+        "description": "The one-year derived series behind the app's charts, per symbol:\ndaily SVX30/SVX1D (plain and adjusted), close and risk reversal, the\npoint-in-time usual-range band (`p20`/`p50`/`p80`, each day's band\nfrom the 252 sessions before it), earnings-eve sessions, realized vs\nimplied (`ivrv`: 20-day realized vol, VRP series, current VRP and\npercentile), spot-vol correlation and beta, and setups. Updated once\nper session. **Cost:** 3 credits per call (up to 10 symbols).\n",
+        "parameters": [
+          {
+            "name": "symbols",
+            "in": "query",
+            "required": true,
+            "description": "Comma-separated Tempest symbols (up to 10). Tempest keys the S&P complex on the option root `SPXW` and Nasdaq-100 on `NDXP`; see `/v1/vol/symbols`.",
+            "schema": {
+              "type": "string",
+              "example": "NVDA,SPY"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VolDerivedResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "402": {
+            "$ref": "#/components/responses/PaymentRequired"
+          },
+          "403": {
+            "$ref": "#/components/responses/VolForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/VolUnavailable"
+          },
+          "504": {
+            "$ref": "#/components/responses/GatewayTimeout"
+          }
+        }
+      }
+    },
+    "/v1/vol/status": {
+      "get": {
+        "operationId": "getVolStatus",
+        "x-credits": 0,
+        "summary": "Tempest freshness, coverage and market state (free)",
+        "tags": [
+          "Tempest"
+        ],
+        "description": "When Tempest last computed (`asOf`), the session it belongs to\n(`sessionDate`), whether it is serving the frozen close state\n(`frozen`: outside regular hours nothing is recomputed, because\nafter-hours option quotes are too wide to read), the market state now,\nhow many symbols are published and coverage counts. Free.\n",
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VolObjectResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "402": {
+            "$ref": "#/components/responses/PaymentRequired"
+          },
+          "403": {
+            "$ref": "#/components/responses/VolForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/VolUnavailable"
+          },
+          "504": {
+            "$ref": "#/components/responses/GatewayTimeout"
+          }
+        }
+      }
+    },
+    "/v1/vol/symbols": {
+      "get": {
+        "operationId": "listVolSymbols",
+        "x-credits": 0,
+        "summary": "Symbols covered by Tempest (free)",
+        "tags": [
+          "Tempest"
+        ],
+        "description": "Every symbol Tempest publishes, with its latest `asOf` and the last\nstored daily session (`historyThrough`). Free.\n",
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VolObjectResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "402": {
+            "$ref": "#/components/responses/PaymentRequired"
+          },
+          "403": {
+            "$ref": "#/components/responses/VolForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/VolUnavailable"
+          },
+          "504": {
+            "$ref": "#/components/responses/GatewayTimeout"
+          }
+        }
+      }
+    },
+    "/v1/vol/stream": {
+      "get": {
+        "operationId": "streamVol",
+        "x-credits": 1,
+        "x-credits-per-minute": 1,
+        "summary": "Live Tempest updates (Server-Sent Events)",
+        "tags": [
+          "Tempest"
+        ],
+        "description": "Pushes a symbol's full module state each time Tempest recomputes it:\nabout every minute for the most active names and every ~10 minutes for\nthe rest during regular hours. Quote readings stay frozen after close;\ncalendar or availability updates can still push a full state with the\nsame quote timestamp and event ID. Events: `connected`, `vol` (id = asOf in epoch ms; data\nis a `data.symbols[]` element of `/v1/vol/snapshot`), `market` (with\n`market=true`), `credits`, `closed`, `reconnect` (after an hour).\nResume with `Last-Event-ID` (or `lastEventId`): the initial burst skips\nsymbols whose asOf is older than it; a frame at exactly that id may\nrepeat. Up to 10 symbols per stream and 5 streams per account. Each\nserver also holds a bounded number of open streams across all\ncustomers; at capacity → `503` `stream_capacity` with `Retry-After: 5`\n(retry; you may land on another server). Access is re-checked every\nminute: a stream closes with `closed` `{\"reason\":\"access_withdrawn\"}`\nonce the account is no longer enabled.\n**Cost:** 1 credit to connect and 1 per minute open.\n",
+        "parameters": [
+          {
+            "name": "symbols",
+            "in": "query",
+            "required": true,
+            "description": "Comma-separated Tempest symbols (up to 10). Tempest keys the S&P complex on the option root `SPXW` and Nasdaq-100 on `NDXP`; see `/v1/vol/symbols`.",
+            "schema": {
+              "type": "string",
+              "example": "NVDA,SPY"
+            }
+          },
+          {
+            "name": "modules",
+            "in": "query",
+            "description": "Comma-separated subset of iv, term, cones, sigma, surface, tilt, events (default all).",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "market",
+            "in": "query",
+            "description": "Also push the market volatility complex.",
+            "schema": {
+              "type": "boolean",
+              "default": false
+            }
+          },
+          {
+            "name": "lastEventId",
+            "in": "query",
+            "description": "Resume point when the client cannot send `Last-Event-ID`.",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "An SSE stream (`text/event-stream`).",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "402": {
+            "$ref": "#/components/responses/PaymentRequired"
+          },
+          "403": {
+            "$ref": "#/components/responses/VolForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/VolUnavailable"
+          }
+        }
+      }
+    },
+    "/v1/openapi.json": {
+      "get": {
+        "summary": "This OpenAPI specification, as JSON.",
+        "operationId": "getOpenAPI",
+        "x-credits": 0,
+        "tags": [
+          "Meta"
+        ],
+        "description": "No key required. Free.",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "OpenAPI 3.1 document for the Skylit Public API.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerApiKey": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "Skylit API key in the `Authorization` header\n(`Authorization: Bearer <key>`). The bare key without `Bearer ` is\nalso accepted; `X-API-Key` is not.\n"
+      }
+    },
+    "parameters": {
+      "Symbols": {
+        "name": "symbols",
+        "in": "query",
+        "required": true,
+        "description": "One ticker, or a comma-separated list for a single cross-asset call\n(e.g. `SPY` or `SPXW,SPY,QQQ`). Each is returned as an element of\n`data.symbols`. At most 10 distinct symbols (more → `400`\n`invalid_parameter`). Unknown symbols in a list are omitted; if none\nis available → `404` `symbol_not_found`.\n\nIndex options are served per option root, and the roots hold\ndifferent contracts. `SPXW` is the PM-settled S&P 500 options (every\ndaily and weekly expiration, 0DTE included), the board the Skylit\napp's Trinity view uses. `SPX` is only the AM-settled monthlies, so\nit has no 0DTE or weekly gamma and reads very differently from\n`SPXW`. The same split applies to `NDXP` / `NDX` and `RUTW` / `RUT`.\nTo match the app's Trinity or read 0DTE, request `SPXW,SPY,QQQ`.\n",
+        "schema": {
+          "type": "string",
+          "example": "SPXW,SPY,QQQ"
+        }
+      },
+      "Metric": {
+        "name": "metric",
+        "in": "query",
+        "required": false,
+        "description": "Which Greek exposure to return per strike.",
+        "schema": {
+          "type": "string",
+          "enum": [
+            "gamma",
+            "vanna"
+          ],
+          "default": "gamma"
+        }
+      },
+      "MaxStrikes": {
+        "name": "maxStrikes",
+        "in": "query",
+        "required": false,
+        "description": "Maximum number of strikes around spot to return: an integer from 1 to\n1000, or `all` for every strike the snapshot lists (SPXW lists about\n730). Values above 1000 return `400 invalid_parameter`; they are never\nsilently reduced. Values below 1 are treated as 1. The single-symbol\nstream (`/v1/stream?symbol=`) accepts at most 400 and no `all`.\n",
+        "schema": {
+          "oneOf": [
+            {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1000
+            },
+            {
+              "type": "string",
+              "enum": [
+                "all"
+              ]
+            }
+          ],
+          "default": 92
+        }
+      },
+      "IncludeEmpty": {
+        "name": "includeEmpty",
+        "in": "query",
+        "required": false,
+        "description": "By default, an interior strike whose every returned cell is below 50 in\nabsolute value (listed but effectively untraded) is left out, judged on\nthe selected metric alone. So gamma and vanna for the same instant can\nreturn different strike lists. The outermost strikes are never\nremoved. `true` keeps every strike in the window, so the list is the\nsnapshot's own contiguous ladder and is identical for gamma and vanna.\nNot supported on the single-symbol stream (`symbol=`).\n",
+        "schema": {
+          "type": "boolean",
+          "default": false
+        }
+      },
+      "Expirations": {
+        "name": "expirations",
+        "in": "query",
+        "required": false,
+        "description": "Net each strike over exactly these expirations (`YYYY-MM-DD`,\ncomma-separated) — one for a single-expiration heatmap (`2026-05-22`)\nor several for a custom set (`2026-05-22,2026-06-19`). Supersedes\n`maxExpirations`, and reaches any expiration the snapshot has, not just\nthe nearest ones. Requested dates the symbol does not have are ignored;\nthe `expirations` array in the response lists what was actually used.\nIf none of them match, the response is `404` with\n`code: expiration_not_found` and the available dates in the message.\nOn `/v1/heatmap`, expirations that have already expired are not\navailable (they are trimmed from the live snapshot) — replay them with\n`/v1/historical` instead.\n",
+        "schema": {
+          "type": "string",
+          "example": "2026-05-22"
+        }
+      },
+      "MaxExpirations": {
+        "name": "maxExpirations",
+        "in": "query",
+        "required": false,
+        "description": "How many of the nearest expirations to net into each strike's `value`:\nan integer from 1 to 60, or `all`. Values above 60 return\n`400 invalid_parameter`. Ignored when `expirations` is set.\n",
+        "schema": {
+          "oneOf": [
+            {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 60
+            },
+            {
+              "type": "string",
+              "enum": [
+                "all"
+              ]
+            }
+          ],
+          "default": 5
+        }
+      },
+      "Layout": {
+        "name": "layout",
+        "in": "query",
+        "required": false,
+        "description": "`net` (default) returns one net value per strike. `matrix` also returns\n`matrix`, the per-expiration grid those values are summed from.\n",
+        "schema": {
+          "type": "string",
+          "enum": [
+            "net",
+            "matrix"
+          ],
+          "default": "net"
+        }
+      }
+    },
+    "schemas": {
+      "LevelsSummary": {
+        "type": "object",
+        "description": "Digest of the returned strikes for the selected `metric`. Covers only\nthe strikes between `lowStrike` and `highStrike` (set by `maxStrikes`,\n`maxExpirations` and `expirations`), never the whole chain.\n",
+        "required": [
+          "netExposure",
+          "positiveWall",
+          "negativeWall",
+          "flip",
+          "lowStrike",
+          "highStrike"
+        ],
+        "properties": {
+          "netExposure": {
+            "type": "number",
+            "description": "Sum of `value` over the returned strikes."
+          },
+          "positiveWall": {
+            "description": "The strike with the largest positive value, or null when none is positive.",
+            "nullable": true,
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Level"
+              },
+              {
+                "enum": [
+                  null
+                ]
+              }
+            ]
+          },
+          "negativeWall": {
+            "description": "The strike with the most negative value, or null when none is negative.",
+            "nullable": true,
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Level"
+              },
+              {
+                "enum": [
+                  null
+                ]
+              }
+            ]
+          },
+          "flip": {
+            "description": "Where the running sum of `value`, from the lowest returned strike\nupward, changes sign (linear interpolation between the bracketing\nstrikes; the crossing nearest spot when there are several). Null\nwhen the running sum never changes sign within the window.\n",
+            "nullable": true,
+            "anyOf": [
+              {
+                "type": "object",
+                "required": [
+                  "level",
+                  "distancePct"
+                ],
+                "properties": {
+                  "level": {
+                    "type": "number"
+                  },
+                  "distancePct": {
+                    "type": "number",
+                    "description": "Percent distance from spot (negative = below)."
+                  }
+                }
+              },
+              {
+                "enum": [
+                  null
+                ]
+              }
+            ]
+          },
+          "lowStrike": {
+            "type": "number",
+            "description": "Lowest returned strike."
+          },
+          "highStrike": {
+            "type": "number",
+            "description": "Highest returned strike."
+          }
+        }
+      },
+      "Level": {
+        "type": "object",
+        "required": [
+          "strike",
+          "value",
+          "nodeType",
+          "distancePct"
+        ],
+        "properties": {
+          "strike": {
+            "type": "number"
+          },
+          "value": {
+            "type": "number",
+            "description": "Net exposure at this strike for the selected metric."
+          },
+          "nodeType": {
+            "type": "string",
+            "enum": [
+              "king",
+              "gatekeeper",
+              "pika",
+              "barney",
+              "significant"
+            ]
+          },
+          "distancePct": {
+            "type": "number",
+            "description": "Percent distance from spot (negative = below)."
+          }
+        }
+      },
+      "SymbolHeatmap": {
+        "type": "object",
+        "required": [
+          "symbol",
+          "asOf",
+          "spot",
+          "previousClose",
+          "priceChange",
+          "priceChangePercent",
+          "expirations",
+          "strikes"
+        ],
+        "properties": {
+          "symbol": {
+            "type": "string",
+            "description": "Canonical ticker for the returned data."
+          },
+          "asOf": {
+            "type": "string",
+            "format": "date-time",
+            "description": "RFC3339 timestamp of the snapshot actually returned (nearest to the requested instant)."
+          },
+          "spot": {
+            "type": "number",
+            "description": "On `/v1/heatmap`, the latest underlying price at the time of the\nrequest, which can be newer than the board. On `/v1/historical`\nand in stream frames, the spot the board was computed at. The\nboard's own spot is `previousClose + priceChange`.\n"
+          },
+          "previousClose": {
+            "type": "number"
+          },
+          "priceChange": {
+            "type": "number",
+            "description": "The board's spot minus previous close (the board's spot, not `spot`, on `/v1/heatmap`)."
+          },
+          "priceChangePercent": {
+            "type": "number"
+          },
+          "expirations": {
+            "type": "array",
+            "description": "Expiration dates (YYYY-MM-DD) contributing to each strike's net value.",
+            "items": {
+              "type": "string",
+              "format": "date"
+            }
+          },
+          "strikes": {
+            "type": "array",
+            "description": "Per-strike nodes, ordered by strike ascending.",
+            "items": {
+              "$ref": "#/components/schemas/StrikeNode"
+            }
+          },
+          "matrix": {
+            "type": "array",
+            "description": "Present only with `layout=matrix`. One row per entry in `strikes`,\none column per entry in `expirations`: `matrix[i][j]` is the\nexposure at strike i for expiration j.\n",
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "number"
+              }
+            }
+          }
+        }
+      },
+      "StrikeNode": {
+        "type": "object",
+        "required": [
+          "strike",
+          "value",
+          "nodeType"
+        ],
+        "properties": {
+          "strike": {
+            "type": "number",
+            "description": "Strike price."
+          },
+          "value": {
+            "type": "number",
+            "description": "Net exposure for the selected `metric` at this strike (summed across the returned expirations)."
+          },
+          "nodeType": {
+            "type": "string",
+            "description": "Skylit's node classification for this strike.",
+            "enum": [
+              "king",
+              "gatekeeper",
+              "pika",
+              "barney",
+              "significant",
+              "normal"
+            ]
+          },
+          "velocityPct": {
+            "type": "number",
+            "description": "Live percent change of this strike's value over the velocity window.\nPresent on `/v1/heatmap` only; omitted on `/v1/historical`.\n"
+          }
+        }
+      },
+      "Meta": {
+        "type": "object",
+        "required": [
+          "metric",
+          "resolution",
+          "mode",
+          "cached"
+        ],
+        "properties": {
+          "metric": {
+            "type": "string",
+            "enum": [
+              "gamma",
+              "vanna"
+            ]
+          },
+          "resolution": {
+            "type": "string",
+            "enum": [
+              "1s",
+              "1m"
+            ],
+            "description": "Time resolution of the data served: \"1s\" when every symbol came\nfrom 1-second data, \"1m\" when any came from minute-resolution\nhistory.\n",
+            "example": "1s"
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "live",
+              "historical"
+            ]
+          },
+          "cached": {
+            "type": "boolean",
+            "description": "True if served from the in-process cache."
+          },
+          "delayed": {
+            "type": "boolean",
+            "description": "True when your plan's data is delayed and this latest-data request\nwas served as of `delayMinutes` ago (mode is then `historical`).\nAbsent on real-time plans.\n"
+          },
+          "delayMinutes": {
+            "type": "integer",
+            "description": "The delay applied when `delayed` is true."
+          },
+          "attribution": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Attribution"
+              }
+            ],
+            "description": "How to credit this data. Most routes send the short form\n`{text, url, terms}` (\"Data: Skylit\"). Routes whose data class the\nlicensing design (TERMS.md §5) tags explicitly — today,\n`/v1/options/*` — send the full licensing shape instead. Can be\nabsent; do not infer sharing rules from the short form or from\nits absence.\n"
+          }
+        }
+      },
+      "Attribution": {
+        "type": "object",
+        "required": [
+          "text",
+          "url"
+        ],
+        "description": "Whether and how this response's data may be published. See\n`/legal/api#sharing`. An Agent or MCP client should never publish\ndata where `shareable` is false, regardless of `shareClass`.\n`required`, `license`, `shareable` and `shareClass` are always sent\non `/v1/options/*` and absent from the short form.\n",
+        "properties": {
+          "text": {
+            "type": "string",
+            "example": "Powered by Skylit"
+          },
+          "url": {
+            "type": "string",
+            "format": "uri"
+          },
+          "required": {
+            "type": "boolean"
+          },
+          "license": {
+            "type": "string",
+            "enum": [
+              "personal",
+              "commercial",
+              "connected_app"
+            ]
+          },
+          "shareable": {
+            "type": "boolean"
+          },
+          "shareClass": {
+            "type": "string",
+            "enum": [
+              "derived",
+              "derived_levels_only",
+              "raw"
+            ],
+            "description": "\"raw\" (e.g. option quotes, greeks) must never be auto-published."
+          },
+          "terms": {
+            "type": "string",
+            "format": "uri"
+          }
+        }
+      },
+      "SymbolRange": {
+        "type": "object",
+        "required": [
+          "symbol",
+          "axes",
+          "frames"
+        ],
+        "properties": {
+          "symbol": {
+            "type": "string",
+            "description": "Canonical ticker for the returned data."
+          },
+          "axes": {
+            "type": "array",
+            "description": "Strike/expiration axes referenced by `frames[].axis`.",
+            "items": {
+              "type": "object",
+              "required": [
+                "id",
+                "strikes",
+                "expirations"
+              ],
+              "properties": {
+                "id": {
+                  "type": "integer"
+                },
+                "strikes": {
+                  "type": "array",
+                  "description": "Visible strikes, ascending.",
+                  "items": {
+                    "type": "number"
+                  }
+                },
+                "expirations": {
+                  "type": "array",
+                  "description": "Expirations (YYYY-MM-DD) netted into each value.",
+                  "items": {
+                    "type": "string",
+                    "format": "date"
+                  }
+                }
+              }
+            }
+          },
+          "frames": {
+            "type": "array",
+            "description": "Snapshots in the window, oldest first.",
+            "items": {
+              "type": "object",
+              "required": [
+                "asOf",
+                "axis",
+                "spot",
+                "previousClose",
+                "values"
+              ],
+              "properties": {
+                "asOf": {
+                  "type": "string",
+                  "format": "date-time",
+                  "description": "Snapshot instant (millisecond precision)."
+                },
+                "axis": {
+                  "type": "integer",
+                  "description": "Id of the axis in `axes` these values are aligned to."
+                },
+                "spot": {
+                  "type": "number"
+                },
+                "previousClose": {
+                  "type": "number"
+                },
+                "values": {
+                  "type": "array",
+                  "description": "Net exposure per strike, aligned with the axis's `strikes`.",
+                  "items": {
+                    "type": "number"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "DailyStat": {
+        "type": "object",
+        "required": [
+          "date",
+          "frames",
+          "complete",
+          "firstAt",
+          "lastAt",
+          "spotOpen",
+          "spotHigh",
+          "spotLow",
+          "spotClose",
+          "minValue",
+          "maxValue",
+          "peakAbsMean",
+          "peakAbsMax"
+        ],
+        "properties": {
+          "date": {
+            "type": "string",
+            "format": "date",
+            "description": "The trading session's date (ET)."
+          },
+          "frames": {
+            "type": "integer",
+            "description": "1-minute frames inside the session the values are computed from."
+          },
+          "complete": {
+            "type": "boolean",
+            "description": "False for a session still in progress (today) or ended less than 30 minutes ago."
+          },
+          "firstAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "lastAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "spotOpen": {
+            "type": "number"
+          },
+          "spotHigh": {
+            "type": "number"
+          },
+          "spotLow": {
+            "type": "number"
+          },
+          "spotClose": {
+            "type": "number"
+          },
+          "minValue": {
+            "type": "number",
+            "description": "Smallest single cell (strike x expiration) in any frame."
+          },
+          "maxValue": {
+            "type": "number",
+            "description": "Largest single cell in any frame."
+          },
+          "peakAbsMean": {
+            "type": "number",
+            "description": "Mean over frames of max(|smallest cell|, |largest cell|)."
+          },
+          "peakAbsMax": {
+            "type": "number",
+            "description": "Maximum over frames of max(|smallest cell|, |largest cell|)."
+          }
+        }
+      },
+      "VolMeta": {
+        "type": "object",
+        "required": [
+          "module",
+          "marketState",
+          "frozen",
+          "cached"
+        ],
+        "properties": {
+          "module": {
+            "type": "string",
+            "description": "Which endpoint answered (iv, cones, screener, ...)."
+          },
+          "asOf": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When Tempest computed the newest value in this response."
+          },
+          "sessionDate": {
+            "type": "string",
+            "format": "date",
+            "description": "The trading session (ET) that asOf belongs to. The close state is stamped 15:59 ET and always belongs to its own session."
+          },
+          "marketState": {
+            "type": "string",
+            "enum": [
+              "pre_open",
+              "open",
+              "post_close",
+              "closed"
+            ],
+            "description": "US equity session at request time."
+          },
+          "frozen": {
+            "type": "boolean",
+            "description": "True while Tempest serves the previous close (outside regular hours)."
+          },
+          "publishedAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When Tempest last published to the API."
+          },
+          "cached": {
+            "type": "boolean"
+          },
+          "attribution": {
+            "$ref": "#/components/schemas/Attribution"
+          }
+        }
+      },
+      "VolMissing": {
+        "type": "object",
+        "required": [
+          "symbol",
+          "reason"
+        ],
+        "properties": {
+          "symbol": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string",
+            "enum": [
+              "not_covered",
+              "no_history"
+            ]
+          }
+        }
+      },
+      "VolSymbol": {
+        "type": "object",
+        "required": [
+          "symbol",
+          "asOf",
+          "sessionDate",
+          "stale"
+        ],
+        "description": "One symbol. Besides these fields it carries the requested module(s)\nas objects keyed `iv`, `term`, `cones`, `sigma`, `surface`, `tilt`,\n`events` (null when Tempest has none for the symbol). Module field\nnames follow Tempest's own (snake_case). Quote-derived prices (fields\nnamed `mid`, `*_mid`, `straddle*`, `forward`, `price`, and a contract's\n`low`, `oi`, `vol`) are never present.\n",
+        "properties": {
+          "symbol": {
+            "type": "string"
+          },
+          "asOf": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "sessionDate": {
+            "type": "string",
+            "format": "date"
+          },
+          "stale": {
+            "type": "boolean",
+            "description": "In session, true when the reading is more than 20 minutes old."
+          }
+        },
+        "additionalProperties": true
+      },
+      "VolSymbolsResponse": {
+        "type": "object",
+        "required": [
+          "data",
+          "meta"
+        ],
+        "properties": {
+          "data": {
+            "type": "object",
+            "required": [
+              "symbols",
+              "missing"
+            ],
+            "properties": {
+              "symbols": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/VolSymbol"
+                }
+              },
+              "missing": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/VolMissing"
+                }
+              }
+            }
+          },
+          "meta": {
+            "$ref": "#/components/schemas/VolMeta"
+          }
+        }
+      },
+      "VolObjectResponse": {
+        "type": "object",
+        "required": [
+          "data",
+          "meta"
+        ],
+        "properties": {
+          "data": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "meta": {
+            "$ref": "#/components/schemas/VolMeta"
+          }
+        }
+      },
+      "VolScreenerResponse": {
+        "type": "object",
+        "required": [
+          "data",
+          "meta"
+        ],
+        "properties": {
+          "data": {
+            "type": "object",
+            "required": [
+              "rows",
+              "total",
+              "offset",
+              "limit",
+              "sort"
+            ],
+            "properties": {
+              "rows": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              },
+              "total": {
+                "type": "integer",
+                "description": "Rows matching the filters, before offset/limit."
+              },
+              "offset": {
+                "type": "integer"
+              },
+              "limit": {
+                "type": "integer"
+              },
+              "sort": {
+                "type": "string"
+              }
+            }
+          },
+          "meta": {
+            "$ref": "#/components/schemas/VolMeta"
+          }
+        }
+      },
+      "VolHistoryResponse": {
+        "type": "object",
+        "required": [
+          "data",
+          "meta"
+        ],
+        "properties": {
+          "data": {
+            "type": "object",
+            "required": [
+              "symbols",
+              "missing",
+              "from",
+              "to"
+            ],
+            "properties": {
+              "from": {
+                "type": "string",
+                "format": "date"
+              },
+              "to": {
+                "type": "string",
+                "format": "date"
+              },
+              "symbols": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "symbol",
+                    "dates",
+                    "columns"
+                  ],
+                  "properties": {
+                    "symbol": {
+                      "type": "string"
+                    },
+                    "dates": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "format": "date"
+                      }
+                    },
+                    "columns": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "array",
+                        "items": {
+                          "type": "number",
+                          "nullable": true
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "missing": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/VolMissing"
+                }
+              }
+            }
+          },
+          "meta": {
+            "$ref": "#/components/schemas/VolMeta"
+          }
+        }
+      },
+      "VolDerivedResponse": {
+        "type": "object",
+        "required": [
+          "data",
+          "meta"
+        ],
+        "properties": {
+          "data": {
+            "type": "object",
+            "required": [
+              "symbols",
+              "missing"
+            ],
+            "properties": {
+              "symbols": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "symbol",
+                    "derived"
+                  ],
+                  "properties": {
+                    "symbol": {
+                      "type": "string"
+                    },
+                    "derived": {
+                      "type": "object",
+                      "additionalProperties": true
+                    }
+                  }
+                }
+              },
+              "missing": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/VolMissing"
+                }
+              }
+            }
+          },
+          "meta": {
+            "$ref": "#/components/schemas/VolMeta"
+          }
+        }
+      },
+      "Error": {
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "type": "object",
+            "required": [
+              "code",
+              "message"
+            ],
+            "properties": {
+              "code": {
+                "type": "string",
+                "description": "Stable, machine-readable error code.",
+                "example": "no_data"
+              },
+              "message": {
+                "type": "string",
+                "description": "Human-readable explanation."
+              }
+            }
+          }
+        }
+      },
+      "StreamSnapshot": {
+        "description": "/v1/stream v2 `snapshot` event payload — a SymbolHeatmap (without per-strike velocityPct) plus `lagged`.",
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/SymbolHeatmap"
+          },
+          {
+            "type": "object",
+            "required": [
+              "lagged"
+            ],
+            "properties": {
+              "lagged": {
+                "type": "boolean",
+                "description": "True when newer boards replaced ones this client had not yet received (slow reader); this is the newest."
+              }
+            }
+          }
+        ]
+      },
+      "StreamVelocity": {
+        "description": "/v1/stream v2 `velocity` event payload.",
+        "type": "object",
+        "properties": {
+          "symbol": {
+            "type": "string"
+          },
+          "metric": {
+            "type": "string",
+            "enum": [
+              "gamma",
+              "vanna"
+            ]
+          },
+          "asOf": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "nodes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NodeVelocity"
+            }
+          },
+          "topRisers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NodeVelocity"
+            }
+          },
+          "topFallers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NodeVelocity"
+            }
+          }
+        }
+      },
+      "NodeVelocity": {
+        "type": "object",
+        "properties": {
+          "strike": {
+            "type": "number"
+          },
+          "expiration": {
+            "type": "string"
+          },
+          "currentValue": {
+            "type": "number"
+          },
+          "delta1Min": {
+            "type": "number"
+          },
+          "delta5Min": {
+            "type": "number"
+          },
+          "delta10Min": {
+            "type": "number"
+          },
+          "delta15Min": {
+            "type": "number"
+          },
+          "delta1Hour": {
+            "type": "number"
+          },
+          "delta4Hour": {
+            "type": "number"
+          },
+          "delta1Day": {
+            "type": "number"
+          },
+          "percent1Min": {
+            "type": "number"
+          },
+          "percent5Min": {
+            "type": "number"
+          },
+          "percent10Min": {
+            "type": "number"
+          },
+          "percent15Min": {
+            "type": "number"
+          },
+          "percent1Hour": {
+            "type": "number"
+          },
+          "percent4Hour": {
+            "type": "number"
+          },
+          "percent1Day": {
+            "type": "number"
+          },
+          "velocity": {
+            "type": "number",
+            "description": "Average change per minute over 5 minutes."
+          },
+          "trend": {
+            "type": "string",
+            "enum": [
+              "increasing",
+              "decreasing",
+              "stable"
+            ]
+          },
+          "history": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            }
+          }
+        }
+      },
+      "StreamResumed": {
+        "description": "/v1/stream v2 `resumed` event payload.",
+        "type": "object",
+        "properties": {
+          "lastEventId": {
+            "type": "string"
+          },
+          "gapCovered": {
+            "type": "boolean",
+            "description": "True only if no symbol had a board published during the gap."
+          },
+          "stateRestored": {
+            "type": "boolean",
+            "description": "True when every symbol received a current snapshot."
+          },
+          "symbols": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "symbol": {
+                  "type": "string"
+                },
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "unchanged",
+                    "advanced",
+                    "unknown",
+                    "unavailable"
+                  ]
+                },
+                "lastAsOf": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "currentAsOf": {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "responses": {
+      "PaymentRequired": {
+        "description": "Out of credits (`insufficient_credits`).",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "BadRequest": {
+        "description": "Request validation failed.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "Unauthorized": {
+        "description": "Missing API key (`unauthorized`), sent by the gateway.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "Forbidden": {
+        "description": "Unknown, revoked or expired key (`forbidden`, from the gateway), or an\nadmin-suspended account (`account_suspended`).\n",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "NotFound": {
+        "description": "Unknown symbol, no data available, or none of the requested\n`expirations` exist for the symbol (`code: expiration_not_found`).\n",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "RateLimited": {
+        "description": "Per-minute rate limit exceeded.",
+        "headers": {
+          "Retry-After": {
+            "schema": {
+              "type": "integer"
+            }
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "Unavailable": {
+        "description": "Heatmap data is temporarily unavailable.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "VolForbidden": {
+        "description": "As `Forbidden`, or `not_entitled`: Tempest data is not enabled for this\naccount (it is in preview). Refunded.\n",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "VolUnavailable": {
+        "description": "Tempest data is loading (`warming_up`, with `Retry-After`) or not configured (`unavailable`). Refunded.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "GatewayTimeout": {
+        "description": "The request did not finish in time (`gateway_timeout`). Refunded;\nretry, or narrow the request.\n",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      }
+    }
+  },
+  "security": [
+    {
+      "bearerApiKey": []
+    }
+  ],
+  "tags": [
+    {
+      "name": "Heatmap"
+    },
+    {
+      "name": "Tempest",
+      "description": "Tempest, Skylit's volatility suite: implied vol per symbol (SVX), term\nstructure, expected-move cones, sigma move tracking, surface and skew,\ncall/put premium tilt, event vol and VRP, the S&P volatility complex, a\nuniverse screener and daily history. Precomputed by Tempest; every\nresponse states when (`asOf`) and for which session (`sessionDate`).\nIn preview: `403 not_entitled` until enabled for your account.\n\nThese endpoints serve derived analytics only: implied vols, skews,\nratios, z-scores, ranks and percent moves. Option prices and price\nlevels read from option quotes (contract mids, straddle prices or moves,\nforwards, the VIX-forward curve) are not part of any /v1/vol response.\n"
+    },
+    {
+      "name": "Meta"
+    }
+  ]
+}
