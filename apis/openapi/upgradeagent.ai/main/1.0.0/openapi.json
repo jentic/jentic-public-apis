@@ -1,0 +1,5307 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Upgrade Agent REST API",
+    "version": "1.0.0",
+    "summary": "Quote → execute → confirm airline, cruise, and rail upgrades from any AI agent.",
+    "description": "Plain REST access to the same functions the Upgrade Agent MCP server exposes, for agents that don't speak MCP.\n\n**Flow.** (1) **Quote** — `POST /api/v1/quotes` runs a live, booking-specific eligibility check and returns the upgrade options with the operator's real bid ranges and fixed prices; `POST /api/v1/quotes/secure` does the same without the agent ever handling booking details (the traveler enters them on a secure page). (2) **Execute** — `POST /api/v1/offers` places a bid, buys an instant upgrade, or redeems points against the quote; `PATCH`/`DELETE /api/v1/offers/{offerReference}` change or withdraw it. (3) **Confirm** — `GET /api/v1/offers?quoteId=` reads back each offer's live status (submitted / pending / accepted / declined / cancelled).\n\n**Payment.** A bid is a payment authorization. Card capture never passes through this API: every staged offer returns a `paymentUrl` on the operator's hosted page (pay-by-link), where the traveler completes payment.\n\n**PII.** The booking reference and last name sent to `POST /api/v1/quotes` are used only for the upstream lookup — never stored, logged, or echoed. Quotes and offers carry only non-PII data (route, cabin, ranges, references).\n\n**Change cap.** Each booking allows at most 3 offer changes through the API (placing is free; each modify counts). Quotes report `changesRemaining`; past the cap, modifications return 409 with code `REASON_CHANGE_LIMIT`.\n\n**Ownership.** A quote is bound to the credential that created it; the same token works on this API and on the MCP server, so a quote started on one can be executed and confirmed on the other. Another caller's quote reads as 404.\n\n**Partner scope.** A partner-scoped token (white-label) is limited to its own carrier: `carrier` may be omitted and is filled in; any other carrier returns 403 with code `PARTNER_SCOPE`. `GET /api/v1/me` reports the scope.\n\n**Outcomes (webhooks + polling).** Bids settle 24–72h before departure. Subscribe with `POST /api/v1/webhooks` to receive `offer.status_changed`, `offer.accepted`, `offer.declined`, `offer.cancelled` and `checkout.paid` (see the top-level `webhooks` section for the delivery shape), or poll `GET /api/v1/offers/events?since=<cursor>`. Deliveries are signed Stripe-style: `X-UpgradeAgent-Signature: t=<unix seconds>,v1=<hex HMAC-SHA256(secret, \"<t>.<raw body>\")>` — recompute over the raw bytes, compare in constant time, and reject |now − t| > 300s. `X-UpgradeAgent-Idempotency-Key` is stable per (quote, offer, status): dedupe on it. Payloads are non-PII (references, status, amount, cabin, route — never a booking reference or last name).\n\n**Errors** are RFC 9457 problem documents (`application/problem+json`) with a machine-readable `code`.",
+    "contact": {
+      "name": "Plusgrade — Upgrade Agent",
+      "email": "ai@plusgrade.com",
+      "url": "https://www.upgradeagent.ai/developers"
+    },
+    "termsOfService": "https://www.upgradeagent.ai/privacy",
+    "x-jentic-source-url": "https://www.upgradeagent.ai/openapi.json"
+  },
+  "servers": [
+    {
+      "url": "https://www.upgradeagent.ai"
+    }
+  ],
+  "paths": {
+    "/api/v1/me": {
+      "get": {
+        "operationId": "whoAmI",
+        "tags": [
+          "Partners"
+        ],
+        "summary": "What this token can do",
+        "description": "The caller's kind (platform credential vs OAuth client), client id, and partner scope. A partner-scoped token is limited to its own carrier on every quote/offer/pricing/partner call (`carrier` may be omitted and is filled in); the response names that partner and its white-label MCP server.",
+        "responses": {
+          "200": {
+            "description": "The token's scope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TokenScope"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          }
+        }
+      }
+    },
+    "/api/v1/analytics": {
+      "get": {
+        "operationId": "getPartnerAnalytics",
+        "tags": [
+          "Partners"
+        ],
+        "summary": "Per-partner analytics report",
+        "description": "The partner analytics product: what travelers and AI agents ask about one operator's upgrade program (by intent and route), the AI-check → bid → paid funnel by channel, the agent mix, AI visibility (share of answer per engine, who gets cited instead, what agents say, where answers are wrong), open content gaps/drift, and observed bid ranges. A partner-scoped token (the `partner` claim) is locked to its own operator and must NOT pass `partner`; an unscoped token must pass `partner`. Same object the MCP `partner_question_insights` tool returns in structuredContent.",
+        "parameters": [
+          {
+            "name": "partner",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Slug, IATA code, or operator name — required for unscoped tokens, rejected for partner-scoped tokens."
+            }
+          },
+          {
+            "name": "window",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Report window.",
+              "enum": [
+                "7d",
+                "30d",
+                "90d"
+              ],
+              "default": "30d"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The report.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PartnerAnalytics"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`partner` missing for an unscoped token, or invalid window.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "description": "A partner-scoped token passed `partner`.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not a confirmed partner.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          }
+        }
+      }
+    },
+    "/api/v1/partners": {
+      "get": {
+        "operationId": "listPartners",
+        "tags": [
+          "Partners"
+        ],
+        "summary": "List operators that offer upgrade programs",
+        "description": "The merged partner view the MCP `list_partners` tool returns, filterable by vertical, region, and product.",
+        "parameters": [
+          {
+            "name": "vertical",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "airline",
+                "cruise",
+                "rail",
+                "hotel"
+              ]
+            }
+          },
+          {
+            "name": "region",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "Americas",
+                "Europe",
+                "MEA",
+                "APAC",
+                "Cruise",
+                "Rail"
+              ]
+            }
+          },
+          {
+            "name": "product",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "bid_upgrade",
+                "instant_upgrade",
+                "seat_blocker",
+                "premium_seating"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Operators matching the filters.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PartnerList"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid filter value.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          }
+        }
+      }
+    },
+    "/api/v1/partners/{code}": {
+      "get": {
+        "operationId": "getPartner",
+        "tags": [
+          "Partners"
+        ],
+        "summary": "One operator's upgrade profile",
+        "description": "Resolved like the MCP `get_partner_info` tool: IATA code or operator name. Includes the official upgrade page URL.",
+        "parameters": [
+          {
+            "name": "code",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "IATA code or operator name, e.g. 'AC' or 'Air Canada'."
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The operator.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Partner"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "description": "Not a confirmed partner.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          }
+        }
+      }
+    },
+    "/api/v1/routes": {
+      "get": {
+        "operationId": "searchRoute",
+        "tags": [
+          "Partners"
+        ],
+        "summary": "Carriers offering upgrades on an airport pair",
+        "description": "Route-level discovery (the MCP `search_upgrade_options` tool with a route). Three labelled evidence layers, never blended: operator inventory (when that upstream is enabled on the deployment), observed upgrade ranges on the pair from anonymized eligibility checks, and hub / home-country matches that may serve the route but are explicitly not confirmed and carry no pricing.",
+        "parameters": [
+          {
+            "name": "origin",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "Origin airport IATA code, e.g. YUL."
+            }
+          },
+          {
+            "name": "destination",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "Destination airport IATA code, e.g. LHR."
+            }
+          },
+          {
+            "name": "date",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "description": "Travel date YYYY-MM-DD; scopes the inventory layer only."
+            }
+          },
+          {
+            "name": "cabin",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "BUSINESS",
+                "FIRST",
+                "PREMIUM_ECONOMY"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Carriers on the route with their evidence basis.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RouteSearch"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "origin/destination missing or not IATA codes; invalid date or cabin.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          }
+        }
+      }
+    },
+    "/api/v1/pricing": {
+      "get": {
+        "operationId": "getPricing",
+        "tags": [
+          "Pricing"
+        ],
+        "summary": "Typical observed bid ranges for an operator",
+        "description": "Low / typical / high per cabin, aggregated from anonymized eligibility checks (the MCP `get_upgrade_pricing` tool). No booking needed; the exact range for a booking comes from a quote.",
+        "parameters": [
+          {
+            "name": "carrier",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "IATA code or operator name."
+            }
+          },
+          {
+            "name": "cabin",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "BUSINESS",
+                "FIRST",
+                "PREMIUM_ECONOMY"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Observed ranges (bands may be empty).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Pricing"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "carrier missing or cabin invalid.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "description": "Operator not resolvable.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          }
+        }
+      }
+    },
+    "/api/v1/quotes": {
+      "post": {
+        "operationId": "createQuote",
+        "tags": [
+          "Quote"
+        ],
+        "summary": "Quote: live eligibility check for a booking",
+        "description": "Runs the same path as the MCP `check_upgrade_eligibility` tool and stores a quote owned by the caller when the booking is transactable (ELIGIBLE or MODIFY). The booking reference and last name are used only for the upstream lookup — never stored, logged, or echoed. Agents that must not handle PII should use `/api/v1/quotes/secure`.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/QuoteRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Checked, but nothing to transact (NOT_ELIGIBLE, PNR_NOT_FOUND, NOT_CONFIGURED, or ERROR); quoteId is null.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Quote"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "Transactable quote (status ELIGIBLE or MODIFY) with a quoteId.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Quote"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Missing bookingReference, lastName, or carrier.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          }
+        }
+      }
+    },
+    "/api/v1/quotes/secure": {
+      "post": {
+        "operationId": "createSecureQuote",
+        "tags": [
+          "Quote"
+        ],
+        "summary": "Quote without handling PII: traveler enters details on a secure page",
+        "description": "The MCP `start_eligibility_check` equivalent. Returns a secure URL for the traveler; poll `GET /api/v1/quotes/{quoteId}` until the status is no longer PENDING.",
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SecureQuoteRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Pending quote with the traveler's secure link.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SecureQuote"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "503": {
+            "description": "Quote store unavailable; retry.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/quotes/{quoteId}": {
+      "get": {
+        "operationId": "getQuote",
+        "tags": [
+          "Quote"
+        ],
+        "summary": "Read a quote",
+        "description": "The stored non-PII result (the MCP `get_eligibility_result` tool). A quote another caller owns reads as 404.",
+        "parameters": [
+          {
+            "name": "quoteId",
+            "in": "path",
+            "required": true,
+            "description": "The quote id returned by POST /api/v1/quotes or /api/v1/quotes/secure.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The quote — completed, or still pending the traveler's input.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/Quote"
+                    },
+                    {
+                      "$ref": "#/components/schemas/PendingQuote"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "description": "Unknown quote, or owned by another caller.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          }
+        }
+      }
+    },
+    "/api/v1/offers": {
+      "post": {
+        "operationId": "createOffer",
+        "tags": [
+          "Execute"
+        ],
+        "summary": "Execute: place a bid, buy an instant upgrade, or redeem points",
+        "description": "The MCP `place_bid` tool. Validates the amount against the operator's live range and stages the offer; payment completes on the operator's hosted page (`paymentUrl`). When live submit is enabled, the first call without `confirm: true` returns 202 with stage `needs_confirmation` and submits nothing.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OfferRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Offer staged or submitted; complete payment at paymentUrl when present.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Offer"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Awaiting human confirmation — repeat with confirm: true.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Offer"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error, or ambiguous cabin/segment (code REASON_AMBIGUOUS_SELECTION).",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "description": "Unknown quote, or owned by another caller.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Quote not ready, booking not eligible, or no offer options.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Amount outside the operator's range or invalid (REASON_PRICE_CEILING / REASON_PRICE_FLOOR / REASON_INVALID_AMOUNT).",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "503": {
+            "description": "Validated, but the hosted payment step didn't open — retry.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "operationId": "listOffers",
+        "tags": [
+          "Confirm"
+        ],
+        "summary": "Confirm: offers on the booking with live status",
+        "description": "The MCP `get_bid_status` tool: live placed offers (submitted / pending / accepted / declined / cancelled), the cart, offers seen at quote time, and the current options.",
+        "parameters": [
+          {
+            "name": "quoteId",
+            "in": "query",
+            "required": true,
+            "description": "The quote id returned by POST /api/v1/quotes or /api/v1/quotes/secure.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Offers and cart for the quote.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OfferList"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "quoteId missing.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "description": "Unknown quote, or owned by another caller.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Quote not ready.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          }
+        }
+      }
+    },
+    "/api/v1/offers/{offerReference}": {
+      "patch": {
+        "operationId": "modifyOffer",
+        "tags": [
+          "Execute"
+        ],
+        "summary": "Change an offer's amount",
+        "description": "The MCP `modify_bid` tool. Each change counts toward the per-booking cap (3 by default); once reached the answer is 409 with code REASON_CHANGE_LIMIT and the current offer stands.",
+        "parameters": [
+          {
+            "name": "offerReference",
+            "in": "path",
+            "required": true,
+            "description": "An offerId from the quote's options, or an offerReference (operator order-change id) from a placed offer.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ModifyOfferRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Offer updated (or re-staged for payment).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/Offer"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ModifiedOffer"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Awaiting human confirmation — repeat with confirm: true.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Offer"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "amount missing or invalid.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "description": "Unknown quote/offer, or owned by another caller.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Change limit reached (REASON_CHANGE_LIMIT), quote not ready, or not eligible.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Amount outside the operator's range.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "503": {
+            "description": "Operator update failed — retry.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "cancelOffer",
+        "tags": [
+          "Execute"
+        ],
+        "summary": "Withdraw a placed offer",
+        "description": "The MCP `cancel_bid` tool. Requires `confirm=true` (query or body) once the traveler has agreed; without it nothing is withdrawn (409 CONFIRMATION_REQUIRED).",
+        "parameters": [
+          {
+            "name": "offerReference",
+            "in": "path",
+            "required": true,
+            "description": "An offerId from the quote's options, or an offerReference (operator order-change id) from a placed offer.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "quoteId",
+            "in": "query",
+            "required": true,
+            "description": "The quote id returned by POST /api/v1/quotes or /api/v1/quotes/secure.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "confirm",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "Must be true to withdraw."
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Offer withdrawn.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CancelledOffer"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "More than one placed offer — pass the specific offerReference.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "description": "Unknown quote/offer, or owned by another caller.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Confirmation required, quote not ready, or cancel not possible here.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          }
+        }
+      }
+    },
+    "/api/v1/offers/{offerReference}/price": {
+      "get": {
+        "operationId": "getOfferPrice",
+        "tags": [
+          "Pricing"
+        ],
+        "summary": "Itemized all-in cost of an offer before committing",
+        "description": "The MCP `get_price_breakdown` tool: amount plus taxes/fees, total, and for a BID the operator's own bid-strength read.",
+        "parameters": [
+          {
+            "name": "offerReference",
+            "in": "path",
+            "required": true,
+            "description": "An offerId from the quote's options, or an offerReference (operator order-change id) from a placed offer.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "quoteId",
+            "in": "query",
+            "required": true,
+            "description": "The quote id returned by POST /api/v1/quotes or /api/v1/quotes/secure.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "amount",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "number",
+              "description": "Amount to price (omit for INSTANT)."
+            }
+          },
+          {
+            "name": "purchaseType",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "BID",
+                "INSTANT",
+                "POINTS"
+              ],
+              "default": "BID"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Breakdown (available=false when itemized pricing isn't offered for this booking).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PriceBreakdown"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "quoteId or amount missing/invalid.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "description": "Unknown quote/offer.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Quote not ready.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Reference not mappable to one option.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          }
+        }
+      }
+    },
+    "/api/v1/offers/events": {
+      "get": {
+        "operationId": "listOfferEvents",
+        "tags": [
+          "Outcomes"
+        ],
+        "summary": "Poll bid-outcome events (for clients without webhooks)",
+        "description": "The MCP `get_offer_events` tool. The ordered log of bid-outcome events — the same events webhooks deliver — for one quote (`quoteId`) or for every quote this caller owns (omit it). Pass `since` = the previous response's `nextCursor` (or an ISO timestamp) to receive only what's new. A quote whose traveler hasn't completed the check yet returns an empty page, not 409.",
+        "parameters": [
+          {
+            "name": "quoteId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Limit to one quote the caller owns."
+          },
+          {
+            "name": "since",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "A `nextCursor` from a previous response, or an ISO-8601 timestamp."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "description": "1–200, default 50."
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Events, oldest first, with the cursor for the next poll.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OfferEventList"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad since/limit.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "description": "Unknown quote, or owned by another caller.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          }
+        }
+      }
+    },
+    "/api/v1/webhooks": {
+      "post": {
+        "operationId": "createWebhook",
+        "tags": [
+          "Outcomes"
+        ],
+        "summary": "Subscribe to bid-outcome webhooks",
+        "description": "Register an HTTPS endpoint to receive signed events when an offer's status changes (and when checkout completes). The response includes the signing `secret` exactly once. Deliveries are retried 3 times inline, then up to 8 more times over ~21h with exponential backoff; 20 consecutive failures disable the webhook. At most 10 active webhooks per caller.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WebhookRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Webhook created — store `secret` now.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookCreated"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "URL rejected (WEBHOOK_URL_REJECTED: not https, private/loopback host, credentials in URL) or unknown events.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "description": "quoteId unknown or owned by another caller.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Webhook limit reached (WEBHOOK_LIMIT).",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "503": {
+            "description": "Webhook store unavailable on this deployment.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "operationId": "listWebhooks",
+        "tags": [
+          "Outcomes"
+        ],
+        "summary": "List this caller's webhooks",
+        "description": "Subscriptions owned by the calling credential. Secrets are never returned.",
+        "responses": {
+          "200": {
+            "description": "Webhooks.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          }
+        }
+      }
+    },
+    "/api/v1/webhooks/{id}": {
+      "get": {
+        "operationId": "getWebhook",
+        "tags": [
+          "Outcomes"
+        ],
+        "summary": "Read one webhook",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The webhook (no secret).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Webhook"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "description": "Unknown webhook, or owned by another caller.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteWebhook",
+        "tags": [
+          "Outcomes"
+        ],
+        "summary": "Unsubscribe",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Deleted.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookDeleted"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "description": "Unknown webhook, or owned by another caller.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          }
+        }
+      }
+    },
+    "/api/v1/webhooks/{id}/test": {
+      "post": {
+        "operationId": "testWebhook",
+        "tags": [
+          "Outcomes"
+        ],
+        "summary": "Send a signed ping",
+        "description": "Delivers a `ping` event signed with the webhook's secret so the receiver can verify its implementation end-to-end. Reports the receiver's status; 502 when it did not answer 2xx.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Receiver answered 2xx.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookTestResult"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "description": "Unknown webhook, or owned by another caller.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "502": {
+            "description": "Receiver did not answer 2xx (details in the body).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookTestResult"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "webhooks": {
+    "offer.status_changed": {
+      "post": {
+        "operationId": "on_offer_status_changed",
+        "summary": "offer.status_changed delivery",
+        "description": "Any change of an offer's normalized status (submitted → pending → accepted / declined / cancelled), including the first time it is observed.",
+        "parameters": [
+          {
+            "name": "X-UpgradeAgent-Signature",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "`t=<unix>,v1=<hex HMAC-SHA256(secret, `${t}.${body}`)>`"
+            }
+          },
+          {
+            "name": "X-UpgradeAgent-Event",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "offer.status_changed"
+              ]
+            }
+          },
+          {
+            "name": "X-UpgradeAgent-Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "Stable per (quote, offer, status) — dedupe on it."
+            }
+          },
+          {
+            "name": "X-UpgradeAgent-Webhook-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/OfferEventPayload"
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "description": "Event id."
+                      }
+                    },
+                    "required": [
+                      "id"
+                    ]
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "2XX": {
+            "description": "Acknowledge within 10s. Anything else (or a timeout) is retried with backoff."
+          }
+        }
+      }
+    },
+    "offer.accepted": {
+      "post": {
+        "operationId": "on_offer_accepted",
+        "summary": "offer.accepted delivery",
+        "description": "The operator accepted the bid (also delivered as offer.status_changed).",
+        "parameters": [
+          {
+            "name": "X-UpgradeAgent-Signature",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "`t=<unix>,v1=<hex HMAC-SHA256(secret, `${t}.${body}`)>`"
+            }
+          },
+          {
+            "name": "X-UpgradeAgent-Event",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "offer.accepted"
+              ]
+            }
+          },
+          {
+            "name": "X-UpgradeAgent-Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "Stable per (quote, offer, status) — dedupe on it."
+            }
+          },
+          {
+            "name": "X-UpgradeAgent-Webhook-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/OfferEventPayload"
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "description": "Event id."
+                      }
+                    },
+                    "required": [
+                      "id"
+                    ]
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "2XX": {
+            "description": "Acknowledge within 10s. Anything else (or a timeout) is retried with backoff."
+          }
+        }
+      }
+    },
+    "offer.declined": {
+      "post": {
+        "operationId": "on_offer_declined",
+        "summary": "offer.declined delivery",
+        "description": "The operator declined the bid, or it expired / payment authorization failed (also delivered as offer.status_changed).",
+        "parameters": [
+          {
+            "name": "X-UpgradeAgent-Signature",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "`t=<unix>,v1=<hex HMAC-SHA256(secret, `${t}.${body}`)>`"
+            }
+          },
+          {
+            "name": "X-UpgradeAgent-Event",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "offer.declined"
+              ]
+            }
+          },
+          {
+            "name": "X-UpgradeAgent-Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "Stable per (quote, offer, status) — dedupe on it."
+            }
+          },
+          {
+            "name": "X-UpgradeAgent-Webhook-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/OfferEventPayload"
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "description": "Event id."
+                      }
+                    },
+                    "required": [
+                      "id"
+                    ]
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "2XX": {
+            "description": "Acknowledge within 10s. Anything else (or a timeout) is retried with backoff."
+          }
+        }
+      }
+    },
+    "offer.cancelled": {
+      "post": {
+        "operationId": "on_offer_cancelled",
+        "summary": "offer.cancelled delivery",
+        "description": "The bid was withdrawn (also delivered as offer.status_changed).",
+        "parameters": [
+          {
+            "name": "X-UpgradeAgent-Signature",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "`t=<unix>,v1=<hex HMAC-SHA256(secret, `${t}.${body}`)>`"
+            }
+          },
+          {
+            "name": "X-UpgradeAgent-Event",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "offer.cancelled"
+              ]
+            }
+          },
+          {
+            "name": "X-UpgradeAgent-Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "Stable per (quote, offer, status) — dedupe on it."
+            }
+          },
+          {
+            "name": "X-UpgradeAgent-Webhook-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/OfferEventPayload"
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "description": "Event id."
+                      }
+                    },
+                    "required": [
+                      "id"
+                    ]
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "2XX": {
+            "description": "Acknowledge within 10s. Anything else (or a timeout) is retried with backoff."
+          }
+        }
+      }
+    },
+    "checkout.paid": {
+      "post": {
+        "operationId": "on_checkout_paid",
+        "summary": "checkout.paid delivery",
+        "description": "The traveler completed payment on the operator's hosted page; the new offer's own status follows as offer.* events.",
+        "parameters": [
+          {
+            "name": "X-UpgradeAgent-Signature",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "`t=<unix>,v1=<hex HMAC-SHA256(secret, `${t}.${body}`)>`"
+            }
+          },
+          {
+            "name": "X-UpgradeAgent-Event",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "checkout.paid"
+              ]
+            }
+          },
+          {
+            "name": "X-UpgradeAgent-Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "Stable per (quote, offer, status) — dedupe on it."
+            }
+          },
+          {
+            "name": "X-UpgradeAgent-Webhook-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/OfferEventPayload"
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "description": "Event id."
+                      }
+                    },
+                    "required": [
+                      "id"
+                    ]
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "2XX": {
+            "description": "Acknowledge within 10s. Anything else (or a timeout) is retried with backoff."
+          }
+        }
+      }
+    },
+    "ping": {
+      "post": {
+        "operationId": "on_ping",
+        "summary": "ping delivery",
+        "description": "Test delivery from POST /api/v1/webhooks/{id}/test.",
+        "parameters": [
+          {
+            "name": "X-UpgradeAgent-Signature",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "`t=<unix>,v1=<hex HMAC-SHA256(secret, `${t}.${body}`)>`"
+            }
+          },
+          {
+            "name": "X-UpgradeAgent-Event",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "ping"
+              ]
+            }
+          },
+          {
+            "name": "X-UpgradeAgent-Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "Stable per (quote, offer, status) — dedupe on it."
+            }
+          },
+          {
+            "name": "X-UpgradeAgent-Webhook-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/OfferEventPayload"
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "description": "Event id."
+                      }
+                    },
+                    "required": [
+                      "id"
+                    ]
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "2XX": {
+            "description": "Acknowledge within 10s. Anything else (or a timeout) is retried with backoff."
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Problem": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "description": "URI identifying the problem type."
+          },
+          "title": {
+            "type": "string",
+            "description": "Short, human-readable summary."
+          },
+          "status": {
+            "type": "integer",
+            "description": "HTTP status code."
+          },
+          "detail": {
+            "type": "string",
+            "description": "Human-readable explanation (never contains booking data)."
+          },
+          "code": {
+            "type": "string",
+            "description": "Machine-readable code, e.g. VALIDATION, QUOTE_NOT_FOUND, QUOTE_PENDING, OFFER_NOT_FOUND, CONFIRMATION_REQUIRED, REASON_CHANGE_LIMIT, REASON_PRICE_CEILING, REASON_PRICE_FLOOR, REASON_INVALID_AMOUNT, REASON_AMBIGUOUS_SELECTION, REASON_NOT_ELIGIBLE, REASON_NO_BID_OPTIONS, UPSTREAM_UNAVAILABLE."
+          },
+          "instance": {
+            "type": "string"
+          },
+          "stage": {
+            "type": "string",
+            "description": "Offer stage when the problem came from staging an offer."
+          },
+          "changesRemaining": {
+            "type": "integer",
+            "description": "Offer changes still allowed on this booking."
+          },
+          "changesLimit": {
+            "type": "integer"
+          },
+          "offerId": {
+            "type": "string"
+          },
+          "offerReferences": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Candidate references when a selection was ambiguous."
+          },
+          "missing": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Missing request fields (validation problems)."
+          }
+        },
+        "required": [
+          "type",
+          "title",
+          "status",
+          "detail"
+        ],
+        "description": "RFC 9457 problem document. Extension members are present only when relevant."
+      },
+      "OfferEvent": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Event id — also the polling cursor (pass as `since`)."
+          },
+          "event": {
+            "type": "string",
+            "description": "Event name.",
+            "enum": [
+              "offer.status_changed",
+              "offer.accepted",
+              "offer.declined",
+              "offer.cancelled",
+              "checkout.paid"
+            ]
+          },
+          "occurredAt": {
+            "type": "string",
+            "description": "ISO-8601 time of the observation that produced the event."
+          },
+          "data": {
+            "$ref": "#/components/schemas/OfferEventPayload"
+          }
+        },
+        "required": [
+          "id",
+          "event",
+          "occurredAt",
+          "data"
+        ],
+        "description": "One bid-outcome event, as returned by GET /api/v1/offers/events. Webhook deliveries carry the OfferEventPayload directly (with `id` added)."
+      },
+      "OfferEventPayload": {
+        "type": "object",
+        "properties": {
+          "event": {
+            "type": "string",
+            "description": "Event name (or `ping` for test deliveries).",
+            "enum": [
+              "offer.status_changed",
+              "offer.accepted",
+              "offer.declined",
+              "offer.cancelled",
+              "checkout.paid",
+              "ping"
+            ]
+          },
+          "quoteId": {
+            "oneOf": [
+              {
+                "type": "string",
+                "description": "The quote the offer belongs to."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "offerReference": {
+            "oneOf": [
+              {
+                "type": "string",
+                "description": "Operator order-change id (the offerReference on GET /offers); null for checkout.paid when ambiguous."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "status": {
+            "oneOf": [
+              {
+                "type": "string",
+                "description": "New normalized status: submitted | pending | accepted | declined | cancelled | paid | unknown."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "previousStatus": {
+            "oneOf": [
+              {
+                "type": "string",
+                "description": "Previous normalized status; null on first observation."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "amount": {
+            "oneOf": [
+              {
+                "type": "number",
+                "description": "Offer amount."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "currency": {
+            "oneOf": [
+              {
+                "type": "string",
+                "description": "ISO currency, or PTS for points."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "cabin": {
+            "oneOf": [
+              {
+                "type": "string",
+                "description": "Cabin / product name."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "segment": {
+            "oneOf": [
+              {
+                "type": "string",
+                "description": "Route, e.g. NCE-ZRH."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "occurredAt": {
+            "type": "string",
+            "description": "ISO-8601 time of the observation."
+          }
+        },
+        "required": [
+          "event",
+          "quoteId",
+          "offerReference",
+          "status",
+          "previousStatus",
+          "amount",
+          "currency",
+          "cabin",
+          "segment",
+          "occurredAt"
+        ],
+        "description": "Non-PII by construction: never a booking reference, last name, or contact detail."
+      },
+      "OfferEventList": {
+        "type": "object",
+        "properties": {
+          "quoteId": {
+            "oneOf": [
+              {
+                "type": "string",
+                "description": "The quote filtered on, or null for all of the caller's quotes."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "events": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OfferEvent"
+            },
+            "description": "Oldest → newest."
+          },
+          "nextCursor": {
+            "oneOf": [
+              {
+                "type": "string",
+                "description": "Pass as `since` on the next call; null when no events were returned."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "eventTypes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "quoteId",
+          "events",
+          "nextCursor",
+          "eventTypes"
+        ]
+      },
+      "WebhookSigning": {
+        "type": "object",
+        "properties": {
+          "header": {
+            "type": "string",
+            "description": "Signature header name.",
+            "enum": [
+              "X-UpgradeAgent-Signature"
+            ]
+          },
+          "format": {
+            "type": "string",
+            "description": "`t=<unix seconds>,v1=<hex HMAC-SHA256(secret, `${t}.${rawBody}`)>`"
+          },
+          "toleranceSeconds": {
+            "type": "integer",
+            "description": "Reject signatures whose t is more than this far from now (300)."
+          },
+          "eventHeader": {
+            "type": "string",
+            "enum": [
+              "X-UpgradeAgent-Event"
+            ]
+          },
+          "idempotencyHeader": {
+            "type": "string",
+            "enum": [
+              "X-UpgradeAgent-Idempotency-Key"
+            ]
+          },
+          "docs": {
+            "type": "string",
+            "description": "Verification guide."
+          }
+        },
+        "required": [
+          "header",
+          "format",
+          "toleranceSeconds",
+          "eventHeader",
+          "idempotencyHeader",
+          "docs"
+        ]
+      },
+      "WebhookRequest": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "description": "HTTPS endpoint on a public host. http, localhost, private/link-local addresses and credentials in the URL are rejected (400 WEBHOOK_URL_REJECTED)."
+          },
+          "events": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "offer.status_changed",
+                "offer.accepted",
+                "offer.declined",
+                "offer.cancelled",
+                "checkout.paid"
+              ]
+            },
+            "description": "Events to receive. Default: all."
+          },
+          "quoteId": {
+            "type": "string",
+            "description": "Scope to one quote this caller owns (pending quotes allowed). Omit to receive events for every quote the caller owns."
+          }
+        },
+        "required": [
+          "url"
+        ]
+      },
+      "Webhook": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          },
+          "events": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "offer.status_changed",
+                "offer.accepted",
+                "offer.declined",
+                "offer.cancelled",
+                "checkout.paid"
+              ]
+            }
+          },
+          "quoteId": {
+            "oneOf": [
+              {
+                "type": "string",
+                "description": "Bound quote, or null for all of the caller's quotes."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "active": {
+            "type": "boolean",
+            "description": "False once auto-disabled after 20 consecutive failed deliveries."
+          },
+          "createdAt": {
+            "type": "string"
+          },
+          "lastDeliveryAt": {
+            "oneOf": [
+              {
+                "type": "string",
+                "description": "Last successful (2xx) delivery."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "failureCount": {
+            "type": "integer",
+            "description": "Consecutive failed deliveries."
+          }
+        },
+        "required": [
+          "id",
+          "url",
+          "events",
+          "quoteId",
+          "active",
+          "createdAt",
+          "lastDeliveryAt",
+          "failureCount"
+        ]
+      },
+      "WebhookCreated": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/Webhook"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "secret": {
+                "type": "string",
+                "description": "The signing secret — shown ONCE. Store it; it is kept encrypted and never returned again."
+              },
+              "signing": {
+                "$ref": "#/components/schemas/WebhookSigning"
+              }
+            },
+            "required": [
+              "secret",
+              "signing"
+            ]
+          }
+        ]
+      },
+      "WebhookList": {
+        "type": "object",
+        "properties": {
+          "webhooks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Webhook"
+            }
+          },
+          "events": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "signing": {
+            "$ref": "#/components/schemas/WebhookSigning"
+          }
+        },
+        "required": [
+          "webhooks",
+          "events",
+          "signing"
+        ]
+      },
+      "WebhookDeleted": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "deleted": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "deleted"
+        ]
+      },
+      "WebhookTestResult": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "event": {
+            "type": "string",
+            "enum": [
+              "ping"
+            ]
+          },
+          "delivered": {
+            "type": "boolean",
+            "description": "True when the receiver answered 2xx."
+          },
+          "statusCode": {
+            "oneOf": [
+              {
+                "type": "integer",
+                "description": "Receiver's HTTP status; null on timeout / connection error."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "error": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "event",
+          "delivered",
+          "statusCode",
+          "error"
+        ]
+      },
+      "ProductLink": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Product id.",
+            "enum": [
+              "bid_upgrade",
+              "instant_upgrade",
+              "seat_blocker",
+              "premium_seating"
+            ]
+          },
+          "label": {
+            "type": "string"
+          },
+          "url": {
+            "oneOf": [
+              {
+                "type": "string",
+                "description": "Operator's marketing/booking page for this product."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "label",
+          "url"
+        ]
+      },
+      "PartnerSummary": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "description": "IATA / operator code, e.g. AC."
+          },
+          "slug": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "vertical": {
+            "type": "string",
+            "enum": [
+              "airline",
+              "cruise",
+              "rail",
+              "hotel"
+            ]
+          },
+          "region": {
+            "oneOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "Americas",
+                  "Europe",
+                  "MEA",
+                  "APAC",
+                  "Cruise",
+                  "Rail"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "products": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProductLink"
+            }
+          },
+          "upgradeUrl": {
+            "oneOf": [
+              {
+                "type": "string",
+                "description": "Official upgrade page — the explicit 'continue here' link for flows an agent can't complete via the API."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "verified": {
+            "type": "boolean"
+          },
+          "profileUrl": {
+            "type": "string",
+            "description": "Public partner profile on Upgrade Agent."
+          }
+        },
+        "required": [
+          "code",
+          "slug",
+          "name",
+          "vertical",
+          "region",
+          "products",
+          "upgradeUrl",
+          "verified",
+          "profileUrl"
+        ]
+      },
+      "Partner": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/PartnerSummary"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "summary": {
+                "type": "string"
+              },
+              "cabins": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Cabin upgrade paths, e.g. 'Economy → Premium Economy'."
+              },
+              "loyaltyProgram": {
+                "oneOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "howToAccess": {
+                "type": "string"
+              },
+              "plusgradePowered": {
+                "type": "string",
+                "enum": [
+                  "yes",
+                  "unverified"
+                ]
+              }
+            },
+            "required": [
+              "summary",
+              "cabins",
+              "loyaltyProgram",
+              "howToAccess",
+              "plusgradePowered"
+            ]
+          }
+        ]
+      },
+      "PartnerList": {
+        "type": "object",
+        "properties": {
+          "count": {
+            "type": "integer"
+          },
+          "partners": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PartnerSummary"
+            }
+          }
+        },
+        "required": [
+          "count",
+          "partners"
+        ]
+      },
+      "RouteObservedPricing": {
+        "type": "object",
+        "properties": {
+          "cabin": {
+            "type": "string",
+            "description": "Target cabin, e.g. BUSINESS."
+          },
+          "label": {
+            "type": "string"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "min": {
+            "type": "number",
+            "description": "Lowest minimum bid observed on this pair."
+          },
+          "median": {
+            "type": "number",
+            "description": "Median suggested starting bid."
+          },
+          "max": {
+            "type": "number",
+            "description": "Highest maximum bid observed."
+          },
+          "sampleSize": {
+            "type": "integer",
+            "description": "Anonymized checks behind the figures."
+          },
+          "lastObserved": {
+            "oneOf": [
+              {
+                "type": "string",
+                "description": "ISO timestamp of the latest check for this carrier on this pair."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "cabin",
+          "label",
+          "currency",
+          "min",
+          "median",
+          "max",
+          "sampleSize",
+          "lastObserved"
+        ]
+      },
+      "RouteCarrier": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "description": "IATA code."
+          },
+          "name": {
+            "type": "string"
+          },
+          "slug": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "products": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "label": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "label"
+              ]
+            }
+          },
+          "basis": {
+            "type": "string",
+            "description": "inventory = operator schedule confirmed for the date; observed = real upgrade ranges seen on this pair (either direction); network = hub / home-country match — may serve the route, NOT confirmed, no pricing.",
+            "enum": [
+              "inventory",
+              "observed",
+              "network"
+            ]
+          },
+          "observedPricing": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RouteObservedPricing"
+            },
+            "description": "Per-cabin observed ranges; present for observed (and inventory-confirmed) carriers."
+          },
+          "observedSamples": {
+            "type": "integer"
+          },
+          "directions": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "outbound",
+                "return"
+              ]
+            },
+            "description": "Which directions of the pair the observed rows came from."
+          },
+          "inventory": {
+            "type": "object",
+            "properties": {
+              "eligibleFlights": {
+                "type": "integer"
+              },
+              "totalFlights": {
+                "type": "integer"
+              },
+              "date": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "eligibleFlights",
+              "totalFlights",
+              "date"
+            ],
+            "description": "Present for inventory-confirmed carriers."
+          },
+          "hubMatch": {
+            "type": "string",
+            "description": "Present when the static network table links this carrier to the route.",
+            "enum": [
+              "hub",
+              "home_country"
+            ]
+          },
+          "note": {
+            "type": "string",
+            "description": "One honest sentence about what the basis means for this carrier."
+          },
+          "upgradePage": {
+            "oneOf": [
+              {
+                "type": "string",
+                "description": "Agent-ready upgrade page on Upgrade Agent."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "partnerPage": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "code",
+          "name",
+          "slug",
+          "products",
+          "basis",
+          "note",
+          "upgradePage",
+          "partnerPage"
+        ]
+      },
+      "RouteSearch": {
+        "type": "object",
+        "properties": {
+          "route": {
+            "type": "object",
+            "properties": {
+              "origin": {
+                "type": "string"
+              },
+              "destination": {
+                "type": "string"
+              },
+              "originLabel": {
+                "type": "string",
+                "description": "City (IATA) when the airport is known."
+              },
+              "destinationLabel": {
+                "type": "string"
+              },
+              "haul": {
+                "oneOf": [
+                  {
+                    "type": "string",
+                    "enum": [
+                      "short",
+                      "long"
+                    ]
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "date": {
+                "oneOf": [
+                  {
+                    "type": "string",
+                    "description": "YYYY-MM-DD as requested; scopes the inventory layer only."
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "cabin": {
+                "oneOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "slug": {
+                "type": "string",
+                "description": "Public page slug, e.g. yul-lhr (/routes/{slug})."
+              }
+            },
+            "required": [
+              "origin",
+              "destination",
+              "originLabel",
+              "destinationLabel",
+              "haul",
+              "date",
+              "cabin",
+              "slug"
+            ]
+          },
+          "carriers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RouteCarrier"
+            },
+            "description": "Ordered inventory → observed → network; at most 12."
+          },
+          "layers": {
+            "type": "object",
+            "properties": {
+              "inventory": {
+                "type": "integer"
+              },
+              "observed": {
+                "type": "integer"
+              },
+              "network": {
+                "type": "integer"
+              },
+              "inventoryStatus": {
+                "type": "string",
+                "enum": [
+                  "disabled",
+                  "ok",
+                  "partial",
+                  "unreachable",
+                  "no_candidates"
+                ]
+              },
+              "truncated": {
+                "type": "integer",
+                "description": "Qualifying carriers cut by the cap."
+              }
+            },
+            "required": [
+              "inventory",
+              "observed",
+              "network",
+              "inventoryStatus",
+              "truncated"
+            ]
+          },
+          "coverageNote": {
+            "type": "string",
+            "description": "Plain-language statement of what the result is based on."
+          },
+          "note": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "route",
+          "carriers",
+          "layers",
+          "coverageNote",
+          "note"
+        ]
+      },
+      "PricingBand": {
+        "type": "object",
+        "properties": {
+          "cabin": {
+            "type": "string",
+            "description": "Target cabin, e.g. BUSINESS."
+          },
+          "label": {
+            "type": "string"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "low": {
+            "type": "number",
+            "description": "Lowest minimum bid observed."
+          },
+          "typical": {
+            "type": "number",
+            "description": "Median suggested bid."
+          },
+          "high": {
+            "type": "number",
+            "description": "Highest maximum bid observed."
+          },
+          "samples": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "cabin",
+          "label",
+          "currency",
+          "low",
+          "typical",
+          "high",
+          "samples"
+        ]
+      },
+      "Pricing": {
+        "type": "object",
+        "properties": {
+          "carrier": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "name"
+            ]
+          },
+          "cabin": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "bands": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PricingBand"
+            },
+            "description": "Empty when there isn't enough observed data yet."
+          },
+          "samples": {
+            "type": "integer"
+          },
+          "observedFrom": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "observedTo": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "note": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "carrier",
+          "cabin",
+          "bands",
+          "samples",
+          "observedFrom",
+          "observedTo",
+          "note"
+        ]
+      },
+      "Segment": {
+        "type": "object",
+        "properties": {
+          "origin": {
+            "type": "string",
+            "description": "IATA airport/port code."
+          },
+          "destination": {
+            "type": "string"
+          },
+          "flightNumber": {
+            "type": "string"
+          },
+          "departureDate": {
+            "oneOf": [
+              {
+                "type": "string",
+                "description": "ISO date."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "origin",
+          "destination",
+          "flightNumber",
+          "departureDate"
+        ]
+      },
+      "BidRange": {
+        "type": "object",
+        "properties": {
+          "currency": {
+            "type": "string"
+          },
+          "minimum": {
+            "oneOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "suggested": {
+            "oneOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "maximum": {
+            "oneOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "currency",
+          "minimum",
+          "suggested",
+          "maximum"
+        ],
+        "description": "The operator's live bid range for this option. Offers outside it are rejected."
+      },
+      "QuoteOption": {
+        "type": "object",
+        "properties": {
+          "offerId": {
+            "type": "string",
+            "description": "Deterministic, non-PII id for this cabin+segment — pass as offerReference to PATCH/DELETE/price."
+          },
+          "cabin": {
+            "type": "string",
+            "description": "Target cabin: BUSINESS | FIRST | PREMIUM_ECONOMY | …"
+          },
+          "productName": {
+            "type": "string"
+          },
+          "segment": {
+            "$ref": "#/components/schemas/Segment"
+          },
+          "bid": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/BidRange"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "instant": {
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "currency": {
+                    "type": "string"
+                  },
+                  "price": {
+                    "type": "number",
+                    "description": "The operator's fixed buy-now price."
+                  }
+                },
+                "required": [
+                  "currency",
+                  "price"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "points": {
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "minimum": {
+                    "oneOf": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "suggested": {
+                    "oneOf": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "maximum": {
+                    "oneOf": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "minimum",
+                  "suggested",
+                  "maximum"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "existingOffer": {
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "amount": {
+                    "oneOf": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "currency": {
+                    "oneOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "status": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "amount",
+                  "currency",
+                  "status"
+                ],
+                "description": "An offer already on the booking for this option at quote time."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "offerId",
+          "cabin",
+          "productName",
+          "segment",
+          "bid",
+          "instant",
+          "points",
+          "existingOffer"
+        ]
+      },
+      "Quote": {
+        "type": "object",
+        "properties": {
+          "quoteId": {
+            "oneOf": [
+              {
+                "type": "string",
+                "description": "Null when the booking isn't transactable (no quote is stored)."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "ELIGIBLE",
+              "MODIFY",
+              "NOT_ELIGIBLE",
+              "PNR_NOT_FOUND",
+              "NOT_CONFIGURED",
+              "ERROR"
+            ]
+          },
+          "carrier": {
+            "oneOf": [
+              {
+                "type": "string",
+                "description": "Carrier as supplied by the caller."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "carrierCode": {
+            "oneOf": [
+              {
+                "type": "string",
+                "description": "Operating carrier IATA code from the booking."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "options": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/QuoteOption"
+            }
+          },
+          "operatorUrl": {
+            "oneOf": [
+              {
+                "type": "string",
+                "description": "The operator's hosted upgrade page for this booking (pay-by-link target)."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "changesRemaining": {
+            "type": "integer",
+            "description": "Offer changes still allowed on this booking through the API."
+          },
+          "changesLimit": {
+            "type": "integer"
+          },
+          "expiresAt": {
+            "oneOf": [
+              {
+                "type": "string",
+                "description": "ISO timestamp — when the quote stops being readable/executable."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "message": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "quoteId",
+          "status",
+          "carrier",
+          "carrierCode",
+          "options",
+          "operatorUrl",
+          "changesRemaining",
+          "changesLimit",
+          "expiresAt",
+          "message"
+        ]
+      },
+      "PendingQuote": {
+        "type": "object",
+        "properties": {
+          "quoteId": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "PENDING",
+              "EXPIRED"
+            ]
+          },
+          "carrier": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "secureUrl": {
+            "type": "string",
+            "description": "HTTPS page where the traveler enters their booking reference and last name."
+          },
+          "expiresAt": {
+            "type": "string"
+          },
+          "options": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/QuoteOption"
+            },
+            "description": "Always empty while pending."
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "quoteId",
+          "status",
+          "carrier",
+          "secureUrl",
+          "expiresAt",
+          "options",
+          "message"
+        ]
+      },
+      "SecureQuote": {
+        "type": "object",
+        "properties": {
+          "quoteId": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "PENDING"
+            ]
+          },
+          "carrier": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "secureUrl": {
+            "type": "string",
+            "description": "Share with the traveler exactly as-is."
+          },
+          "expiresAt": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "quoteId",
+          "status",
+          "carrier",
+          "secureUrl",
+          "expiresAt",
+          "message"
+        ]
+      },
+      "QuoteRequest": {
+        "type": "object",
+        "properties": {
+          "bookingReference": {
+            "type": "string",
+            "description": "Booking reference / PNR. Used only for the upstream lookup — never stored, logged, or echoed."
+          },
+          "lastName": {
+            "type": "string",
+            "description": "Passenger last name exactly as on the booking. Never stored, logged, or echoed."
+          },
+          "carrier": {
+            "type": "string",
+            "description": "Operator IATA code or name, e.g. 'LX' or 'SWISS'."
+          },
+          "language": {
+            "type": "string",
+            "description": "ISO 639-1 language for the operator's offer page (default en)."
+          },
+          "conversationId": {
+            "type": "string",
+            "description": "Optional stable id for trace correlation across quote → offer → confirm."
+          }
+        },
+        "required": [
+          "bookingReference",
+          "lastName",
+          "carrier"
+        ]
+      },
+      "SecureQuoteRequest": {
+        "type": "object",
+        "properties": {
+          "carrier": {
+            "type": "string",
+            "description": "Operator IATA code or name, if known."
+          },
+          "language": {
+            "type": "string",
+            "description": "ISO 639-1 (default en)."
+          }
+        }
+      },
+      "OfferRequest": {
+        "type": "object",
+        "properties": {
+          "quoteId": {
+            "type": "string"
+          },
+          "purchaseType": {
+            "type": "string",
+            "description": "BID (money offer, default), INSTANT (buy now at the operator's fixed price — omit amount), or POINTS (amount = points).",
+            "enum": [
+              "BID",
+              "INSTANT",
+              "POINTS"
+            ],
+            "default": "BID"
+          },
+          "amount": {
+            "type": "number",
+            "description": "Offer amount in the option's currency (or points). Omit for INSTANT."
+          },
+          "cabin": {
+            "type": "string",
+            "description": "Target cabin when the quote has more than one option.",
+            "enum": [
+              "BUSINESS",
+              "FIRST",
+              "PREMIUM_ECONOMY"
+            ]
+          },
+          "segment": {
+            "type": "string",
+            "description": "Route 'YUL-LHR' or flight number when more than one segment is eligible."
+          },
+          "quantity": {
+            "type": "integer",
+            "description": "Seats (default 1)."
+          },
+          "confirm": {
+            "type": "boolean",
+            "description": "Human-in-the-loop: set true to commit once the traveler has confirmed. When live submit is enabled, a first call without it returns 202 + stage needs_confirmation."
+          },
+          "conversationId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "quoteId"
+        ]
+      },
+      "ModifyOfferRequest": {
+        "type": "object",
+        "properties": {
+          "quoteId": {
+            "type": "string"
+          },
+          "amount": {
+            "type": "number",
+            "description": "The NEW amount in the offer currency."
+          },
+          "quantity": {
+            "type": "integer"
+          },
+          "confirm": {
+            "type": "boolean",
+            "description": "Human-in-the-loop confirm (see OfferRequest.confirm)."
+          },
+          "conversationId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "quoteId",
+          "amount"
+        ]
+      },
+      "Offer": {
+        "type": "object",
+        "properties": {
+          "quoteId": {
+            "type": "string"
+          },
+          "offerReference": {
+            "oneOf": [
+              {
+                "type": "string",
+                "description": "Operator order-change id when one exists, else the option's offerId."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "offerReferences": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "All operator order-change ids created/affected by this call."
+          },
+          "offerId": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "stage": {
+            "type": "string",
+            "enum": [
+              "needs_payment",
+              "needs_confirmation",
+              "submitted",
+              "rejected",
+              "unavailable"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending_confirmation",
+              "pending_payment",
+              "submitted",
+              "rejected",
+              "unavailable"
+            ]
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "purchaseType": {
+            "type": "string",
+            "enum": [
+              "BID",
+              "INSTANT",
+              "POINTS"
+            ]
+          },
+          "cabin": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "segment": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Segment"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "amount": {
+            "oneOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "currency": {
+            "oneOf": [
+              {
+                "type": "string",
+                "description": "ISO currency, or PTS for a points amount."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "quantity": {
+            "type": "integer"
+          },
+          "paymentUrl": {
+            "oneOf": [
+              {
+                "type": "string",
+                "description": "The operator's hosted payment / confirmation page (pay-by-link). Card details are captured there, never by this API."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "message": {
+            "type": "string",
+            "description": "Human-readable next step, safe to relay to the traveler."
+          },
+          "reason": {
+            "oneOf": [
+              {
+                "type": "string",
+                "description": "Rejection token on failures."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "changesRemaining": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "quoteId",
+          "offerReference",
+          "offerReferences",
+          "offerId",
+          "stage",
+          "status",
+          "ok",
+          "purchaseType",
+          "cabin",
+          "segment",
+          "amount",
+          "currency",
+          "quantity",
+          "paymentUrl",
+          "message",
+          "reason",
+          "changesRemaining"
+        ]
+      },
+      "ModifiedOffer": {
+        "type": "object",
+        "properties": {
+          "quoteId": {
+            "type": "string"
+          },
+          "offerReference": {
+            "type": "string"
+          },
+          "offerReferences": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "stage": {
+            "type": "string",
+            "enum": [
+              "updated"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "submitted"
+            ]
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "amount": {
+            "type": "number"
+          },
+          "currency": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "paymentUrl": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "message": {
+            "type": "string"
+          },
+          "changesRemaining": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "quoteId",
+          "offerReference",
+          "offerReferences",
+          "stage",
+          "status",
+          "ok",
+          "amount",
+          "currency",
+          "paymentUrl",
+          "message",
+          "changesRemaining"
+        ]
+      },
+      "CancelledOffer": {
+        "type": "object",
+        "properties": {
+          "quoteId": {
+            "type": "string"
+          },
+          "offerReference": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "stage": {
+            "type": "string",
+            "enum": [
+              "cancelled"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "cancelled"
+            ]
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "message": {
+            "type": "string"
+          },
+          "changesRemaining": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "quoteId",
+          "offerReference",
+          "stage",
+          "status",
+          "ok",
+          "message",
+          "changesRemaining"
+        ]
+      },
+      "Money": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "number"
+          },
+          "currency": {
+            "type": "string",
+            "description": "ISO currency, or PTS for points."
+          }
+        },
+        "required": [
+          "value",
+          "currency"
+        ]
+      },
+      "PlacedOffer": {
+        "type": "object",
+        "properties": {
+          "reference": {
+            "type": "string",
+            "description": "Operator order-change id (live) or the option's offerId (snapshot)."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "submitted",
+              "pending",
+              "accepted",
+              "declined",
+              "cancelled",
+              "unknown"
+            ]
+          },
+          "rawStatus": {
+            "type": "string",
+            "description": "The operator's own status code."
+          },
+          "amount": {
+            "oneOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "currency": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "cabin": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "segment": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "mutable": {
+            "type": "boolean",
+            "description": "Whether the offer can still be changed or withdrawn."
+          },
+          "source": {
+            "type": "string",
+            "description": "live = read from the operator now; snapshot = seen on the booking at quote time.",
+            "enum": [
+              "live",
+              "snapshot"
+            ]
+          }
+        },
+        "required": [
+          "reference",
+          "status",
+          "rawStatus",
+          "amount",
+          "currency",
+          "cabin",
+          "segment",
+          "mutable",
+          "source"
+        ]
+      },
+      "CartLine": {
+        "type": "object",
+        "properties": {
+          "cartItemId": {
+            "type": "string"
+          },
+          "offerItemId": {
+            "type": "string"
+          },
+          "productName": {
+            "type": "string"
+          },
+          "segment": {
+            "type": "string"
+          },
+          "purchaseType": {
+            "type": "string"
+          },
+          "amount": {
+            "$ref": "#/components/schemas/Money"
+          },
+          "quantity": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "productName",
+          "purchaseType"
+        ]
+      },
+      "OfferList": {
+        "type": "object",
+        "properties": {
+          "quoteId": {
+            "type": "string"
+          },
+          "carrier": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "offers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PlacedOffer"
+            }
+          },
+          "cart": {
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "items": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/components/schemas/CartLine"
+                    }
+                  },
+                  "total": {
+                    "oneOf": [
+                      {
+                        "$ref": "#/components/schemas/Money"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "items",
+                  "total"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "liveStatusLines": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Human-readable live status lines, one per placed offer."
+          },
+          "options": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/QuoteOption"
+            },
+            "description": "Bid-eligible options with their current ranges."
+          },
+          "changesRemaining": {
+            "type": "integer"
+          },
+          "changesLimit": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "quoteId",
+          "carrier",
+          "offers",
+          "cart",
+          "liveStatusLines",
+          "options",
+          "changesRemaining",
+          "changesLimit"
+        ]
+      },
+      "TokenScope": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "oauth",
+              "static"
+            ]
+          },
+          "clientId": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "scopes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "partner": {
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "code": {
+                    "type": "string",
+                    "description": "IATA / partner code."
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "slug": {
+                    "type": "string"
+                  },
+                  "mcpServer": {
+                    "type": "string",
+                    "description": "The partner's white-label MCP server URL."
+                  },
+                  "serverCard": {
+                    "type": "string",
+                    "description": "The partner's server card URL."
+                  },
+                  "note": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "code",
+                  "name",
+                  "slug",
+                  "mcpServer",
+                  "serverCard"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "mcpServer": {
+            "type": "string",
+            "description": "The MCP server this token should use (partner server for a scoped token)."
+          },
+          "channel": {
+            "type": "string",
+            "enum": [
+              "rest",
+              "rest-partner"
+            ]
+          }
+        },
+        "required": [
+          "kind",
+          "clientId",
+          "scopes",
+          "partner",
+          "mcpServer",
+          "channel"
+        ]
+      },
+      "PriceLine": {
+        "type": "object",
+        "properties": {
+          "label": {
+            "type": "string"
+          },
+          "amount": {
+            "$ref": "#/components/schemas/Money"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "charge",
+              "credit"
+            ]
+          }
+        },
+        "required": [
+          "label",
+          "amount"
+        ]
+      },
+      "PriceBreakdown": {
+        "type": "object",
+        "properties": {
+          "quoteId": {
+            "type": "string"
+          },
+          "offerId": {
+            "type": "string"
+          },
+          "purchaseType": {
+            "type": "string"
+          },
+          "available": {
+            "type": "boolean",
+            "description": "False when itemized pricing isn't available for this booking."
+          },
+          "pending": {
+            "type": "boolean",
+            "description": "True when the operator hasn't returned itemized taxes/fees yet."
+          },
+          "amount": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Money"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "lines": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PriceLine"
+            }
+          },
+          "total": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Money"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "bidAnalysis": {
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "strength": {
+                    "type": "string"
+                  },
+                  "score": {
+                    "type": "number",
+                    "description": "0–100."
+                  },
+                  "text": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "strength"
+                ],
+                "description": "The operator's own bid-strength read for this amount."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "message": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "quoteId",
+          "offerId",
+          "purchaseType",
+          "available",
+          "amount",
+          "lines",
+          "total",
+          "bidAnalysis",
+          "message"
+        ]
+      },
+      "PartnerAnalytics": {
+        "type": "object",
+        "properties": {
+          "partner": {
+            "type": "object",
+            "properties": {
+              "slug": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "code": {
+                "type": "string",
+                "description": "IATA / operator code."
+              },
+              "vertical": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "slug",
+              "name",
+              "code",
+              "vertical"
+            ]
+          },
+          "window": {
+            "type": "object",
+            "properties": {
+              "key": {
+                "type": "string",
+                "enum": [
+                  "7d",
+                  "30d",
+                  "90d"
+                ]
+              },
+              "days": {
+                "type": "integer"
+              },
+              "from": {
+                "type": "string"
+              },
+              "to": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "key",
+              "days",
+              "from",
+              "to"
+            ]
+          },
+          "generatedAt": {
+            "type": "string"
+          },
+          "headline": {
+            "type": "object",
+            "properties": {
+              "questions": {
+                "type": "integer"
+              },
+              "aiChecks": {
+                "type": "integer"
+              },
+              "bids": {
+                "type": "integer"
+              },
+              "paid": {
+                "type": "integer"
+              },
+              "shareOfAnswer": {
+                "oneOf": [
+                  {
+                    "type": "number",
+                    "description": "Share of answer-engine answers that cited or mentioned Upgrade Agent for prompts about this partner; null when nothing was observed."
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "questions",
+              "aiChecks",
+              "bids",
+              "paid",
+              "shareOfAnswer"
+            ]
+          },
+          "demand": {
+            "type": "object",
+            "properties": {
+              "total": {
+                "type": "integer",
+                "description": "Questions about this partner in the window, excluding Upgrade Agent's own traffic and synthetic test rows."
+              },
+              "excluded": {
+                "type": "object",
+                "properties": {
+                  "internal": {
+                    "type": "integer"
+                  },
+                  "test": {
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "internal",
+                  "test"
+                ]
+              },
+              "byIntent": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/Count"
+                }
+              },
+              "byChannel": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/Count"
+                }
+              },
+              "byRoute": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "route": {
+                      "type": "string",
+                      "description": "e.g. YYZ–LHR"
+                    },
+                    "origin": {
+                      "type": "string"
+                    },
+                    "destination": {
+                      "type": "string"
+                    },
+                    "count": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "route",
+                    "origin",
+                    "destination",
+                    "count"
+                  ]
+                }
+              },
+              "withRoute": {
+                "type": "integer"
+              },
+              "topQuestions": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/QuestionFreq"
+                }
+              },
+              "weakAnswers": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/QuestionFreq"
+                }
+              },
+              "trend": {
+                "type": "object",
+                "properties": {
+                  "bucket": {
+                    "type": "string",
+                    "enum": [
+                      "day",
+                      "week"
+                    ]
+                  },
+                  "points": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "start": {
+                          "type": "string",
+                          "description": "ISO date"
+                        },
+                        "questions": {
+                          "type": "integer"
+                        },
+                        "checks": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "start",
+                        "questions",
+                        "checks"
+                      ]
+                    }
+                  }
+                },
+                "required": [
+                  "bucket",
+                  "points"
+                ]
+              },
+              "note": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "total",
+              "excluded",
+              "byIntent",
+              "byChannel",
+              "byRoute",
+              "withRoute",
+              "topQuestions",
+              "weakAnswers",
+              "trend"
+            ]
+          },
+          "conversion": {
+            "type": "object",
+            "properties": {
+              "steps": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "stage": {
+                      "type": "string",
+                      "enum": [
+                        "checked",
+                        "eligible",
+                        "staged",
+                        "paid",
+                        "accepted"
+                      ]
+                    },
+                    "label": {
+                      "type": "string"
+                    },
+                    "count": {
+                      "type": "integer"
+                    },
+                    "stepRate": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "stage",
+                    "label",
+                    "count",
+                    "stepRate"
+                  ]
+                }
+              },
+              "declined": {
+                "type": "integer"
+              },
+              "cancelled": {
+                "type": "integer"
+              },
+              "paidConversionRate": {
+                "type": "number",
+                "description": "paid / eligible"
+              },
+              "bidRate": {
+                "type": "number",
+                "description": "staged / eligible"
+              },
+              "byChannel": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "channel": {
+                      "type": "string",
+                      "enum": [
+                        "web",
+                        "mcp",
+                        "rest",
+                        "mcp-partner",
+                        "widget",
+                        "other"
+                      ]
+                    },
+                    "label": {
+                      "type": "string"
+                    },
+                    "checked": {
+                      "type": "integer"
+                    },
+                    "eligible": {
+                      "type": "integer"
+                    },
+                    "staged": {
+                      "type": "integer"
+                    },
+                    "paid": {
+                      "type": "integer"
+                    },
+                    "accepted": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "channel",
+                    "label",
+                    "checked",
+                    "eligible",
+                    "staged",
+                    "paid",
+                    "accepted"
+                  ]
+                }
+              },
+              "offersPresented": {
+                "type": "integer"
+              },
+              "widgetRenders": {
+                "type": "integer"
+              },
+              "note": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "steps",
+              "declined",
+              "cancelled",
+              "paidConversionRate",
+              "bidRate",
+              "byChannel",
+              "offersPresented",
+              "widgetRenders"
+            ]
+          },
+          "agents": {
+            "type": "object",
+            "properties": {
+              "total": {
+                "type": "integer"
+              },
+              "byTier": {
+                "type": "object",
+                "properties": {
+                  "verified": {
+                    "type": "integer"
+                  },
+                  "declared": {
+                    "type": "integer"
+                  },
+                  "unknown": {
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "verified",
+                  "declared",
+                  "unknown"
+                ]
+              },
+              "blocked": {
+                "type": "integer"
+              },
+              "families": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "agent": {
+                      "type": "string"
+                    },
+                    "tier": {
+                      "type": "string"
+                    },
+                    "requests": {
+                      "type": "integer"
+                    },
+                    "blocked": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "agent",
+                    "tier",
+                    "requests",
+                    "blocked"
+                  ]
+                }
+              },
+              "clients": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/Count"
+                }
+              },
+              "blocks": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "reason": {
+                      "type": "string"
+                    },
+                    "count": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "reason",
+                    "count"
+                  ]
+                }
+              },
+              "note": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "total",
+              "byTier",
+              "blocked",
+              "families",
+              "clients",
+              "blocks"
+            ]
+          },
+          "visibility": {
+            "type": "object",
+            "properties": {
+              "observations": {
+                "type": "integer"
+              },
+              "prompts": {
+                "type": "integer"
+              },
+              "runs": {
+                "type": "integer"
+              },
+              "shareOfAnswer": {
+                "oneOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "cited": {
+                "type": "integer"
+              },
+              "mentioned": {
+                "type": "integer"
+              },
+              "namedRate": {
+                "oneOf": [
+                  {
+                    "type": "number",
+                    "description": "Share of answers that named the partner."
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "byProvider": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "provider": {
+                      "type": "string"
+                    },
+                    "answered": {
+                      "type": "integer"
+                    },
+                    "cited": {
+                      "type": "integer"
+                    },
+                    "mentioned": {
+                      "type": "integer"
+                    },
+                    "share": {
+                      "type": "number"
+                    },
+                    "namedRate": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "provider",
+                    "answered",
+                    "cited",
+                    "mentioned",
+                    "share",
+                    "namedRate"
+                  ]
+                }
+              },
+              "citedInstead": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "domain": {
+                      "type": "string"
+                    },
+                    "bucket": {
+                      "type": "string"
+                    },
+                    "count": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "domain",
+                    "bucket",
+                    "count"
+                  ]
+                }
+              },
+              "trend": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "askedAt": {
+                      "type": "string"
+                    },
+                    "n": {
+                      "type": "integer"
+                    },
+                    "share": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "askedAt",
+                    "n",
+                    "share"
+                  ]
+                }
+              },
+              "whatAgentsSay": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/AgentExcerpt"
+                }
+              },
+              "whereWrong": {
+                "type": "object",
+                "properties": {
+                  "community": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "claim": {
+                          "type": "string"
+                        },
+                        "reason": {
+                          "type": "string"
+                        },
+                        "canonical": {
+                          "oneOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "category": {
+                          "type": "string"
+                        },
+                        "url": {
+                          "type": "string"
+                        },
+                        "subreddit": {
+                          "type": "string"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "createdAt": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "claim",
+                        "reason",
+                        "canonical",
+                        "category",
+                        "url",
+                        "subreddit",
+                        "title",
+                        "createdAt"
+                      ]
+                    }
+                  },
+                  "forReview": {
+                    "type": "array",
+                    "items": {
+                      "allOf": [
+                        {
+                          "$ref": "#/components/schemas/AgentExcerpt"
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "reason": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "reason"
+                          ]
+                        }
+                      ]
+                    }
+                  },
+                  "communityMentions": {
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "community",
+                  "forReview",
+                  "communityMentions"
+                ]
+              },
+              "note": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "observations",
+              "prompts",
+              "runs",
+              "shareOfAnswer",
+              "cited",
+              "mentioned",
+              "namedRate",
+              "byProvider",
+              "citedInstead",
+              "trend",
+              "whatAgentsSay",
+              "whereWrong"
+            ]
+          },
+          "content": {
+            "type": "object",
+            "properties": {
+              "gaps": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "partner": {
+                      "oneOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "intent": {
+                      "type": "string"
+                    },
+                    "representativeQuery": {
+                      "type": "string"
+                    },
+                    "count": {
+                      "type": "integer"
+                    },
+                    "avgQuality": {
+                      "type": "number"
+                    },
+                    "poorCount": {
+                      "type": "integer"
+                    },
+                    "examples": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "score": {
+                      "type": "number"
+                    },
+                    "sources": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "providers": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "intent",
+                    "representativeQuery",
+                    "count",
+                    "avgQuality",
+                    "poorCount",
+                    "examples",
+                    "score"
+                  ]
+                }
+              },
+              "drift": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "integer"
+                    },
+                    "partner": {
+                      "type": "string"
+                    },
+                    "canonicalQuestionId": {
+                      "type": "string"
+                    },
+                    "sourceUrl": {
+                      "oneOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "detectedAt": {
+                      "type": "string"
+                    },
+                    "reason": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "partner",
+                    "canonicalQuestionId",
+                    "sourceUrl",
+                    "detectedAt",
+                    "reason"
+                  ]
+                }
+              },
+              "publishedCanonical": {
+                "type": "integer"
+              },
+              "note": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "gaps",
+              "drift",
+              "publishedCanonical"
+            ]
+          },
+          "pricing": {
+            "type": "object",
+            "properties": {
+              "bands": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "upgradeType": {
+                      "type": "string"
+                    },
+                    "label": {
+                      "type": "string"
+                    },
+                    "currency": {
+                      "type": "string"
+                    },
+                    "low": {
+                      "type": "number"
+                    },
+                    "typical": {
+                      "type": "number"
+                    },
+                    "high": {
+                      "type": "number"
+                    },
+                    "samples": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "upgradeType",
+                    "label",
+                    "currency",
+                    "low",
+                    "typical",
+                    "high",
+                    "samples"
+                  ]
+                }
+              },
+              "byRoute": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "route": {
+                      "type": "string"
+                    },
+                    "upgradeType": {
+                      "type": "string"
+                    },
+                    "label": {
+                      "type": "string"
+                    },
+                    "currency": {
+                      "type": "string"
+                    },
+                    "low": {
+                      "type": "number"
+                    },
+                    "typical": {
+                      "type": "number"
+                    },
+                    "high": {
+                      "type": "number"
+                    },
+                    "samples": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "route",
+                    "upgradeType",
+                    "label",
+                    "currency",
+                    "low",
+                    "typical",
+                    "high",
+                    "samples"
+                  ]
+                }
+              },
+              "samples": {
+                "type": "integer"
+              },
+              "observedFrom": {
+                "oneOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "observedTo": {
+                "oneOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "note": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "bands",
+              "byRoute",
+              "samples",
+              "observedFrom",
+              "observedTo"
+            ]
+          },
+          "notes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Data-availability notes (a source unavailable in this window)."
+          }
+        },
+        "required": [
+          "partner",
+          "window",
+          "generatedAt",
+          "headline",
+          "demand",
+          "conversion",
+          "agents",
+          "visibility",
+          "content",
+          "pricing",
+          "notes"
+        ],
+        "description": "Per-partner analytics report: demand, conversion, agent mix, AI visibility, content, observed pricing. Every section is empty-safe and carries a `note` when its source had nothing in the window. PII-free: question text is masked at capture."
+      },
+      "Count": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "count": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "name",
+          "count"
+        ]
+      },
+      "QuestionFreq": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "PII-masked question text."
+          },
+          "count": {
+            "type": "integer"
+          },
+          "avgQuality": {
+            "type": "number",
+            "description": "Mean judge quality 0–1."
+          }
+        },
+        "required": [
+          "query",
+          "count",
+          "avgQuality"
+        ]
+      },
+      "AgentExcerpt": {
+        "type": "object",
+        "properties": {
+          "provider": {
+            "type": "string"
+          },
+          "prompt": {
+            "type": "string"
+          },
+          "excerpt": {
+            "type": "string",
+            "description": "PII-masked excerpt of the engine's answer."
+          },
+          "cited": {
+            "type": "boolean"
+          },
+          "askedAt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider",
+          "prompt",
+          "excerpt",
+          "cited",
+          "askedAt"
+        ]
+      }
+    },
+    "responses": {
+      "Unauthorized": {
+        "description": "Missing, invalid, expired, or revoked bearer token. The WWW-Authenticate challenge points at the OAuth protected-resource metadata.",
+        "headers": {
+          "WWW-Authenticate": {
+            "schema": {
+              "type": "string"
+            },
+            "description": "Bearer resource_metadata=\"https://www.upgradeagent.ai/.well-known/oauth-protected-resource\""
+          }
+        },
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/Problem"
+            }
+          }
+        }
+      },
+      "TooManyRequests": {
+        "description": "Per-caller rate limit exceeded.",
+        "headers": {
+          "Retry-After": {
+            "schema": {
+              "type": "integer"
+            }
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "properties": {
+                "error": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "error"
+              ]
+            }
+          }
+        }
+      }
+    },
+    "securitySchemes": {
+      "oauth2": {
+        "type": "oauth2",
+        "description": "OAuth 2.1 authorization code with PKCE (S256). Dynamic client registration (RFC 7591) at /api/oauth/register; discovery at /.well-known/oauth-authorization-server.",
+        "flows": {
+          "authorizationCode": {
+            "authorizationUrl": "https://www.upgradeagent.ai/api/oauth/authorize",
+            "tokenUrl": "https://www.upgradeagent.ai/api/oauth/token",
+            "refreshUrl": "https://www.upgradeagent.ai/api/oauth/token",
+            "scopes": {
+              "mcp": "Quote, execute, and confirm upgrades (same scope as the MCP server)."
+            }
+          }
+        }
+      },
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "An OAuth access token (or a partner-issued static token) as `Authorization: Bearer <token>`."
+      }
+    }
+  },
+  "security": [
+    {
+      "oauth2": [
+        "mcp"
+      ]
+    },
+    {
+      "bearerAuth": []
+    }
+  ],
+  "tags": [
+    {
+      "name": "Quote",
+      "description": "Step 1 — live eligibility and options for a booking."
+    },
+    {
+      "name": "Execute",
+      "description": "Step 2 — place, change, or withdraw an offer; pay on the operator's hosted page."
+    },
+    {
+      "name": "Confirm",
+      "description": "Step 3 — read back live offer status."
+    },
+    {
+      "name": "Pricing",
+      "description": "Observed ranges without a booking, and itemized cost before committing."
+    },
+    {
+      "name": "Partners",
+      "description": "Which operators offer upgrades, and how — including route-level discovery."
+    },
+    {
+      "name": "Outcomes",
+      "description": "Learn a bid's result asynchronously — signed webhooks, or poll the event log."
+    }
+  ],
+  "externalDocs": {
+    "description": "Developer guide (MCP + REST)",
+    "url": "https://www.upgradeagent.ai/developers"
+  },
+  "x-mcp-server": "https://www.upgradeagent.ai/api/mcp",
+  "x-mcp-manifest": "https://www.upgradeagent.ai/.well-known/mcp.json"
+}
