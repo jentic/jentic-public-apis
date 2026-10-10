@@ -1,0 +1,3869 @@
+{
+  "openapi": "3.1.0",
+  "jsonSchemaDialect": "https://json-schema.org/draft/2020-12/schema",
+  "info": {
+    "title": "snaplab API",
+    "version": "1.0.0",
+    "summary": "Turn any URL or HTML into a screenshot, a PDF, or a social image.",
+    "description": "snaplab renders web pages with a real headless Chromium and hands you the bytes.\n\n- `POST|GET /api/render` — URL **or** raw HTML → PNG / JPEG / WebP / AVIF / PDF, viewport or full page, retina, dark mode, element clipping.\n- `POST|GET /api/render/image` — HTML (or a `{{ template }}` + `data`) → a fixed-size image. The Open Graph card path.\n- `POST /api/render/preview` — unauthenticated, rate-limited demo render.\n- `POST /api/tools/*` — key-less public tools, 20 renders/day/IP, always answered with a hosted URL.\n- `/mcp` — a stateless Streamable-HTTP MCP server exposing `screenshot`, `pdf`, `html_to_image` and `usage`.\n\n## Authentication\n\nEvery endpoint except `/api/health`, `/api/render/preview` and `/api/tools/*` needs an API key. Keys look like `sk_…`\nand are created in the dashboard or through `POST /api/keys`.\n\n1. `Authorization: Bearer sk_…` — the header form, accepted everywhere.\n2. Signed query parameters — `GET /api/render` and `GET /api/render/image` only. See below.\n3. The browser session cookie, for the dashboard itself.\n\n### Signed URLs\n\nPutting a raw key in an `<img src>` leaks it. Sign the URL instead: append `keyId` (the API key's id) and\n`sig=hex(HMAC_SHA256(signing_secret, canonical))`, optionally with an `expires` Unix timestamp. The canonical string is\nevery query pair except `sig`, sorted by name then value and joined with `&`. The per-key signing secret and a URL\nbuilder live in the dashboard under Keys.\n\n## Options\n\nOptions are camelCase and identical between the JSON body and the query string. In a query string, booleans are\n`true`/`1` and `false`/`0`, `hideSelectors` is a comma-separated list, and PDF options take either the dotted form\n(`pdf.format=A4`) or the flat alias (`pdfFormat=A4`).\n\n## Caching and quota\n\nIdentical options are served from a shared cache for 24h. **Cache hits and failed renders do not count against your\nquota** — only fresh, successful renders do. Renders carry `X-Snaplab-Cache`, `X-Snaplab-Duration-Ms`,\n`X-Snaplab-Fingerprint` and `X-Snaplab-Quota-Remaining`.\n\nPass `cache: false` to force a fresh render.\n\n## Errors\n\nErrors are JSON: `{\"error\":\"…\",\"code\":\"…\"}`. Messages are for humans; codes are stable.\n\n| Status | Code | Meaning |\n| --- | --- | --- |\n| 400 | — | A parameter is missing, malformed, out of range, or the target is a private/blocked address. |\n| 401 | `unauthorized` | Missing, unknown or revoked API key; or a bad signature. |\n| 402 | `payment_required` | The subscription is past due. |\n| 422 | `selector_not_found` | The page rendered but `selector` matched nothing. |\n| 429 | `quota_exceeded` | The monthly render allowance is used up. |\n| 429 | — | Too many requests per minute for your plan. |\n| 502 | `upstream` | The target site was unreachable. |\n| 503 | `capacity` / `not_ready` | The render queue is saturated, or the browsers are still starting. Retry shortly. |\n| 504 | `timeout` | The page did not finish in time. |\n\n## Plans\n\n| Plan | Renders / month | Price | Rate | Concurrency |\n| --- | --- | --- | --- | --- |\n| free | 100 | $0 | 30/min | 1 |\n| starter | 2,000 | $9 | 120/min | 3 |\n| pro | 10,000 | $29 | 300/min | 5 |\n| business | 40,000 | $79 | 600/min | 10 |\n",
+    "termsOfService": "https://snaplab.dev/terms",
+    "contact": {
+      "name": "snaplab support",
+      "url": "https://snaplab.dev/docs",
+      "email": "snaplab.dev"
+    },
+    "license": {
+      "name": "MIT",
+      "identifier": "MIT"
+    }
+  },
+  "servers": [
+    {
+      "url": "https://snaplab.dev",
+      "description": "Production"
+    }
+  ],
+  "externalDocs": {
+    "description": "snaplab documentation",
+    "url": "https://snaplab.dev/docs"
+  },
+  "tags": [
+    {
+      "name": "Rendering",
+      "description": "Turn URLs and HTML into images and PDFs."
+    },
+    {
+      "name": "Captures",
+      "description": "Stored renders, served from public `/i/c/{id}` URLs."
+    },
+    {
+      "name": "Free tools",
+      "description": "Key-less public endpoints behind the free tool pages."
+    },
+    {
+      "name": "Account",
+      "description": "API keys, plan and usage."
+    },
+    {
+      "name": "Billing",
+      "description": "Stripe checkout, portal and webhook."
+    },
+    {
+      "name": "System",
+      "description": "Unauthenticated service health."
+    }
+  ],
+  "security": [
+    {
+      "bearerAuth": []
+    }
+  ],
+  "paths": {
+    "/api/render": {
+      "post": {
+        "tags": [
+          "Rendering"
+        ],
+        "operationId": "render",
+        "summary": "Render a URL or HTML",
+        "description": "The main endpoint. Give it a `url` **or** inline `html`/`template` and it answers with the bytes — or, with `responseType: \"json\"`, a hosted URL.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RenderOptions"
+              },
+              "examples": {
+                "url": {
+                  "summary": "Full-page screenshot",
+                  "value": {
+                    "url": "https://example.com",
+                    "format": "png",
+                    "fullPage": true,
+                    "blockAds": true
+                  }
+                },
+                "html": {
+                  "summary": "Inline HTML to PDF",
+                  "value": {
+                    "html": "<h1>Invoice #42</h1>",
+                    "format": "pdf",
+                    "pdf": {
+                      "format": "A4"
+                    }
+                  }
+                },
+                "hosted": {
+                  "summary": "Hosted URL instead of bytes",
+                  "value": {
+                    "url": "https://example.com",
+                    "responseType": "json"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The rendered bytes.",
+            "headers": {
+              "X-Snaplab-Cache": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "HIT",
+                    "MISS"
+                  ]
+                },
+                "description": "Whether the bytes came from the cache. Hits are free."
+              },
+              "X-Snaplab-Duration-Ms": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Server-side render time."
+              },
+              "X-Snaplab-Fingerprint": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Cache key for these options."
+              },
+              "X-Snaplab-Quota-Remaining": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Renders left this month."
+              }
+            },
+            "content": {
+              "image/png": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "image/jpeg": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "image/webp": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "image/avif": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "application/pdf": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HostedRender"
+                },
+                "description": "When `responseType` is `json`."
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid options, or a target that resolves to a private/blocked address.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid API key / signature.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Subscription past due (`payment_required`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The render can never succeed as written (`selector_not_found`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit or monthly quota exceeded (`quota_exceeded`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "The target site was unreachable (`upstream`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Queue saturated or browsers not ready. Retry after `Retry-After` seconds.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "The page did not finish in time (`timeout`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "Rendering"
+        ],
+        "operationId": "renderGet",
+        "summary": "Render a URL or HTML (query form)",
+        "description": "Every option as a query parameter, so a render can sit in an `<img src>`. Accepts a bearer key or a signed URL (`keyId` + `sig`).",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "signedKeyId": [],
+            "signedSignature": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "url",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Absolute http(s) URL. Provide this or `html`/`template`.",
+            "example": "https://example.com"
+          },
+          {
+            "name": "html",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "URL-encoded HTML to render instead of navigating."
+          },
+          {
+            "name": "template",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "URL-encoded `{{ template }}` HTML."
+          },
+          {
+            "name": "data",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "JSON object (URL-encoded) with values for the template.",
+            "example": "{\"title\":\"Hello\"}"
+          },
+          {
+            "name": "css",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "URL-encoded stylesheet injected into `<head>`."
+          },
+          {
+            "name": "googleFonts",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Comma-separated font families.",
+            "example": "Inter"
+          },
+          {
+            "name": "format",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "png",
+                "jpeg",
+                "webp",
+                "avif",
+                "pdf"
+              ]
+            },
+            "description": "Output format."
+          },
+          {
+            "name": "viewport",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "desktop",
+                "laptop",
+                "tablet",
+                "mobile",
+                "wide"
+              ]
+            },
+            "description": "Viewport preset."
+          },
+          {
+            "name": "width",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "Viewport width in CSS pixels."
+          },
+          {
+            "name": "height",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "Viewport height in CSS pixels."
+          },
+          {
+            "name": "deviceScaleFactor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "number"
+            },
+            "description": "Pixel ratio (0.5–3)."
+          },
+          {
+            "name": "mobile",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "true",
+                "false",
+                "1",
+                "0"
+              ]
+            },
+            "description": "Sugar for `viewport=mobile`."
+          },
+          {
+            "name": "fullPage",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "true",
+                "false",
+                "1",
+                "0"
+              ]
+            },
+            "description": "Capture the whole scrollable page."
+          },
+          {
+            "name": "selector",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Capture just this element."
+          },
+          {
+            "name": "quality",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "1–100, jpeg/webp/avif only."
+          },
+          {
+            "name": "waitUntil",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "auto",
+                "load",
+                "domcontentloaded",
+                "networkidle"
+              ],
+              "default": "auto"
+            },
+            "description": "Navigation wait condition. Default \"auto\": waits for load, then for the network to be quiet for 150ms, capped at 400ms. \"networkidle\" is the full wait and costs ~0.5s more."
+          },
+          {
+            "name": "waitForSelector",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Wait for this selector before capturing."
+          },
+          {
+            "name": "delayMs",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "Extra settle time, 0–30000."
+          },
+          {
+            "name": "scrollY",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "Scroll down first, to trigger lazy loading."
+          },
+          {
+            "name": "hideSelectors",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Comma-separated selectors to hide.",
+            "example": ".ad,#cookie-banner"
+          },
+          {
+            "name": "darkMode",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "true",
+                "false",
+                "1",
+                "0",
+                "prefers",
+                "force"
+              ]
+            },
+            "description": "`true`/`force` emulate `prefers-color-scheme: dark` AND turn on Chromium's auto dark mode, so a site with no dark theme still comes back dark (a site that has one is left alone). `prefers` is the media query only."
+          },
+          {
+            "name": "dismissBanners",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "true",
+                "false",
+                "1",
+                "0"
+              ]
+            },
+            "description": "Hide known cookie/consent banners (default true)."
+          },
+          {
+            "name": "blockAds",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "true",
+                "false",
+                "1",
+                "0"
+              ]
+            },
+            "description": "Abort ad/analytics/session-replay requests."
+          },
+          {
+            "name": "customCss",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "URL-encoded CSS injected after load."
+          },
+          {
+            "name": "customJs",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "URL-encoded JS evaluated after load."
+          },
+          {
+            "name": "cache",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "true",
+                "false",
+                "1",
+                "0"
+              ]
+            },
+            "description": "Set `false` to force a fresh render."
+          },
+          {
+            "name": "responseType",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "binary",
+                "json"
+              ]
+            },
+            "description": "`json` answers with a hosted URL instead of bytes."
+          },
+          {
+            "name": "pdf.format",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Paper size. Flat alias: `pdfFormat`.",
+            "example": "A4"
+          },
+          {
+            "name": "pdf.landscape",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "true",
+                "false",
+                "1",
+                "0"
+              ]
+            },
+            "description": "Landscape orientation. Flat alias: `pdfLandscape`."
+          },
+          {
+            "name": "pdf.printBackground",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "true",
+                "false",
+                "1",
+                "0"
+              ]
+            },
+            "description": "Print background graphics. Flat alias: `pdfPrintBackground`."
+          },
+          {
+            "name": "pdf.scale",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "number"
+            },
+            "description": "0.1–2. Flat alias: `pdfScale`."
+          },
+          {
+            "name": "pdf.preferCSSPageSize",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "true",
+                "false",
+                "1",
+                "0"
+              ]
+            },
+            "description": "Honour the page's `@page size`. Flat alias: `pdfPreferCSSPageSize`."
+          },
+          {
+            "name": "pdf.margin",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "One CSS length applied to all four sides. Per-side: `pdf.margin.top` … or `pdfMarginTop` ….",
+            "example": "0.4in"
+          },
+          {
+            "name": "pdf.headerTemplate",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "HTML drawn at the top of every page. Flat alias: `pdfHeaderTemplate`."
+          },
+          {
+            "name": "pdf.footerTemplate",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "HTML drawn at the bottom of every page, or a preset name (`@pageNumbers`, `@pageNumbersUrl`). Setting it turns `displayHeaderFooter` on. Flat alias: `pdfFooterTemplate`.",
+            "example": "@pageNumbers"
+          },
+          {
+            "name": "pdf.displayHeaderFooter",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "true",
+                "false",
+                "1",
+                "0"
+              ]
+            },
+            "description": "Draw the running header/footer. Inferred from the templates. Flat alias: `pdfDisplayHeaderFooter`."
+          },
+          {
+            "name": "pdf.pageRanges",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Sheets to keep — `1-3`, `1,4,7-9`. Flat alias: `pdfPageRanges`.",
+            "example": "1-3"
+          },
+          {
+            "name": "pdf.media",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "print",
+                "screen"
+              ]
+            },
+            "description": "Stylesheet the paper is printed under. Default `print`. Case-insensitive. Flat alias: `pdfMedia`."
+          },
+          {
+            "name": "pdf.tagged",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "true",
+                "false",
+                "1",
+                "0"
+              ]
+            },
+            "description": "Emit a tagged (accessible) PDF. Flat alias: `pdfTagged`."
+          },
+          {
+            "name": "pdf.outline",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "true",
+                "false",
+                "1",
+                "0"
+              ]
+            },
+            "description": "Embed a document outline (bookmarks). Flat alias: `pdfOutline`."
+          },
+          {
+            "name": "pdf.width",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Exact paper width as a CSS length; replaces `pdf.format` and needs `pdf.height` too. Flat alias: `pdfWidth`.",
+            "example": "210mm"
+          },
+          {
+            "name": "pdf.height",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Exact paper height as a CSS length. Flat alias: `pdfHeight`.",
+            "example": "297mm"
+          },
+          {
+            "name": "pdf.omitBackground",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "true",
+                "false",
+                "1",
+                "0"
+              ]
+            },
+            "description": "Drop background colours and images. Flat alias: `pdfOmitBackground`."
+          },
+          {
+            "name": "filename",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 120
+            },
+            "description": "Suggested download name, sanitised — sets `content-disposition` on the response.",
+            "example": "INV-2026-014.pdf"
+          },
+          {
+            "name": "keyId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "API key id, for a signed URL. Send with `sig`."
+          },
+          {
+            "name": "sig",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "`hex(HMAC_SHA256(signingSecret, canonicalQuery))` over every pair except `sig`, sorted by name then value."
+          },
+          {
+            "name": "expires",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "Optional Unix-seconds expiry, included in the signed canonical string."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The rendered bytes.",
+            "headers": {
+              "X-Snaplab-Cache": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "HIT",
+                    "MISS"
+                  ]
+                },
+                "description": "Whether the bytes came from the cache. Hits are free."
+              },
+              "X-Snaplab-Duration-Ms": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Server-side render time."
+              },
+              "X-Snaplab-Fingerprint": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Cache key for these options."
+              },
+              "X-Snaplab-Quota-Remaining": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Renders left this month."
+              }
+            },
+            "content": {
+              "image/png": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "image/jpeg": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "image/webp": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "image/avif": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "application/pdf": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HostedRender"
+                },
+                "description": "When `responseType` is `json`."
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid options, or a target that resolves to a private/blocked address.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid API key / signature.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Subscription past due (`payment_required`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The render can never succeed as written (`selector_not_found`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit or monthly quota exceeded (`quota_exceeded`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "The target site was unreachable (`upstream`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Queue saturated or browsers not ready. Retry after `Retry-After` seconds.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "The page did not finish in time (`timeout`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/render/image": {
+      "post": {
+        "tags": [
+          "Rendering"
+        ],
+        "operationId": "renderImage",
+        "summary": "HTML → a fixed-size image",
+        "description": "Paint HTML (or a `{{ template }}` + `data`) onto an exact width×height canvas. Defaults to 1200×630 @2x — an Open Graph card.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ImageOptions"
+              },
+              "examples": {
+                "template": {
+                  "summary": "Template + data",
+                  "value": {
+                    "template": "<div style=\"font:700 64px Inter;padding:80px\">{{ title }}</div>",
+                    "data": {
+                      "title": "Ship it"
+                    },
+                    "googleFonts": "Inter",
+                    "responseType": "json"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The rendered card.",
+            "headers": {
+              "X-Snaplab-Cache": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "HIT",
+                    "MISS"
+                  ]
+                },
+                "description": "Whether the bytes came from the cache. Hits are free."
+              },
+              "X-Snaplab-Duration-Ms": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Server-side render time."
+              },
+              "X-Snaplab-Fingerprint": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Cache key for these options."
+              },
+              "X-Snaplab-Quota-Remaining": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Renders left this month."
+              }
+            },
+            "content": {
+              "image/png": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "image/jpeg": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "image/webp": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "image/avif": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "application/pdf": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HostedRender"
+                },
+                "description": "When `responseType` is `json`."
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid options, or a target that resolves to a private/blocked address.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid API key / signature.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Subscription past due (`payment_required`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The render can never succeed as written (`selector_not_found`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit or monthly quota exceeded (`quota_exceeded`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "The target site was unreachable (`upstream`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Queue saturated or browsers not ready. Retry after `Retry-After` seconds.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "The page did not finish in time (`timeout`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "Rendering"
+        ],
+        "operationId": "renderImageGet",
+        "summary": "HTML → a fixed-size image (query form)",
+        "description": "The signed-URL form of the card renderer: pass URL-encoded `html` (or `template` + `data`) in the query string.",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "signedKeyId": [],
+            "signedSignature": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "html",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "URL-encoded HTML. Provide this or `template`."
+          },
+          {
+            "name": "template",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "URL-encoded `{{ template }}` HTML."
+          },
+          {
+            "name": "data",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "JSON object (URL-encoded) with values for the template."
+          },
+          {
+            "name": "css",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "URL-encoded stylesheet."
+          },
+          {
+            "name": "googleFonts",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Comma-separated font families."
+          },
+          {
+            "name": "width",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "Canvas width (default 1200)."
+          },
+          {
+            "name": "height",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "Canvas height (default 630)."
+          },
+          {
+            "name": "deviceScaleFactor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "number"
+            },
+            "description": "Pixel ratio (default 2)."
+          },
+          {
+            "name": "format",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "png",
+                "jpeg",
+                "webp"
+              ]
+            },
+            "description": "Image format."
+          },
+          {
+            "name": "quality",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "1–100, jpeg/webp only."
+          },
+          {
+            "name": "darkMode",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "true",
+                "false",
+                "1",
+                "0",
+                "prefers",
+                "force"
+              ]
+            },
+            "description": "`true`/`force` emulate `prefers-color-scheme: dark` AND turn on Chromium's auto dark mode, so a site with no dark theme still comes back dark (a site that has one is left alone). `prefers` is the media query only."
+          },
+          {
+            "name": "delayMs",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "Extra settle time."
+          },
+          {
+            "name": "cache",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "true",
+                "false",
+                "1",
+                "0"
+              ]
+            },
+            "description": "Set `false` to force a fresh render."
+          },
+          {
+            "name": "responseType",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "binary",
+                "json"
+              ]
+            },
+            "description": "`json` answers with a hosted URL."
+          },
+          {
+            "name": "keyId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "API key id, for a signed URL. Send with `sig`."
+          },
+          {
+            "name": "sig",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "`hex(HMAC_SHA256(signingSecret, canonicalQuery))` over every pair except `sig`, sorted by name then value."
+          },
+          {
+            "name": "expires",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "Optional Unix-seconds expiry, included in the signed canonical string."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The rendered card.",
+            "headers": {
+              "X-Snaplab-Cache": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "HIT",
+                    "MISS"
+                  ]
+                },
+                "description": "Whether the bytes came from the cache. Hits are free."
+              },
+              "X-Snaplab-Duration-Ms": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Server-side render time."
+              },
+              "X-Snaplab-Fingerprint": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Cache key for these options."
+              },
+              "X-Snaplab-Quota-Remaining": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Renders left this month."
+              }
+            },
+            "content": {
+              "image/png": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "image/jpeg": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "image/webp": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "image/avif": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "application/pdf": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HostedRender"
+                },
+                "description": "When `responseType` is `json`."
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid options, or a target that resolves to a private/blocked address.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid API key / signature.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Subscription past due (`payment_required`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The render can never succeed as written (`selector_not_found`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit or monthly quota exceeded (`quota_exceeded`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "The target site was unreachable (`upstream`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Queue saturated or browsers not ready. Retry after `Retry-After` seconds.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "The page did not finish in time (`timeout`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/render/preview": {
+      "post": {
+        "tags": [
+          "Rendering"
+        ],
+        "operationId": "renderPreview",
+        "summary": "Unauthenticated demo render",
+        "description": "A laptop-viewport render for the marketing site's live demo. No key, no quota, IP rate-limited, and never persisted.",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "url"
+                ],
+                "properties": {
+                  "url": {
+                    "type": "string",
+                    "format": "uri"
+                  },
+                  "selector": {
+                    "type": "string"
+                  },
+                  "fullPage": {
+                    "type": "boolean"
+                  },
+                  "format": {
+                    "type": "string",
+                    "enum": [
+                      "png",
+                      "jpeg",
+                      "pdf"
+                    ]
+                  },
+                  "darkMode": {
+                    "type": "boolean"
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The preview bytes.",
+            "headers": {
+              "X-Snaplab-Cache": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "HIT",
+                    "MISS"
+                  ]
+                },
+                "description": "Whether the bytes came from the cache. Hits are free."
+              },
+              "X-Snaplab-Duration-Ms": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Server-side render time."
+              },
+              "X-Snaplab-Fingerprint": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Cache key for these options."
+              },
+              "X-Snaplab-Quota-Remaining": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Renders left this month."
+              }
+            },
+            "content": {
+              "image/png": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "image/jpeg": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "image/webp": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "image/avif": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "application/pdf": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid or blocked URL.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many previews from this IP.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Renderer busy.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/tools/screenshot": {
+      "post": {
+        "tags": [
+          "Free tools"
+        ],
+        "operationId": "toolScreenshot",
+        "summary": "Free screenshot",
+        "description": "Public and key-less: 20 renders per day per IP, viewports capped at 1600px, and always answered with a hosted URL.",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "url": {
+                    "type": "string",
+                    "format": "uri"
+                  },
+                  "html": {
+                    "type": "string",
+                    "maxLength": 200000
+                  },
+                  "fullPage": {
+                    "type": "boolean",
+                    "default": true
+                  },
+                  "format": {
+                    "type": "string",
+                    "enum": [
+                      "png",
+                      "jpeg",
+                      "webp"
+                    ],
+                    "default": "png"
+                  },
+                  "width": {
+                    "type": "integer",
+                    "maximum": 1600
+                  },
+                  "height": {
+                    "type": "integer",
+                    "maximum": 1600
+                  },
+                  "darkMode": {
+                    "type": "boolean"
+                  },
+                  "mobile": {
+                    "type": "boolean"
+                  },
+                  "dismissBanners": {
+                    "type": "boolean",
+                    "default": true
+                  },
+                  "blockAds": {
+                    "type": "boolean",
+                    "default": false
+                  }
+                },
+                "additionalProperties": false
+              },
+              "example": {
+                "url": "https://example.com",
+                "fullPage": true
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "A hosted render plus the caller's remaining daily budget.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ToolResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid options, or a blocked target.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "The free daily limit for this IP is spent (`tool_limit_reached`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Renderer busy.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/tools/pdf": {
+      "post": {
+        "tags": [
+          "Free tools"
+        ],
+        "operationId": "toolPdf",
+        "summary": "Free HTML/URL → PDF",
+        "description": "Public and key-less: 20 renders per day per IP, viewports capped at 1600px, and always answered with a hosted URL.",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "url": {
+                    "type": "string",
+                    "format": "uri"
+                  },
+                  "html": {
+                    "type": "string",
+                    "maxLength": 200000
+                  },
+                  "format": {
+                    "type": "string",
+                    "enum": [
+                      "Letter",
+                      "Legal",
+                      "Tabloid",
+                      "A3",
+                      "A4",
+                      "A5"
+                    ],
+                    "default": "A4"
+                  },
+                  "landscape": {
+                    "type": "boolean",
+                    "default": false
+                  },
+                  "darkMode": {
+                    "type": "boolean"
+                  },
+                  "dismissBanners": {
+                    "type": "boolean",
+                    "default": true
+                  },
+                  "blockAds": {
+                    "type": "boolean",
+                    "default": false
+                  }
+                },
+                "additionalProperties": false
+              },
+              "example": {
+                "url": "https://example.com",
+                "format": "A4"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "A hosted render plus the caller's remaining daily budget.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ToolResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid options, or a blocked target.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "The free daily limit for this IP is spent (`tool_limit_reached`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Renderer busy.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/tools/image": {
+      "post": {
+        "tags": [
+          "Free tools"
+        ],
+        "operationId": "toolImage",
+        "summary": "Free OG-image generator",
+        "description": "Public and key-less: 20 renders per day per IP, viewports capped at 1600px, and always answered with a hosted URL.",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "html"
+                ],
+                "properties": {
+                  "html": {
+                    "type": "string",
+                    "maxLength": 200000
+                  },
+                  "css": {
+                    "type": "string",
+                    "maxLength": 50000
+                  },
+                  "googleFonts": {
+                    "type": "string",
+                    "maxLength": 300
+                  },
+                  "width": {
+                    "type": "integer",
+                    "maximum": 1600,
+                    "default": 1200
+                  },
+                  "height": {
+                    "type": "integer",
+                    "maximum": 1600,
+                    "default": 630
+                  },
+                  "format": {
+                    "type": "string",
+                    "enum": [
+                      "png",
+                      "jpeg",
+                      "webp"
+                    ],
+                    "default": "png"
+                  }
+                },
+                "additionalProperties": false
+              },
+              "example": {
+                "html": "<div style='padding:80px;font:700 64px sans-serif'>Hello</div>",
+                "width": 1200,
+                "height": 630
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "A hosted render plus the caller's remaining daily budget.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ToolResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid options, or a blocked target.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "The free daily limit for this IP is spent (`tool_limit_reached`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Renderer busy.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/captures": {
+      "get": {
+        "tags": [
+          "Captures"
+        ],
+        "operationId": "listCaptures",
+        "summary": "List stored captures",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "default": 30
+            },
+            "description": "Page size."
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "`nextCursor` from the previous page (a Unix-seconds timestamp)."
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "pending",
+                "processing",
+                "completed",
+                "failed"
+              ]
+            },
+            "description": "Filter by status."
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Substring match on url or title."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of captures, newest first.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Capture"
+                      }
+                    },
+                    "nextCursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Captures"
+        ],
+        "operationId": "createCapture",
+        "summary": "Render and store a capture",
+        "description": "Renders synchronously and keeps the result, so it stays available at `/i/c/{id}` and in the dashboard. Pass `webhookUrl` to be called back when the capture finishes instead of polling — see `WebhookPayload`.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CaptureRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The completed capture row.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Capture"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid options, a target that resolves to a private/blocked address, or a `webhookUrl` that is not https or resolves to a private address.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid API key / signature.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Subscription past due (`payment_required`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The render can never succeed as written (`selector_not_found`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit or monthly quota exceeded (`quota_exceeded`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "The target site was unreachable (`upstream`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Queue saturated or browsers not ready. Retry after `Retry-After` seconds.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "The page did not finish in time (`timeout`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/captures/{id}": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "get": {
+        "tags": [
+          "Captures"
+        ],
+        "operationId": "getCapture",
+        "summary": "Fetch one capture",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The capture.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Capture"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such capture for this account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Captures"
+        ],
+        "operationId": "deleteCapture",
+        "summary": "Delete a capture",
+        "description": "Removes the row and, when nothing else references them, the stored bytes.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Deleted.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such capture for this account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/keys": {
+      "get": {
+        "tags": [
+          "Account"
+        ],
+        "operationId": "listKeys",
+        "summary": "List API keys",
+        "description": "Session-authenticated only — an API key cannot manage other keys. Also returns the account's signing secret for building signed URLs.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Active keys.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/ApiKey"
+                      }
+                    },
+                    "signingSecret": {
+                      "type": "string",
+                      "description": "HMAC secret for signed URLs."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "API keys can't manage other API keys.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Account"
+        ],
+        "operationId": "createKey",
+        "summary": "Create an API key",
+        "description": "The full `sk_…` token is returned exactly once — store it now.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "name"
+                ],
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 80
+                  }
+                },
+                "additionalProperties": false
+              },
+              "example": {
+                "name": "production"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The new key, with its plaintext token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiKey"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "token": {
+                          "type": "string",
+                          "example": "sk_…"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid name.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "API keys can't create other API keys.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/keys/{id}": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "delete": {
+        "tags": [
+          "Account"
+        ],
+        "operationId": "revokeKey",
+        "summary": "Revoke an API key",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Revoked.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "API keys can't manage other API keys.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/me": {
+      "get": {
+        "tags": [
+          "Account"
+        ],
+        "operationId": "me",
+        "summary": "The current account, plan and usage",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Account, plan and month-to-date usage.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "email": {
+                      "type": "string",
+                      "format": "email"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "image": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "createdAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "authMethod": {
+                      "type": "string",
+                      "enum": [
+                        "session",
+                        "apikey",
+                        "signature"
+                      ]
+                    },
+                    "plan": {
+                      "type": "string",
+                      "enum": [
+                        "free",
+                        "starter",
+                        "pro",
+                        "business"
+                      ]
+                    },
+                    "planStatus": {
+                      "type": "string",
+                      "example": "active"
+                    },
+                    "usage": {
+                      "type": "object",
+                      "properties": {
+                        "used": {
+                          "type": "integer"
+                        },
+                        "limit": {
+                          "type": "integer"
+                        },
+                        "resetsAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        }
+                      }
+                    },
+                    "billingConfigured": {
+                      "type": "boolean",
+                      "description": "False when Stripe isn't configured on this deployment."
+                    },
+                    "webhookUrl": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "format": "uri",
+                      "description": "Account-default capture callback, used when a request names none."
+                    },
+                    "webhookSecret": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Masked to the last four characters (`****1234`). The real secret is never returned."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "Account"
+        ],
+        "operationId": "updateMe",
+        "summary": "Set the account-default capture webhook",
+        "description": "Either field may be sent on its own; `null` or `\"\"` clears it. Used by any capture that does not carry its own `webhookUrl`.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "webhookUrl": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "format": "uri",
+                    "maxLength": 2048,
+                    "description": "`https://` only; private, loopback and metadata addresses are refused."
+                  },
+                  "webhookSecret": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "maxLength": 256,
+                    "description": "Signs every callback that uses this URL."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The stored values, secret masked.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "webhookUrl": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "webhookSecret": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Masked to the last four characters."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Nothing to update, or a webhook field that failed validation.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/billing/checkout": {
+      "post": {
+        "tags": [
+          "Billing"
+        ],
+        "operationId": "billingCheckout",
+        "summary": "Start a Stripe Checkout session",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "plan"
+                ],
+                "properties": {
+                  "plan": {
+                    "type": "string",
+                    "enum": [
+                      "starter",
+                      "pro",
+                      "business"
+                    ]
+                  },
+                  "interval": {
+                    "type": "string",
+                    "description": "Billing interval. Yearly is ten months' price for twelve; omit for monthly.",
+                    "enum": [
+                      "month",
+                      "year"
+                    ],
+                    "default": "month"
+                  }
+                },
+                "additionalProperties": false
+              },
+              "example": {
+                "plan": "pro",
+                "interval": "year"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Redirect the browser here.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "url": {
+                      "type": "string",
+                      "format": "uri"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Unknown plan.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Billing is not configured on this deployment (`billing_not_configured`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/billing/portal": {
+      "post": {
+        "tags": [
+          "Billing"
+        ],
+        "operationId": "billingPortal",
+        "summary": "Open the Stripe billing portal",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Redirect the browser here.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "url": {
+                      "type": "string",
+                      "format": "uri"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Billing is not configured (`billing_not_configured`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/billing/webhook": {
+      "post": {
+        "tags": [
+          "Billing"
+        ],
+        "operationId": "billingWebhook",
+        "summary": "Stripe webhook receiver",
+        "description": "Stripe calls this. The raw body is verified against `Stripe-Signature`; it is not part of the public API.",
+        "security": [],
+        "parameters": [
+          {
+            "name": "Stripe-Signature",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Event accepted.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "received": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad signature or malformed event.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/health": {
+      "get": {
+        "tags": [
+          "System"
+        ],
+        "operationId": "health",
+        "summary": "Liveness, browser readiness and render statistics",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Service status.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "example": "ok"
+                    },
+                    "ready": {
+                      "type": "boolean",
+                      "description": "At least one browser can render."
+                    },
+                    "uptime": {
+                      "type": "number"
+                    },
+                    "stats": {
+                      "type": "object",
+                      "additionalProperties": true,
+                      "description": "Queue depth, pool state, cache counters."
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "sk_<40 chars>",
+        "description": "Send the key as `Authorization: Bearer sk_…`. This is also how the MCP server at `/mcp` authenticates."
+      },
+      "signedKeyId": {
+        "type": "apiKey",
+        "in": "query",
+        "name": "keyId",
+        "description": "Signed-URL auth (GET renders only): the API key's **id**, not its secret. Pair with `sig`."
+      },
+      "signedSignature": {
+        "type": "apiKey",
+        "in": "query",
+        "name": "sig",
+        "description": "`hex(HMAC_SHA256(signingSecret, canonical))`, where canonical is every query pair except `sig`, sorted by name then value and joined with `&`. Add `expires` (Unix seconds) to time-limit the URL."
+      }
+    },
+    "schemas": {
+      "RenderOptions": {
+        "type": "object",
+        "description": "Exactly one of `url` or `html`/`template` must be given.",
+        "properties": {
+          "url": {
+            "type": "string",
+            "maxLength": 2048,
+            "format": "uri",
+            "description": "Absolute http(s) URL to capture. Private, loopback, link-local and metadata addresses are refused."
+          },
+          "html": {
+            "type": "string",
+            "maxLength": 2000000,
+            "description": "Raw HTML rendered instead of navigating. Subresources are still SSRF-filtered."
+          },
+          "template": {
+            "type": "string",
+            "maxLength": 2000000,
+            "description": "HTML with `{{ path.to.value }}` placeholders, substituted from `data` and HTML-escaped."
+          },
+          "data": {
+            "type": "object",
+            "additionalProperties": true,
+            "description": "Values for `template` (or for `html`, when no template is given)."
+          },
+          "css": {
+            "type": "string",
+            "maxLength": 500000,
+            "description": "Stylesheet injected into `<head>` before load. html/template mode only."
+          },
+          "googleFonts": {
+            "type": "string",
+            "maxLength": 300,
+            "description": "Comma-separated Google Fonts families, e.g. `Inter,Playfair Display` (max 6)."
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "png",
+              "jpeg",
+              "webp",
+              "avif",
+              "pdf"
+            ],
+            "default": "png"
+          },
+          "viewport": {
+            "type": "string",
+            "enum": [
+              "desktop",
+              "laptop",
+              "tablet",
+              "mobile",
+              "wide"
+            ],
+            "default": "desktop",
+            "description": "Preset size. `width`/`height`/`deviceScaleFactor` override individual axes."
+          },
+          "width": {
+            "type": "integer",
+            "minimum": 120,
+            "maximum": 3840
+          },
+          "height": {
+            "type": "integer",
+            "minimum": 120,
+            "maximum": 4320
+          },
+          "deviceScaleFactor": {
+            "type": "number",
+            "minimum": 0.5,
+            "maximum": 3,
+            "description": "Pixel ratio. 2 = retina."
+          },
+          "mobile": {
+            "type": "boolean",
+            "description": "Sugar for `viewport: \"mobile\"` (390x844 @3x, touch emulation)."
+          },
+          "fullPage": {
+            "type": "boolean",
+            "default": true,
+            "description": "Capture the whole scrollable document. Ignored when `selector` is set."
+          },
+          "selector": {
+            "type": "string",
+            "maxLength": 512,
+            "description": "Capture just this element. PDFs stay vector/selectable."
+          },
+          "quality": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "description": "jpeg/webp/avif only."
+          },
+          "waitUntil": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "load",
+              "domcontentloaded",
+              "networkidle"
+            ],
+            "default": "auto",
+            "description": "\"auto\" waits for load, then for the network to be quiet for 150ms, capped at 400ms. \"networkidle\" is the full Playwright wait and costs ~0.5s more."
+          },
+          "waitForSelector": {
+            "type": "string",
+            "maxLength": 512,
+            "description": "Wait (up to 10s) for this selector before capturing."
+          },
+          "delayMs": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 30000
+          },
+          "scrollY": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 50000,
+            "description": "Scroll down this many pixels first (triggers lazy loading)."
+          },
+          "hideSelectors": {
+            "type": "array",
+            "maxItems": 20,
+            "items": {
+              "type": "string",
+              "maxLength": 512
+            },
+            "description": "Elements to hide before capturing. Comma-separated in a query string."
+          },
+          "darkMode": {
+            "oneOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "string",
+                "enum": [
+                  "prefers",
+                  "force"
+                ]
+              }
+            ],
+            "description": "`true` (= `\"force\"`) emulates `prefers-color-scheme: dark` AND turns on Chromium's auto dark mode, so a page with no dark theme comes back dark; a page that has one is left alone. `\"prefers\"` is the media query only."
+          },
+          "dismissBanners": {
+            "type": "boolean",
+            "default": true,
+            "description": "Hide known cookie/consent/chat banners with a curated stylesheet."
+          },
+          "blockAds": {
+            "type": "boolean",
+            "default": false,
+            "description": "Abort requests to known ad, analytics and session-replay hosts."
+          },
+          "customCss": {
+            "type": "string",
+            "maxLength": 20000,
+            "description": "CSS injected after load."
+          },
+          "customJs": {
+            "type": "string",
+            "maxLength": 20000,
+            "description": "JavaScript evaluated after load."
+          },
+          "cookies": {
+            "type": "array",
+            "maxItems": 40,
+            "items": {
+              "type": "object",
+              "required": [
+                "name",
+                "value"
+              ],
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "maxLength": 256
+                },
+                "value": {
+                  "type": "string",
+                  "maxLength": 4096
+                },
+                "domain": {
+                  "type": "string",
+                  "maxLength": 256,
+                  "description": "Defaults to the target host."
+                },
+                "path": {
+                  "type": "string",
+                  "maxLength": 256,
+                  "default": "/"
+                },
+                "secure": {
+                  "type": "boolean"
+                },
+                "httpOnly": {
+                  "type": "boolean"
+                },
+                "sameSite": {
+                  "type": "string",
+                  "enum": [
+                    "Strict",
+                    "Lax",
+                    "None"
+                  ]
+                },
+                "expires": {
+                  "type": "integer",
+                  "description": "Unix seconds. Omit for a session cookie."
+                }
+              },
+              "additionalProperties": false
+            },
+            "description": "Per-request cookies. Renders with cookies are never cached or shared."
+          },
+          "headers": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string",
+              "maxLength": 8192
+            },
+            "description": "Extra request headers."
+          },
+          "basicAuth": {
+            "type": "object",
+            "required": [
+              "username",
+              "password"
+            ],
+            "properties": {
+              "username": {
+                "type": "string"
+              },
+              "password": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          },
+          "pdf": {
+            "type": "object",
+            "description": "PDF-only geometry. Ignored unless `format` is `pdf`.",
+            "properties": {
+              "format": {
+                "type": "string",
+                "enum": [
+                  "Letter",
+                  "Legal",
+                  "Tabloid",
+                  "Ledger",
+                  "A0",
+                  "A1",
+                  "A2",
+                  "A3",
+                  "A4",
+                  "A5",
+                  "A6"
+                ],
+                "default": "A4"
+              },
+              "landscape": {
+                "type": "boolean",
+                "default": false
+              },
+              "printBackground": {
+                "type": "boolean",
+                "default": true
+              },
+              "scale": {
+                "type": "number",
+                "minimum": 0.1,
+                "maximum": 2,
+                "default": 1
+              },
+              "preferCSSPageSize": {
+                "type": "boolean",
+                "default": false,
+                "description": "Honour the page's own `@page size` rule instead of `format`."
+              },
+              "margin": {
+                "type": "object",
+                "description": "CSS lengths (`0.4in`, `1cm`, `12mm`…).",
+                "properties": {
+                  "top": {
+                    "type": "string",
+                    "default": "0.4in"
+                  },
+                  "right": {
+                    "type": "string",
+                    "default": "0.4in"
+                  },
+                  "bottom": {
+                    "type": "string",
+                    "default": "0.4in"
+                  },
+                  "left": {
+                    "type": "string",
+                    "default": "0.4in"
+                  }
+                },
+                "additionalProperties": false
+              },
+              "headerTemplate": {
+                "type": "string",
+                "maxLength": 20000,
+                "description": "HTML drawn at the top of every page, inside the top margin. It inherits none of the document's CSS, so set `font-size` explicitly and add your own side padding. Any element carrying the classes `pageNumber`, `totalPages`, `date`, `title` or `url` is filled in by Chromium."
+              },
+              "footerTemplate": {
+                "type": "string",
+                "maxLength": 20000,
+                "description": "Same as `headerTemplate`, at the bottom of every page. Also accepts a built-in preset name: `@pageNumbers` (centred “Page N of M”) or `@pageNumbersUrl` (page numbers left, document URL right)."
+              },
+              "displayHeaderFooter": {
+                "type": "boolean",
+                "description": "Draw the running header and footer. Defaults to `true` as soon as either template is set; pass `false` to suppress both."
+              },
+              "pageRanges": {
+                "type": "string",
+                "maxLength": 200,
+                "description": "Sheets to keep, in print-dialog syntax — `1-3`, `1,4,7-9`. Default: every page.",
+                "example": "1-3"
+              },
+              "media": {
+                "type": "string",
+                "enum": [
+                  "screen",
+                  "print"
+                ],
+                "default": "screen",
+                "description": "Which stylesheet the paper is printed under. `print` honours the document's own print CSS (`@media print` rules, page breaks, hidden nav); `screen` keeps the on-screen look. Screenshots are always screen media."
+              },
+              "tagged": {
+                "type": "boolean",
+                "default": false,
+                "description": "Emit a tagged (accessible) PDF with structure tags for screen readers."
+              },
+              "outline": {
+                "type": "boolean",
+                "default": false,
+                "description": "Embed a document outline (PDF bookmarks) built from the page's headings."
+              },
+              "width": {
+                "type": "string",
+                "maxLength": 40,
+                "description": "Exact paper width as a CSS length. Replaces `format`; ignored unless `height` is set too.",
+                "example": "210mm"
+              },
+              "height": {
+                "type": "string",
+                "maxLength": 40,
+                "description": "Exact paper height as a CSS length.",
+                "example": "297mm"
+              },
+              "omitBackground": {
+                "type": "boolean",
+                "default": false,
+                "description": "Drop background colours and images. The same knob as `printBackground: false`, and it wins over it."
+              }
+            },
+            "additionalProperties": false
+          },
+          "filename": {
+            "type": "string",
+            "maxLength": 120,
+            "description": "Suggested download name, sanitised. Sets `content-disposition: inline; filename=\"…\"` on the returned bytes and on the hosted `/i/c/{id}` file (`?download=1` there makes it an `attachment`). Include the extension you want — it is used verbatim.",
+            "example": "INV-2026-014.pdf"
+          },
+          "cache": {
+            "type": "boolean",
+            "default": true,
+            "description": "Set false to force a fresh render."
+          },
+          "responseType": {
+            "type": "string",
+            "enum": [
+              "binary",
+              "json"
+            ],
+            "default": "binary",
+            "description": "`binary` streams the bytes; `json` stores the render and answers with a hosted URL."
+          }
+        },
+        "additionalProperties": false
+      },
+      "ImageOptions": {
+        "type": "object",
+        "description": "Fixed-canvas rendering for social/OG cards. Requires `html` or `template`.",
+        "properties": {
+          "html": {
+            "type": "string",
+            "maxLength": 2000000
+          },
+          "template": {
+            "type": "string",
+            "maxLength": 2000000,
+            "description": "HTML with `{{ placeholders }}`, substituted from `data` and HTML-escaped."
+          },
+          "data": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "css": {
+            "type": "string",
+            "maxLength": 500000
+          },
+          "width": {
+            "type": "integer",
+            "minimum": 120,
+            "maximum": 3840,
+            "default": 1200
+          },
+          "height": {
+            "type": "integer",
+            "minimum": 120,
+            "maximum": 4320,
+            "default": 630
+          },
+          "deviceScaleFactor": {
+            "type": "number",
+            "minimum": 0.5,
+            "maximum": 3,
+            "default": 2
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "png",
+              "jpeg",
+              "webp"
+            ],
+            "default": "png"
+          },
+          "quality": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          },
+          "googleFonts": {
+            "type": "string",
+            "maxLength": 300
+          },
+          "darkMode": {
+            "oneOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "string",
+                "enum": [
+                  "prefers",
+                  "force"
+                ]
+              }
+            ],
+            "description": "`true`/`\"force\"` darken the card even without a dark theme; `\"prefers\"` is the media query only."
+          },
+          "delayMs": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 30000
+          },
+          "cache": {
+            "type": "boolean",
+            "default": true
+          },
+          "responseType": {
+            "type": "string",
+            "enum": [
+              "binary",
+              "json"
+            ],
+            "default": "binary"
+          }
+        },
+        "additionalProperties": false
+      },
+      "HostedRender": {
+        "type": "object",
+        "description": "Answer for `responseType: \"json\"` — the render is stored and served from a public, immutable URL.",
+        "required": [
+          "url",
+          "id",
+          "format",
+          "bytes"
+        ],
+        "properties": {
+          "url": {
+            "type": "string",
+            "format": "uri",
+            "example": "https://snaplab.dev/i/c/V1StGXR8_Z5j"
+          },
+          "id": {
+            "type": "string",
+            "example": "V1StGXR8_Z5j"
+          },
+          "format": {
+            "type": "string",
+            "example": "png"
+          },
+          "width": {
+            "type": "integer"
+          },
+          "height": {
+            "type": "integer"
+          },
+          "bytes": {
+            "type": "integer"
+          },
+          "cacheHit": {
+            "type": "boolean"
+          },
+          "durationMs": {
+            "type": "integer"
+          }
+        }
+      },
+      "ToolResult": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/HostedRender"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "screenshot",
+                  "pdf",
+                  "image"
+                ]
+              },
+              "remainingToday": {
+                "type": "integer"
+              },
+              "dailyLimit": {
+                "type": "integer",
+                "example": 20
+              }
+            }
+          }
+        ]
+      },
+      "Capture": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "userId": {
+            "type": "string"
+          },
+          "apiKeyId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "url": {
+            "type": "string"
+          },
+          "title": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "processing",
+              "completed",
+              "failed"
+            ]
+          },
+          "format": {
+            "type": "string"
+          },
+          "selector": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "fullPage": {
+            "type": "boolean"
+          },
+          "width": {
+            "type": "integer"
+          },
+          "height": {
+            "type": "integer"
+          },
+          "deviceScaleFactor": {
+            "type": "integer"
+          },
+          "darkMode": {
+            "type": "boolean"
+          },
+          "fileKey": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "fileSize": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "fingerprint": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "durationMs": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "cacheHit": {
+            "type": "boolean"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "completedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "webhook": {
+            "$ref": "#/components/schemas/CaptureWebhook",
+            "description": "Only on `GET /api/captures/{id}`, and only when a callback was set."
+          }
+        }
+      },
+      "ApiKey": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "prefix": {
+            "type": "string",
+            "example": "sk_abc123"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "lastUsedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "revokedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        }
+      },
+      "Error": {
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "type": "string",
+            "description": "Human-readable message."
+          },
+          "code": {
+            "type": "string",
+            "description": "Stable machine code, when one applies."
+          },
+          "retryable": {
+            "type": "boolean"
+          },
+          "issues": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            },
+            "description": "Zod validation issues, for 400s."
+          },
+          "upgradeUrl": {
+            "type": "string"
+          }
+        }
+      },
+      "CaptureRequest": {
+        "type": "object",
+        "description": "Every `RenderOptions` field, plus the optional callback. Omitted webhook fields fall back to the account defaults set with `PATCH /api/me`.",
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/RenderOptions"
+          }
+        ],
+        "properties": {
+          "webhookUrl": {
+            "type": "string",
+            "format": "uri",
+            "maxLength": 2048,
+            "description": "`https://` URL POSTed once the capture reaches `completed` or `failed`. Private, loopback, link-local and metadata addresses are refused with a 400.",
+            "example": "https://api.example.com/hooks/snaplab"
+          },
+          "webhookSecret": {
+            "type": "string",
+            "maxLength": 256,
+            "description": "Signs the callback: `x-snaplab-signature: sha256=hex(HMAC_SHA256(secret, timestamp + \".\" + rawBody))`. Never returned by the API."
+          }
+        }
+      },
+      "WebhookDelivery": {
+        "type": "object",
+        "description": "One delivery attempt of a capture callback. Attempts run at 0s, 30s, 5min and 30min; after the fourth the row is `gave_up`.",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "attempt": {
+            "type": "integer",
+            "description": "Attempts made so far, 1-4."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "ok",
+              "failed",
+              "gave_up"
+            ]
+          },
+          "lastStatusCode": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "HTTP status of the last attempt; null if the request never completed."
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "CaptureWebhook": {
+        "type": "object",
+        "description": "Present on `GET /api/captures/{id}` only when a callback was set.",
+        "properties": {
+          "url": {
+            "type": "string",
+            "format": "uri"
+          },
+          "deliveries": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WebhookDelivery"
+            }
+          }
+        }
+      },
+      "WebhookPayload": {
+        "type": "object",
+        "description": "The JSON body snaplab POSTs to `webhookUrl`. Headers: `content-type: application/json`, `user-agent: snaplab-webhooks/1`, `x-snaplab-event`, `x-snaplab-delivery`, `x-snaplab-timestamp` and, when a secret is set, `x-snaplab-signature`. Only a 2xx counts as delivered; a 3xx is never followed.",
+        "properties": {
+          "event": {
+            "type": "string",
+            "enum": [
+              "capture.completed",
+              "capture.failed"
+            ]
+          },
+          "capture": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "url": {
+                "type": "string"
+              },
+              "format": {
+                "type": "string"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "completed",
+                  "failed"
+                ]
+              },
+              "width": {
+                "type": "integer"
+              },
+              "height": {
+                "type": "integer"
+              },
+              "bytes": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "durationMs": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "cacheHit": {
+                "type": "boolean"
+              },
+              "error": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "createdAt": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time"
+              },
+              "completedAt": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time"
+              }
+            }
+          },
+          "hostedUrl": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uri",
+            "description": "`<BASE_URL>/i/c/{id}`, or null on `capture.failed`."
+          }
+        }
+      }
+    }
+  }
+}
