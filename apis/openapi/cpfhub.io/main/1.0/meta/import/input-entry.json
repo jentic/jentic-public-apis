@@ -1,0 +1,1560 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "CPFHub.io API",
+    "version": "1.0",
+    "description": "API REST da CPFHub.io para consulta de dados cadastrais vinculados a um CPF brasileiro\n(Cadastro de Pessoas Físicas). Retorna nome completo, gênero e data de nascimento.\n\nTrês consultas:\n- **Consulta Simples** (`GET /cpf/{cpf}`): consulta na base da CPFHub.io. Tempo típico de ~150 ms (não é um SLA).\n- **Consulta em lote** (`POST /cpf/bulk`): o tempo depende de quantos CPFs estão no envio, e cada consulta fica na mesma faixa da Consulta Simples (~150 ms).\n- **Consulta em Tempo Real** (`POST /cpf/realtime`): consulta a Receita Federal na hora,\n  com CPF e data de nascimento, e retorna a situação cadastral. Tempo típico de cerca de 1 segundo (não é um SLA).\n\nCasos de uso comuns: verificação cadastral, onboarding de usuários, prevenção de fraudes, preenchimento automático de formulários.\n\nAutenticação: envie sua API Key no header `x-api-key`. Gere sua chave em https://app.cpfhub.io.\n\nCobrança: pool de créditos por período de cobrança. Em planos sem excedente (overage),\nsem saldo a API responde `403` \"Limite de créditos excedido\". Planos com excedente ativo continuam\nrespondendo após a franquia, e o excedente é cobrado no ciclo seguinte.\n\nLimite por minuto: cada API Key tem um limite de requisições por minuto (padrão 30 na Consulta Simples,\nem que cada envio de lote conta como 1, e 5 na Consulta em Tempo Real). Planos personalizados podem ter\nlimites diferentes; confirme com o suporte da CPFHub.io em suporte@cpfhub.io. Acima do limite, a API\nresponde `429` com o header `Retry-After` (segundos), sem consumir crédito.\n\nFormato dos erros (mensagens em PT-BR; decida pelo status HTTP, nunca pelo texto):\n- Erros da consulta (validação, créditos da consulta, não encontrado, limite por minuto, Receita Federal):\n  `{\"success\": false, \"data\": null, \"error\": {\"message\": \"...\"}}`\n- Erros de autenticação e conta (401, 403 de conta, 500 de assinatura, 503 `usage_unavailable`):\n  `{\"success\": false, \"error\": \"...\"}` (`error` é uma string)\n- Para ler a mensagem em qualquer caso: `typeof body.error === \"string\" ? body.error : body.error.message`\n",
+    "contact": {
+      "name": "Suporte CPFHub.io",
+      "url": "https://www.cpfhub.io",
+      "email": "suporte@cpfhub.io"
+    },
+    "license": {
+      "name": "Proprietária",
+      "url": "https://www.cpfhub.io/termos-de-uso"
+    },
+    "x-llms-txt": "https://www.cpfhub.io/llms.txt",
+    "x-openapi-json": "https://www.cpfhub.io/openapi.json",
+    "x-openapi-yaml": "https://www.cpfhub.io/openapi.yaml",
+    "x-jentic-source-url": "https://www.cpfhub.io/openapi.json"
+  },
+  "servers": [
+    {
+      "url": "https://api.cpfhub.io",
+      "description": "Produção"
+    }
+  ],
+  "paths": {
+    "/cpf/bulk": {
+      "post": {
+        "operationId": "submitBulkCpf",
+        "summary": "Enviar um lote de CPFs para consulta assíncrona",
+        "description": "Recebe uma lista de CPFs e cria um lote processado em segundo plano. Responde na hora\ncom um `jobId`; acompanhe o andamento em `GET /cpf/bulk/{jobId}`.\n\n- CPFs com formato ou dígito verificador inválido são descartados antes do processamento\n  e contados em `data.invalid`. CPFs repetidos na lista são consultados uma única vez.\n- Só CPFs encontrados (`found`) consomem crédito, como em `GET /cpf/{cpf}`: 1 crédito por CPF\n  por padrão. Consulte o custo do seu plano no dashboard em https://app.cpfhub.io.\n- Máximo de 10.000 CPFs por requisição. Acima disso a resposta é `400`.\n- Os resultados por CPF são retornados em `GET /cpf/bulk/{jobId}`.\n- Em plano sem excedente, o envio confere o saldo antes: se ele não cobre todos os CPFs válidos,\n  responde `403` \"Créditos insuficientes para o lote: N necessários.\" e o lote não é criado.\n  CPFs que ainda assim ficarem sem crédito durante o processamento são contados em `skipped`.\n- Itens que não são string são contados em `data.invalid`.\n- Cada envio conta como 1 requisição no limite por minuto da Consulta Simples (`429` acima do limite).\n- O POST não é idempotente: repetir depois de um timeout de rede pode criar um segundo lote.\n- O lote usa a Consulta Simples. A Consulta em Tempo Real (`POST /cpf/realtime`) é feita CPF a CPF.\n",
+        "tags": [
+          "Consulta em Lote"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BulkSubmitRequest"
+              },
+              "example": {
+                "cpfs": [
+                  "12345678909",
+                  "11144477735",
+                  "52998224725"
+                ],
+                "fileName": "clientes-junho.csv",
+                "format": "CSV"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Lote aceito e em processamento",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BulkSubmitResponse"
+                },
+                "example": {
+                  "success": true,
+                  "data": {
+                    "jobId": "4a1ef25e-052c-4464-9657-4148f53bb0fc",
+                    "status": "processing",
+                    "totalRecords": 3,
+                    "invalid": 0
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Campo `cpfs` ausente, vazio ou que não é array, ou lista acima de 10.000 CPFs",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "examples": {
+                  "emptyCpfs": {
+                    "value": {
+                      "success": false,
+                      "data": null,
+                      "error": {
+                        "message": "Campo 'cpfs' deve ser um array não vazio."
+                      }
+                    }
+                  },
+                  "limitExceeded": {
+                    "value": {
+                      "success": false,
+                      "data": null,
+                      "error": {
+                        "message": "Limite de 10000 CPFs por lote excedido."
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/BulkForbidden"
+          },
+          "422": {
+            "description": "Nenhum CPF válido na lista enviada",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "data": null,
+                  "error": {
+                    "message": "Nenhum CPF válido na lista enviada."
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Erro interno ao criar o lote ou ao validar a assinatura",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/AuthErrorResponse"
+                    }
+                  ]
+                },
+                "examples": {
+                  "jobCreateFailed": {
+                    "value": {
+                      "success": false,
+                      "data": null,
+                      "error": {
+                        "message": "Falha ao criar lote."
+                      }
+                    }
+                  },
+                  "subscriptionLookupFailed": {
+                    "value": {
+                      "success": false,
+                      "error": "Erro ao validar assinatura"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "$ref": "#/components/responses/UsageUnavailable"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      }
+    },
+    "/cpf/bulk/{jobId}": {
+      "get": {
+        "operationId": "getBulkStatus",
+        "summary": "Consultar o status e os resultados de um lote",
+        "description": "Retorna o andamento, os contadores e os resultados por CPF de um lote criado em\n`POST /cpf/bulk`. Consulte até `data.status` ser `done` ou `failed`.\n\n- `data.cpfs` traz um objeto por CPF processado. Para `found: true`, os campos são os\n  mesmos de `GET /cpf/{cpf}`; para `found: false`, os campos de dados vêm `null`.\n- Enquanto `status` é `processing`, `data.cpfs` traz o que já foi processado e cresce a cada consulta.\n- CPFs contados em `skipped` não aparecem em `data.cpfs`.\n- O campo `cpf` em `data.cpfs` tem sempre **11 dígitos, sem máscara**.\n- Consultar o status não consome crédito.\n",
+        "tags": [
+          "Consulta em Lote"
+        ],
+        "parameters": [
+          {
+            "name": "jobId",
+            "in": "path",
+            "required": true,
+            "description": "O `jobId` retornado por `POST /cpf/bulk`.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Status do lote retornado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BulkStatusResponse"
+                },
+                "example": {
+                  "success": true,
+                  "data": {
+                    "id": "0c64d9d1-5676-4900-9bae-20929b1b0082",
+                    "status": "done",
+                    "file_name": "clientes-junho.csv",
+                    "format": "CSV",
+                    "total_records": 2,
+                    "processed": 2,
+                    "found": 1,
+                    "not_found": 1,
+                    "skipped": 0,
+                    "error": null,
+                    "created_at": "2026-06-16T12:05:38.066-03:00",
+                    "updated_at": "2026-06-16T12:05:38.134-03:00",
+                    "cpfs": [
+                      {
+                        "cpf": "11144477735",
+                        "found": true,
+                        "name": "Ana de Exemplo",
+                        "nameUpper": "ANA DE EXEMPLO",
+                        "gender": "F",
+                        "birthDate": "01/01/1990",
+                        "day": 1,
+                        "month": 1,
+                        "year": 1990
+                      },
+                      {
+                        "cpf": "52998224725",
+                        "found": false,
+                        "name": null,
+                        "nameUpper": null,
+                        "gender": null,
+                        "birthDate": null,
+                        "day": null,
+                        "month": null,
+                        "year": null
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/AccountForbidden"
+          },
+          "404": {
+            "description": "Lote não encontrado ou criado com outra API Key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "data": null,
+                  "error": {
+                    "message": "Lote não encontrado."
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/components/responses/SubscriptionError"
+          },
+          "503": {
+            "$ref": "#/components/responses/UsageUnavailable"
+          }
+        }
+      }
+    },
+    "/cpf/realtime": {
+      "post": {
+        "operationId": "getCpfRealtime",
+        "summary": "Consulta em Tempo Real",
+        "description": "Consulta o CPF na Receita Federal na hora, usando CPF e data de nascimento do titular.\nRetorna nome, data de nascimento, ano do óbito e situação cadastral, com dados de emissão e links\nde validação do comprovante quando a Receita os fornece.\n\n- **Custo:** 1,5 crédito por consulta bem-sucedida por padrão. Consulte o custo do seu plano\n  no dashboard em https://app.cpfhub.io. Só a resposta `200` consome crédito.\n- **Latência:** cerca de 1 segundo por consulta (tempo típico, não um SLA).\n- Consulta feita CPF a CPF (não existe em lote).\n- Quando a Receita recusa a consulta (por exemplo, data de nascimento divergente), a resposta é\n  `422` com a mensagem devolvida pela Receita Federal.\n\nDocumentação: https://www.cpfhub.io/documentacao/referencia/cpf-tempo-real\n",
+        "externalDocs": {
+          "url": "https://www.cpfhub.io/documentacao/referencia/cpf-tempo-real"
+        },
+        "tags": [
+          "Consulta em Tempo Real"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RealtimeRequest"
+              },
+              "example": {
+                "cpf": "12345678909",
+                "birthDate": "15/06/1990"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Consulta concluída na Receita Federal",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RealtimeResponse"
+                },
+                "example": {
+                  "success": true,
+                  "data": {
+                    "cpf": "12345678909",
+                    "name": "FULANO DE TAL",
+                    "birthDate": "15/06/1990",
+                    "deathYear": null,
+                    "situation": "REGULAR",
+                    "emissionDate": "02/10/2026",
+                    "emissionTime": "14:32:10",
+                    "controlCode": "A1B2.C3D4.E5F6.7890",
+                    "validationUrl": "https://servicos.receita.fazenda.gov.br/Servicos/CPF/ca/ResultadoAut.asp?cp=12345678909&cc=A1B2C3D4E5F67890&de=02102026&he=143210&dv=09&em=01",
+                    "validationHtmlUrl": "https://api.cpfhub.io/cpf/proof/12345678909/1790962330000"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "CPF sem 11 dígitos ou data de nascimento inválida",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "examples": {
+                  "invalidCpf": {
+                    "value": {
+                      "success": false,
+                      "data": null,
+                      "error": {
+                        "message": "CPF inválido. Deve conter 11 dígitos."
+                      }
+                    }
+                  },
+                  "invalidBirthDate": {
+                    "value": {
+                      "success": false,
+                      "data": null,
+                      "error": {
+                        "message": "Data de nascimento inválida. Use o formato DD/MM/YYYY ou DDMMYYYY"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/LookupForbidden"
+          },
+          "422": {
+            "description": "Dígito verificador do CPF incorreto, ou a Receita Federal recusou a consulta\n(por exemplo, data de nascimento divergente). Neste caso a mensagem é a devolvida pela Receita.\n",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "examples": {
+                  "invalidDigits": {
+                    "value": {
+                      "success": false,
+                      "data": null,
+                      "error": {
+                        "message": "CPF inválido. Dígito verificador incorreto."
+                      }
+                    }
+                  },
+                  "receitaRejected": {
+                    "summary": "Exemplo de mensagem devolvida pela Receita Federal (o texto pode variar)",
+                    "value": {
+                      "success": false,
+                      "data": null,
+                      "error": {
+                        "message": "Data de nascimento informada está divergente da constante na base de dados da Secretaria da Receita Federal do Brasil."
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/components/responses/SubscriptionError"
+          },
+          "502": {
+            "description": "A Receita Federal não respondeu a tempo ou devolveu uma resposta que não pôde ser interpretada. Não consome crédito; tente de novo em alguns segundos.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "data": null,
+                  "error": {
+                    "message": "A Receita Federal não respondeu a tempo. Tente novamente em alguns segundos. Nenhum crédito foi cobrado."
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Consulta temporariamente indisponível (Receita Federal com alta demanda), ou saldo de créditos indisponível. Não consome crédito; tente de novo em alguns segundos.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/UsageUnavailableResponse"
+                    }
+                  ]
+                },
+                "examples": {
+                  "receitaUnavailable": {
+                    "value": {
+                      "success": false,
+                      "data": null,
+                      "error": {
+                        "message": "A Receita Federal está com alta demanda agora. Tente novamente em alguns segundos. Nenhum crédito foi cobrado."
+                      }
+                    }
+                  },
+                  "reservationUnavailable": {
+                    "value": {
+                      "success": false,
+                      "data": null,
+                      "error": {
+                        "message": "Não foi possível reservar os créditos. Tente novamente."
+                      }
+                    }
+                  },
+                  "saveFailed": {
+                    "value": {
+                      "success": false,
+                      "data": null,
+                      "error": {
+                        "message": "Falha ao registrar validação"
+                      }
+                    }
+                  },
+                  "usageUnavailable": {
+                    "value": {
+                      "success": false,
+                      "error": "usage_unavailable",
+                      "message": "Não foi possível verificar o saldo de créditos. Tente novamente."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      }
+    },
+    "/cpf/{cpf}": {
+      "get": {
+        "operationId": "getCpf",
+        "summary": "Consulta Simples de um CPF",
+        "description": "Retorna os dados cadastrais vinculados ao CPF (Consulta Simples na base da CPFHub.io).\n\n- **CPF não encontrado (404) não consome crédito.** Só a resposta `200` é cobrada:\n  1 crédito por padrão. Consulte o custo do seu plano no dashboard em https://app.cpfhub.io.\n- O campo `cpf` da resposta tem sempre **11 dígitos, sem máscara** (por exemplo, `12345678909`).\n- Em plano sem excedente e sem saldo, a resposta é `403`\n  `{\"success\":false,\"error\":\"Limite de créditos excedido\"}`. Planos com excedente ativo\n  continuam respondendo, e o excedente é cobrado no ciclo seguinte.\n- Para a situação cadastral na Receita Federal, use `POST /cpf/realtime`.\n",
+        "tags": [
+          "CPF"
+        ],
+        "parameters": [
+          {
+            "name": "cpf",
+            "in": "path",
+            "required": true,
+            "description": "CPF com ou sem formatação.\nExemplos válidos: `12345678909` ou `123.456.789-09`.\n",
+            "schema": {
+              "type": "string",
+              "pattern": "^\\d{11}$|^\\d{3}\\.\\d{3}\\.\\d{3}-\\d{2}$",
+              "example": "12345678909"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "CPF encontrado, dados cadastrais retornados",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CPFResponse"
+                },
+                "example": {
+                  "success": true,
+                  "data": {
+                    "cpf": "12345678909",
+                    "name": "Fulano de Tal",
+                    "nameUpper": "FULANO DE TAL",
+                    "gender": "M",
+                    "birthDate": "15/06/1990",
+                    "day": 15,
+                    "month": 6,
+                    "year": 1990
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "CPF sem 11 dígitos",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "data": null,
+                  "error": {
+                    "message": "CPF inválido. Deve conter 11 dígitos."
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/LookupForbidden"
+          },
+          "404": {
+            "description": "CPF não encontrado (não consome crédito)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "data": null,
+                  "error": {
+                    "message": "CPF não encontrado na base de dados"
+                  }
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Dígito verificador do CPF incorreto",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "data": null,
+                  "error": {
+                    "message": "CPF inválido. Dígito verificador incorreto."
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Erro interno",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/AuthErrorResponse"
+                    }
+                  ]
+                },
+                "examples": {
+                  "databaseUnavailable": {
+                    "value": {
+                      "success": false,
+                      "data": null,
+                      "error": {
+                        "message": "Banco de dados indisponível"
+                      }
+                    }
+                  },
+                  "subscriptionLookupFailed": {
+                    "value": {
+                      "success": false,
+                      "error": "Erro ao validar assinatura"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Não foi possível verificar ou reservar o saldo de créditos, ou registrar a consulta. Tente novamente; nenhum crédito é consumido.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/UsageUnavailableResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    }
+                  ]
+                },
+                "examples": {
+                  "usageUnavailable": {
+                    "value": {
+                      "success": false,
+                      "error": "usage_unavailable",
+                      "message": "Não foi possível verificar o saldo de créditos. Tente novamente."
+                    }
+                  },
+                  "saveFailed": {
+                    "value": {
+                      "success": false,
+                      "data": null,
+                      "error": {
+                        "message": "Falha ao registrar validação"
+                      }
+                    }
+                  },
+                  "reservationUnavailable": {
+                    "value": {
+                      "success": false,
+                      "data": null,
+                      "error": {
+                        "message": "Não foi possível reservar os créditos. Tente novamente."
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      }
+    },
+    "/quota": {
+      "get": {
+        "operationId": "getQuota",
+        "summary": "Consultar saldo de créditos e plano",
+        "description": "Retorna o plano, os créditos restantes e usados, o status de cobrança e os identificadores\nda conta autenticada. Somente leitura; não consome crédito.\n\n- Responde mesmo com saldo zerado, para você sempre conseguir consultar o saldo.\n- `remainingCredits` é o saldo arredondado para baixo. Um saldo de 1,0 a 1,99 aparece como `1`.\n- O conteúdo de `data` é o mesmo da ferramenta MCP `get_quota_info`.\n",
+        "tags": [
+          "Quota"
+        ],
+        "responses": {
+          "200": {
+            "description": "Saldo retornado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotaResponse"
+                },
+                "example": {
+                  "success": true,
+                  "data": {
+                    "plan": "Básico",
+                    "remainingCredits": 750,
+                    "usedCredits": 250,
+                    "billingStatus": "active",
+                    "userId": "123e4567-e89b-12d3-a456-426614174000",
+                    "email": "usuario@exemplo.com"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/AccountForbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/SubscriptionError"
+          },
+          "503": {
+            "$ref": "#/components/responses/UsageUnavailable"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "ApiKeyAuth": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "x-api-key",
+        "description": "Gere sua API Key em https://app.cpfhub.io.\nEnvie em todas as requisições: `x-api-key: sua-api-key`\n"
+      }
+    },
+    "responses": {
+      "Unauthorized": {
+        "description": "API Key ausente, inválida ou inativa",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/AuthErrorResponse"
+            },
+            "examples": {
+              "missingKey": {
+                "value": {
+                  "success": false,
+                  "error": "API Key não fornecida"
+                }
+              },
+              "invalidKey": {
+                "value": {
+                  "success": false,
+                  "error": "API Key inválida"
+                }
+              },
+              "inactiveKey": {
+                "value": {
+                  "success": false,
+                  "error": "API Key inativa"
+                }
+              }
+            }
+          }
+        }
+      },
+      "AccountForbidden": {
+        "description": "Conta inativa ou bloqueada",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/AuthErrorResponse"
+            },
+            "examples": {
+              "inactiveUser": {
+                "value": {
+                  "success": false,
+                  "error": "Usuário inativo. Entre em contato com o suporte."
+                }
+              },
+              "blockedAccount": {
+                "value": {
+                  "success": false,
+                  "error": "Conta bloqueada. Entre em contato com o suporte."
+                }
+              }
+            }
+          }
+        }
+      },
+      "SubscriptionError": {
+        "description": "Erro interno ao validar a assinatura",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/AuthErrorResponse"
+            },
+            "example": {
+              "success": false,
+              "error": "Erro ao validar assinatura"
+            }
+          }
+        }
+      },
+      "UsageUnavailable": {
+        "description": "Não foi possível verificar o saldo de créditos. Tente novamente em instantes; nenhum crédito é consumido.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/UsageUnavailableResponse"
+            },
+            "example": {
+              "success": false,
+              "error": "usage_unavailable",
+              "message": "Não foi possível verificar o saldo de créditos. Tente novamente."
+            }
+          }
+        }
+      },
+      "RateLimited": {
+        "description": "Limite de requisições por minuto da API Key excedido. Espere os segundos de `Retry-After` e tente de novo. Não consome crédito.",
+        "headers": {
+          "Retry-After": {
+            "description": "Segundos até poder tentar de novo",
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "example": 12
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            },
+            "example": {
+              "success": false,
+              "data": null,
+              "error": {
+                "message": "Limite de requisições por minuto excedido. Tente novamente em 12 segundos."
+              }
+            }
+          }
+        }
+      },
+      "LookupForbidden": {
+        "description": "Créditos insuficientes para a consulta em plano sem excedente (`error.message`), ou conta inativa\nou bloqueada (`error` string). Planos com excedente ativo continuam respondendo após a franquia.\n",
+        "content": {
+          "application/json": {
+            "schema": {
+              "oneOf": [
+                {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                {
+                  "$ref": "#/components/schemas/AuthErrorResponse"
+                }
+              ]
+            },
+            "examples": {
+              "insufficientCredits": {
+                "value": {
+                  "success": false,
+                  "data": null,
+                  "error": {
+                    "message": "Limite de créditos excedido"
+                  }
+                }
+              },
+              "inactiveUser": {
+                "value": {
+                  "success": false,
+                  "error": "Usuário inativo. Entre em contato com o suporte."
+                }
+              },
+              "blockedAccount": {
+                "value": {
+                  "success": false,
+                  "error": "Conta bloqueada. Entre em contato com o suporte."
+                }
+              }
+            }
+          }
+        }
+      },
+      "BulkForbidden": {
+        "description": "Em plano sem excedente: saldo menor que o necessário para todos os CPFs válidos do lote (o lote não é criado),\nou saldo menor que uma Consulta Simples. Também quando a conta está inativa ou bloqueada.\n",
+        "content": {
+          "application/json": {
+            "schema": {
+              "oneOf": [
+                {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                {
+                  "$ref": "#/components/schemas/AuthErrorResponse"
+                }
+              ]
+            },
+            "examples": {
+              "insufficientForBatch": {
+                "value": {
+                  "success": false,
+                  "data": null,
+                  "error": {
+                    "message": "Créditos insuficientes para o lote: 250 necessários."
+                  }
+                }
+              },
+              "noCredits": {
+                "value": {
+                  "success": false,
+                  "error": "Limite de créditos excedido"
+                }
+              },
+              "inactiveUser": {
+                "value": {
+                  "success": false,
+                  "error": "Usuário inativo. Entre em contato com o suporte."
+                }
+              },
+              "blockedAccount": {
+                "value": {
+                  "success": false,
+                  "error": "Conta bloqueada. Entre em contato com o suporte."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "schemas": {
+      "CPFResponse": {
+        "type": "object",
+        "required": [
+          "success",
+          "data"
+        ],
+        "description": "Resposta de sucesso da consulta de CPF",
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "description": "Sempre `true` em respostas 200",
+            "example": true
+          },
+          "data": {
+            "$ref": "#/components/schemas/CPFData"
+          }
+        }
+      },
+      "CPFData": {
+        "type": "object",
+        "required": [
+          "cpf",
+          "name",
+          "nameUpper",
+          "gender",
+          "birthDate",
+          "day",
+          "month",
+          "year"
+        ],
+        "description": "Dados cadastrais vinculados ao CPF",
+        "properties": {
+          "cpf": {
+            "type": "string",
+            "description": "CPF com 11 dígitos, sem máscara (por exemplo, `12345678909`)",
+            "pattern": "^\\d{11}$",
+            "example": "12345678909"
+          },
+          "name": {
+            "type": "string",
+            "description": "Nome completo",
+            "example": "Fulano de Tal"
+          },
+          "nameUpper": {
+            "type": "string",
+            "description": "Nome completo em maiúsculas",
+            "example": "FULANO DE TAL"
+          },
+          "gender": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "M",
+              "F",
+              null
+            ],
+            "description": "Gênero (`M` = masculino, `F` = feminino); `null` quando não disponível",
+            "example": "M"
+          },
+          "birthDate": {
+            "type": "string",
+            "description": "Data de nascimento no formato DD/MM/AAAA",
+            "pattern": "^\\d{2}/\\d{2}/\\d{4}$",
+            "example": "15/06/1990"
+          },
+          "day": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 31,
+            "description": "Dia de nascimento",
+            "example": 15
+          },
+          "month": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 12,
+            "description": "Mês de nascimento",
+            "example": 6
+          },
+          "year": {
+            "type": "integer",
+            "minimum": 1900,
+            "description": "Ano de nascimento",
+            "example": 1990
+          }
+        }
+      },
+      "RealtimeRequest": {
+        "type": "object",
+        "required": [
+          "cpf",
+          "birthDate"
+        ],
+        "description": "Corpo da Consulta em Tempo Real",
+        "properties": {
+          "cpf": {
+            "type": "string",
+            "description": "CPF com ou sem formatação (11 dígitos)",
+            "example": "12345678909"
+          },
+          "birthDate": {
+            "type": "string",
+            "description": "Data de nascimento do titular, DD/MM/AAAA ou DDMMAAAA (ano entre 1900 e o ano atual)",
+            "pattern": "^\\d{2}/?\\d{2}/?\\d{4}$",
+            "example": "15/06/1990"
+          }
+        }
+      },
+      "RealtimeResponse": {
+        "type": "object",
+        "required": [
+          "success",
+          "data"
+        ],
+        "description": "Resposta de sucesso da Consulta em Tempo Real",
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "description": "Sempre `true` em respostas 200",
+            "example": true
+          },
+          "data": {
+            "$ref": "#/components/schemas/RealtimeData"
+          }
+        }
+      },
+      "RealtimeData": {
+        "type": "object",
+        "required": [
+          "cpf",
+          "name",
+          "birthDate",
+          "deathYear",
+          "situation"
+        ],
+        "description": "Dados devolvidos pela Receita Federal",
+        "properties": {
+          "cpf": {
+            "type": "string",
+            "description": "CPF com 11 dígitos, sem máscara",
+            "pattern": "^\\d{11}$",
+            "example": "12345678909"
+          },
+          "name": {
+            "type": "string",
+            "description": "Nome como consta na Receita Federal",
+            "example": "FULANO DE TAL"
+          },
+          "birthDate": {
+            "type": "string",
+            "description": "Data de nascimento, DD/MM/AAAA",
+            "example": "15/06/1990"
+          },
+          "deathYear": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 1900,
+            "description": "Ano do óbito. Sempre presente; null quando não há óbito registrado ou quando o valor recebido é inválido (não tem 4 dígitos, está fora do intervalo entre 1900 e o ano atual ou é anterior ao ano de nascimento).",
+            "example": null
+          },
+          "situation": {
+            "type": "string",
+            "description": "Situação cadastral na Receita Federal, em maiúsculas (por exemplo, REGULAR, SUSPENSA, TITULAR FALECIDO)",
+            "example": "REGULAR"
+          },
+          "emissionDate": {
+            "type": "string",
+            "description": "Data de emissão do comprovante na Receita (quando disponível)",
+            "example": "02/10/2026"
+          },
+          "emissionTime": {
+            "type": "string",
+            "description": "Hora de emissão do comprovante na Receita (quando disponível)",
+            "example": "14:32:10"
+          },
+          "controlCode": {
+            "type": "string",
+            "description": "Código de controle do comprovante (quando disponível)",
+            "example": "A1B2.C3D4.E5F6.7890"
+          },
+          "validationUrl": {
+            "type": "string",
+            "format": "uri",
+            "description": "Link de conferência no site da Receita Federal, o mesmo destino do QR code do comprovante (quando disponível)"
+          },
+          "validationHtmlUrl": {
+            "type": "string",
+            "format": "uri",
+            "description": "Comprovante da consulta guardado pela CPFHub.io (página HTML), com QR code que leva ao validationUrl (quando disponível)"
+          }
+        }
+      },
+      "QuotaResponse": {
+        "type": "object",
+        "required": [
+          "success",
+          "data"
+        ],
+        "description": "Resposta de sucesso do saldo de créditos",
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "description": "Sempre `true` em respostas 200",
+            "example": true
+          },
+          "data": {
+            "$ref": "#/components/schemas/QuotaData"
+          }
+        }
+      },
+      "QuotaData": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "plan",
+          "remainingCredits",
+          "usedCredits",
+          "billingStatus",
+          "userId",
+          "email"
+        ],
+        "description": "Saldo de créditos e plano da conta autenticada",
+        "properties": {
+          "plan": {
+            "type": "string",
+            "description": "Nome do plano atual, ou `\"unknown\"` quando a conta não tem assinatura ativa",
+            "example": "Básico"
+          },
+          "remainingCredits": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Créditos disponíveis no período de cobrança atual, arredondados para baixo.\nA autorização usa o saldo exato, com casas decimais.\n",
+            "example": 750
+          },
+          "usedCredits": {
+            "type": "number",
+            "description": "Créditos usados no período de cobrança atual (pode ter casas decimais, por causa das consultas em tempo real)",
+            "example": 250
+          },
+          "billingStatus": {
+            "type": "string",
+            "enum": [
+              "active",
+              "free"
+            ],
+            "description": "Elegibilidade ao plano: `active` quando a conta tem uma assinatura que dá acesso ao plano, inclusive assinatura no plano Gratuito e status como `past_due`; `free` quando não há assinatura válida, por exemplo `canceled`, `unpaid` ou `incomplete_expired`. Nesse caso, `plan` pode vir como `unknown`.",
+            "example": "active"
+          },
+          "userId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Identificador do usuário",
+            "example": "123e4567-e89b-12d3-a456-426614174000"
+          },
+          "email": {
+            "type": "string",
+            "format": "email",
+            "description": "E-mail da conta",
+            "example": "usuario@exemplo.com"
+          }
+        }
+      },
+      "BulkSubmitRequest": {
+        "type": "object",
+        "required": [
+          "cpfs"
+        ],
+        "description": "Corpo do envio de um lote de CPFs",
+        "properties": {
+          "cpfs": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "maxItems": 10000,
+            "description": "Lista de CPFs, com ou sem formatação. Máximo de 10.000 por requisição.",
+            "example": [
+              "12345678909",
+              "11144477735",
+              "52998224725"
+            ]
+          },
+          "fileName": {
+            "type": "string",
+            "description": "Opcional. Nome de referência do lote, exibido no histórico.",
+            "example": "clientes-junho.csv"
+          },
+          "format": {
+            "type": "string",
+            "description": "Opcional e apenas informativo. Formato de origem do lote (por exemplo, CSV, TXT).",
+            "example": "CSV"
+          }
+        }
+      },
+      "BulkSubmitResponse": {
+        "type": "object",
+        "required": [
+          "success",
+          "data"
+        ],
+        "description": "Resposta após o lote ser aceito",
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "example": true
+          },
+          "data": {
+            "type": "object",
+            "required": [
+              "jobId",
+              "status",
+              "totalRecords",
+              "invalid"
+            ],
+            "properties": {
+              "jobId": {
+                "type": "string",
+                "format": "uuid",
+                "description": "Identificador do lote, usado em `GET /cpf/bulk/{jobId}`"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "processing"
+                ],
+                "description": "Status inicial do lote"
+              },
+              "totalRecords": {
+                "type": "integer",
+                "description": "CPFs válidos e únicos aceitos para processamento"
+              },
+              "invalid": {
+                "type": "integer",
+                "description": "CPFs descartados por formato ou dígito verificador inválido"
+              }
+            }
+          }
+        }
+      },
+      "BulkStatusResponse": {
+        "type": "object",
+        "required": [
+          "success",
+          "data"
+        ],
+        "description": "Status e resultados de um lote",
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "example": true
+          },
+          "data": {
+            "type": "object",
+            "required": [
+              "id",
+              "status",
+              "file_name",
+              "format",
+              "total_records",
+              "processed",
+              "found",
+              "not_found",
+              "skipped",
+              "error",
+              "created_at",
+              "updated_at",
+              "cpfs"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid",
+                "description": "Identificador do lote"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "processing",
+                  "done",
+                  "failed"
+                ],
+                "description": "Status do lote"
+              },
+              "file_name": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Nome de referência enviado em `fileName`"
+              },
+              "format": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Formato enviado em `format`"
+              },
+              "total_records": {
+                "type": "integer",
+                "description": "CPFs válidos e únicos no lote"
+              },
+              "processed": {
+                "type": "integer",
+                "description": "CPFs já processados (inclui `skipped`)"
+              },
+              "found": {
+                "type": "integer",
+                "description": "CPFs encontrados; cada um consome crédito (1 por padrão; pode variar por plano)"
+              },
+              "not_found": {
+                "type": "integer",
+                "description": "CPFs não encontrados; não consomem crédito"
+              },
+              "skipped": {
+                "type": "integer",
+                "description": "CPFs não consultados por falta de crédito"
+              },
+              "error": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Mensagem de erro quando `status` é `failed`"
+              },
+              "created_at": {
+                "type": "string",
+                "format": "date-time",
+                "description": "Data de criação do lote"
+              },
+              "updated_at": {
+                "type": "string",
+                "format": "date-time",
+                "description": "Data da última atualização do lote"
+              },
+              "cpfs": {
+                "type": "array",
+                "description": "Resultados por CPF, preenchidos conforme o lote é processado. CPFs `skipped` não aparecem aqui.",
+                "items": {
+                  "$ref": "#/components/schemas/BulkResultItem"
+                }
+              }
+            }
+          }
+        }
+      },
+      "BulkResultItem": {
+        "type": "object",
+        "required": [
+          "cpf",
+          "found",
+          "name",
+          "nameUpper",
+          "gender",
+          "birthDate",
+          "day",
+          "month",
+          "year"
+        ],
+        "description": "Resultado de um CPF em `data.cpfs`",
+        "properties": {
+          "cpf": {
+            "type": "string",
+            "description": "CPF com 11 dígitos, sem máscara",
+            "pattern": "^\\d{11}$",
+            "example": "11144477735"
+          },
+          "found": {
+            "type": "boolean",
+            "description": "Indica se o CPF foi encontrado (CPFs encontrados consomem crédito)"
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Nome completo",
+            "example": "Ana de Exemplo"
+          },
+          "nameUpper": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Nome completo em maiúsculas",
+            "example": "ANA DE EXEMPLO"
+          },
+          "gender": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "M",
+              "F",
+              null
+            ],
+            "description": "Gênero (`M` ou `F`)",
+            "example": "F"
+          },
+          "birthDate": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Data de nascimento, DD/MM/AAAA",
+            "example": "01/01/1990"
+          },
+          "day": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "Dia de nascimento",
+            "example": 1
+          },
+          "month": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "Mês de nascimento",
+            "example": 1
+          },
+          "year": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "Ano de nascimento",
+            "example": 1990
+          }
+        }
+      },
+      "ErrorResponse": {
+        "type": "object",
+        "required": [
+          "success",
+          "data",
+          "error"
+        ],
+        "description": "Erro das rotas (validação, não encontrado, Receita Federal). Mensagens em PT-BR.\nErros trazem `error.message`; use o status HTTP para tratar cada caso.\n",
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "description": "Sempre `false` em respostas de erro",
+            "example": false
+          },
+          "data": {
+            "type": "null",
+            "description": "Sempre `null` em respostas de erro"
+          },
+          "error": {
+            "type": "object",
+            "required": [
+              "message"
+            ],
+            "properties": {
+              "message": {
+                "type": "string",
+                "description": "Descrição do erro (PT-BR)",
+                "example": "CPF não encontrado na base de dados"
+              }
+            }
+          }
+        }
+      },
+      "AuthErrorResponse": {
+        "type": "object",
+        "required": [
+          "success",
+          "error"
+        ],
+        "description": "Erro de autenticação, conta ou crédito; `error` é uma string",
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "description": "Sempre `false` em respostas de erro",
+            "example": false
+          },
+          "error": {
+            "type": "string",
+            "description": "Descrição do erro (PT-BR)",
+            "example": "API Key inválida"
+          }
+        }
+      },
+      "UsageUnavailableResponse": {
+        "type": "object",
+        "required": [
+          "success",
+          "error",
+          "message"
+        ],
+        "description": "Não foi possível verificar o saldo de créditos (HTTP 503). Tente novamente em instantes.",
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "description": "Sempre `false` em respostas de erro",
+            "example": false
+          },
+          "error": {
+            "type": "string",
+            "enum": [
+              "usage_unavailable"
+            ],
+            "description": "Identificador do erro",
+            "example": "usage_unavailable"
+          },
+          "message": {
+            "type": "string",
+            "description": "Descrição do erro (PT-BR)",
+            "example": "Não foi possível verificar o saldo de créditos. Tente novamente."
+          }
+        }
+      }
+    }
+  },
+  "security": [
+    {
+      "ApiKeyAuth": []
+    }
+  ],
+  "tags": [
+    {
+      "name": "CPF",
+      "description": "Consulta Simples de dados cadastrais por CPF"
+    },
+    {
+      "name": "Consulta em Tempo Real",
+      "description": "Consulta na Receita Federal na hora, com CPF e data de nascimento",
+      "externalDocs": {
+        "url": "https://www.cpfhub.io/documentacao/referencia/cpf-tempo-real"
+      }
+    },
+    {
+      "name": "Consulta em Lote",
+      "description": "Consulta assíncrona de CPFs em lote"
+    },
+    {
+      "name": "Quota",
+      "description": "Saldo de créditos e plano da conta"
+    }
+  ]
+}
