@@ -1,0 +1,3469 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "API NotaGuard",
+    "version": "1.7.0",
+    "description": "Interface HTTP de leitura dos documentos fiscais que o NotaGuard monitora para a\nsua empresa. Permite listar NF-e, NFC-e e NFS-e, consultar um documento\nespecífico (com tributos, referências, etiquetas e parcelas de pagamento),\nlistar itens e eventos SEFAZ, baixar o XML autorizado e gerar o PDF de\nrepresentação (DANFE ou DANFSe).\n\n## Visão geral\n\n| | |\n| --- | --- |\n| URL base | `https://api.notaguard.com.br` |\n| Versão | `v1` |\n| Autenticação | Bearer token no header `Authorization`, uma chave por empresa |\n| Métodos | Somente leitura. `GET`, com uma exceção: `POST /v1/notas/exportacoes` cria uma exportação em lote |\n| Formato | JSON. Datas em ISO 8601, sempre UTC |\n| Paginação | Por cursor. Não há parâmetro de offset |\n| Limite de uso | 60 unidades de custo por minuto, por chave |\n| CORS | Não habilitado. As chamadas devem partir do seu servidor |\n\nA especificação completa está em\n[openapi.json](https://notaguard.com.br/api/openapi.json), pronta para importar\nem Postman, Insomnia ou gerador de cliente, e para ser lida por ferramentas\nautomatizadas.\n\n## Autenticação\n\nToda requisição exige uma chave de API no header:\n\n```\nAuthorization: Bearer ng_live_sua_chave_aqui\n```\n\nAs chaves são criadas em **Configurações > Integrações > API** no painel, por\nproprietários e administradores da empresa. Cada chave dá acesso aos documentos de uma única\nempresa, e o token completo é exibido apenas no momento da criação: depois disso,\nsó o prefixo fica visível. Se o token for perdido, revogue a chave e crie outra.\n\nA API não envia headers de CORS de propósito: ela é feita para ser chamada do seu\nservidor. Chamar do navegador exporia sua chave no bundle JavaScript.\n\n## Primeira chamada\n\n`GET /v1/me` valida a chave e devolve a empresa que ela abre, os escopos\nconcedidos e o limite restante na janela atual. É a forma mais rápida de\nconfirmar que a integração está configurada corretamente.\n\n```bash\ncurl https://api.notaguard.com.br/v1/me \\\n  -H \"Authorization: Bearer ng_live_sua_chave_aqui\"\n```\n\nPara listar documentos, use `GET /v1/notas`:\n\n```bash\ncurl \"https://api.notaguard.com.br/v1/notas?tipo=NFe&limite=50\" \\\n  -H \"Authorization: Bearer ng_live_sua_chave_aqui\"\n```\n\n## Detalhe: id ou chave de acesso, e blocos opcionais\n\nToda rota de documento (`/v1/notas/{id}`, `/xml`, `/pdf`, `/itens`,\n`/eventos`) aceita no lugar de `{id}` tanto o `id` (UUID) devolvido na\nlistagem quanto a **chave de acesso** do documento. Se o seu sistema já tem a\nchave, não precisa buscar o UUID antes:\n\n```bash\ncurl \"https://api.notaguard.com.br/v1/notas/35260112345678000195550010000000011123456782\" \\\n  -H \"Authorization: Bearer ng_live_sua_chave_aqui\"\n```\n\nO detalhe devolve mais do que a listagem (destinatário, natureza da operação,\nprotocolo de autorização, finalidade) e aceita blocos opcionais via `incluir`:\n\n```bash\ncurl \"https://api.notaguard.com.br/v1/notas/{id}?incluir=tributos,referencias,etiquetas,duplicatas,cfop\" \\\n  -H \"Authorization: Bearer ng_live_sua_chave_aqui\"\n```\n\n- `tributos`: ICMS, IPI, PIS/COFINS, ISS, retenções e IBS/CBS quando presentes.\n- `referencias`: vínculos com outros documentos, nos dois sentidos: devolução,\n  nota referenciada (`NFref`), substituição de NFS-e e o CT-e que transportou a\n  mercadoria.\n- `etiquetas`: as marcações aplicadas no painel do NotaGuard.\n- `duplicatas`: parcelas de pagamento extraídas do XML, com a situação\n  acompanhada no contas a pagar.\n- `cfop`: CFOPs distintos dos itens (NF-e e NFC-e). É uma lista porque uma\n  nota pode ter mais de um CFOP entre os itens.\n\nBloco não pedido não aparece na resposta, e cada bloco custa apenas a leitura\ndo que você pediu.\n\n## CFOP\n\nO CFOP é atributo do **item**, não da nota: uma NF-e pode misturar, por\nexemplo, `5102` e `5405` nos itens. Por isso a API o expõe em três formas:\n\n- `GET /v1/notas/{id}/itens` traz o CFOP de cada item.\n- `incluir=cfop` (na listagem e no detalhe) adiciona ao documento a lista de\n  CFOPs distintos dos itens: `\"cfop\": [\"5102\", \"5405\"]`.\n- `GET /v1/notas?cfop=5905,6905` filtra documentos com item em qualquer um\n  dos CFOPs. O filtro também vale em `/resumo` e na exportação em lote.\n\nO CFOP vem dos itens do XML completo: documento só com resumo tem\n`\"cfop\": null` no `incluir` e fica de fora do filtro. NFS-e não tem CFOP.\n\n## Etiquetas\n\nEtiquetas são marcadores que a sua equipe define e aplica nas notas pelo painel\n(centro de custo, status de conferência, o que fizer sentido). Pela API:\n\n- `GET /v1/etiquetas` lista as definições da empresa e os valores possíveis.\n- `GET /v1/notas?etiqueta=centro-custo:matriz` filtra a listagem pelas notas\n  marcadas. `etiqueta=centro-custo` (sem valor) retorna as que têm a etiqueta\n  com qualquer valor.\n- `incluir=etiquetas` no detalhe devolve as marcações da nota.\n\nÉ a ponte entre a triagem manual feita no painel e o seu sistema: por exemplo,\no ERP importa somente as notas que alguém marcou como \"aprovada\".\n\n## Paginação\n\nA paginação é por cursor. Chame `GET /v1/notas`, use o `proximo_cursor` da\nresposta na chamada seguinte, e pare quando `tem_mais` for `false`. Não existe\nparâmetro de offset: offset duplica itens quando um documento novo chega entre\nduas páginas.\n\nA ordenação padrão é por `criada_em` decrescente (quando o documento entrou no\nNotaGuard), campo que nunca é nulo e por isso dá paginação estável.\n\n## Filtros de data: o dia é o dia inteiro, em horário de Brasília\n\nTodo filtro de data aceita duas formas, e elas significam coisas diferentes:\n\n- **Data pura** (`AAAA-MM-DD`) recorta o **dia civil completo no fuso de\n  Brasília** (America/São Paulo). `data_ref_de=2026-07-01&data_ref_ate=2026-07-31`\n  pega de 1º de julho 00:00 até 31 de julho 23:59:59, como o painel mostra. É a\n  forma recomendada para fechamento de período.\n- **Instante ISO 8601 completo** (`2026-07-31T18:00:00Z`) é usado exatamente\n  como veio, sem arredondar. Use quando você precisa de um corte por hora.\n\nIsso vale nos dois extremos: o `_de` não puxa notas da noite do dia anterior, e\no `_ate` não descarta as do último dia. As respostas continuam em UTC.\n\n## Sincronização incremental\n\nPara manter uma cópia atualizada sem varrer tudo a cada execução, guarde o maior\n`atualizada_em` que você recebeu e passe em `data_atualizacao_apos` na próxima vez.\nAqui prefira o instante ISO completo, e não a data pura: você quer continuar\nexatamente de onde parou, não do início do dia.\n\n## Documentos que só têm resumo\n\nUma parte grande do acervo aparece com `status: \"resumida\"`, sem `valor` nem\n`data_emissao` e com `xml_completo_disponivel: false`. Existem **duas\nsituações bem diferentes** por trás disso, e confundi-las leva a conclusões\nerradas sobre \"notas faltando\":\n\n**1. Nota que a sua empresa recebeu** (`vinculo: \"receptor\"`). A SEFAZ entrega\nprimeiro um resumo e, em seguida, o documento completo, que sobrescreve o\nresumo automaticamente. Na prática isso acontece em segundos e o estado\n`resumida` é transitório: no acervo atual, praticamente toda nota recebida já\nestá completa. Se um documento ficar parado nesse estado, o caminho é registrar\na **ciência da operação**, que é o que autoriza a SEFAZ a liberar o XML.\n\n**2. Nota que a sua empresa emitiu** (`vinculo: \"emissor\"`). A SEFAZ não\ndevolve ao emissor, pela distribuição, o XML daquilo que ele mesmo emitiu. O\nNotaGuard fica sabendo dessas notas de forma indireta, por eventos de terceiros\nque as referenciam (por exemplo, o CT-e que transportou a mercadoria). Elas\npermanecem sem valor e sem data indefinidamente, e isso **não** é atraso de\nprocessamento: o dado não existe do lado de cá. Para tê-lo, envie o XML da sua\nemissão pelo painel.\n\nPor isso, ao sincronizar, filtre por `vinculo`: `?vinculo=receptor` devolve o\nacervo recebido, que é o que vem completo.\n\nEm qualquer um dos casos, `GET /v1/notas/{id}/xml` continua funcionando e\ndevolve o XML de resumo (nome do arquivo terminando em `-resumo.xml`). Só o\nPDF exige o XML completo.\n\n### Como o XML completo é liberado (manifestação do destinatário)\n\nIsto não é uma regra do NotaGuard, é da SEFAZ, e costuma ser a explicação real\npara \"a nota está lá mas o XML não vem\".\n\nNa distribuição de DF-e, a SEFAZ entrega ao destinatário **primeiro o resumo**\n(`resNFe`: chave, emissor, valor e data). O documento **completo** (`procNFe`,\ncom itens, tributos e cobrança) só é liberado depois que o destinatário\n**manifesta** a operação. A manifestação é um evento registrado na SEFAZ, e para\neste efeito valem:\n\n- **Ciência da operação** (`210210`) — \"recebi o documento e ainda estou\n  apurando\". É o passo mínimo que libera o XML completo, e o mais usado.\n- **Confirmação da operação** (`210200`) — confirma que a operação de fato\n  ocorreu. Também libera o XML.\n- **Desconhecimento** (`210220`) e **operação não realizada** (`210240`)\n  registram o oposto e não servem para \"destravar\" o download.\n\nDepois da manifestação, o documento completo entra na fila de distribuição e é\ncapturado no ciclo seguinte de consulta: **não é instantâneo**. Enquanto isso, a\nnota continua com `status: \"resumida\"` e `xml_completo_disponivel: false`, e\n`/pdf` responde `409 xml_indisponivel`.\n\n**No NotaGuard isso pode ser automático.** Em **Configurações > Gerais** existe\na opção **Ciência Automática**: com ela ligada, o NotaGuard registra a ciência\ndas notas recebidas assim que elas aparecem, sem ninguém precisar clicar, e o\nXML completo passa a chegar sozinho. Se a sua integração encontra muitos\ndocumentos em `resumida`, verifique essa opção antes de tratar como falha da\nAPI: provavelmente as notas estão só esperando manifestação.\n\nManifestação **não se aplica** a nota que a sua própria empresa emitiu (caso 2\nacima) nem a NFS-e; nesses casos o caminho é enviar o XML pelo painel.\n\nNulo aqui significa **desconhecido**, não zero. Trate esse caso explicitamente:\nsomar `valor` sem checar produz total subestimado. O endpoint\n`/v1/notas/resumo` devolve `total_sem_valor` para você medir esse efeito.\n\nSituações possíveis em `status`:\n\n- `autorizada`: Documento autorizado, com XML completo disponível.\n- `resumida`: Só existe o **resumo** do documento, sem o XML completo: `valor` e `data_emissao` geralmente vêm `null` e `xml_completo_disponivel` é `false` (o XML de resumo continua disponível para download). Em nota recebida é um estado transitório, que dura até o documento completo chegar; em nota emitida pela sua empresa é permanente, porque a SEFAZ não devolve pela distribuição o XML da própria emissão. Veja a seção \"Documentos que só têm resumo\".\n- `cancelada`: Documento cancelado na SEFAZ.\n- `denegada`: Emissão denegada pela SEFAZ.\n- `desconhecido`: A SEFAZ não informou situação reconhecível para o documento.\n\n## Exportação em lote (XML e PDF)\n\nPara baixar muitos documentos de uma vez, use `POST /v1/notas/exportacoes` em\nvez de iterar nos endpoints unitários: além de mais barato no limite de uso, é\numa requisição em vez de centenas. O resultado é sempre um ZIP com os arquivos\nnomeados pela chave de acesso e um `manifesto.csv` dizendo, documento a\ndocumento, o que entrou e o que não entrou (e por quê).\n\nA seleção dos documentos usa **os mesmos filtros da listagem** (campo\n`filtros`) ou uma lista explícita (campo `ids`). Ao usar `filtros`, um\n**período fechado é obrigatório**: `data_ref_de`+`data_ref_ate` (recomendado;\né a data de referência do painel: emissão em NF-e/NFC-e, competência em NFS-e),\n`data_emissao_de`+`data_emissao_ate` ou `data_criacao_de`+`data_criacao_ate`.\nExportação sem recorte de tempo não existe de propósito: \"o acervo inteiro\" não\né um pedido de exportação, é sincronização, e para isso o caminho é\n`data_atualizacao_apos` na listagem. Existem duas entregas, e **você** escolhe\nqual quer:\n\n**Entrega `direta`** (síncrona): para até 50\ndocumentos, somente XML. O ZIP vem no corpo da resposta, sem espera:\n\n```bash\ncurl -X POST https://api.notaguard.com.br/v1/notas/exportacoes \\\n  -H \"Authorization: Bearer ng_live_sua_chave_aqui\" \\\n  -H \"Content-Type: application/json\" \\\n  -d '{\"formatos\": [\"xml\"], \"entrega\": \"direta\", \"filtros\": {\"data_ref_de\": \"2026-07-01\", \"data_ref_ate\": \"2026-07-31\"}}' \\\n  -o notas.zip\n```\n\n**Entrega `arquivo`** (assíncrona, o padrão): para lotes maiores e para\nqualquer lote com PDF. A resposta é `202` com um job; consulte o status até\n`concluida` e baixe pelo campo `url`:\n\n```bash\ncurl -X POST https://api.notaguard.com.br/v1/notas/exportacoes \\\n  -H \"Authorization: Bearer ng_live_sua_chave_aqui\" \\\n  -H \"Content-Type: application/json\" \\\n  -d '{\"formatos\": [\"xml\", \"pdf\"], \"filtros\": {\"data_ref_de\": \"2026-07-01\", \"data_ref_ate\": \"2026-07-31\", \"vinculo\": \"receptor\"}}'\n\n# resposta: 202 { \"id\": \"...\", \"status\": \"pendente\", \"total_documentos\": 480, ... }\n\ncurl https://api.notaguard.com.br/v1/notas/exportacoes/{id} \\\n  -H \"Authorization: Bearer ng_live_sua_chave_aqui\"\n# repita até \"status\": \"concluida\"; então baixe o ZIP pelo campo \"url\"\n```\n\nRegras que valem a pena conhecer antes de integrar:\n\n- **Faça polling com calma.** Enquanto `pendente`/`processando`, a resposta\n  traz `Retry-After: 5`. Lotes pequenos concluem em segundos; um lote grande\n  de PDFs pode levar alguns minutos.\n- **Limites por exportação**: 5000 documentos quando só XML,\n  500 quando inclui PDF (gerar PDF custa ~1s por\n  documento). Pedido acima do limite responde `422` **com a contagem real**,\n  para você saber exatamente como dividir. Limites ajustáveis por empresa, como\n  o limite de requisições.\n- **Uma exportação ativa por vez** por empresa (`409` na segunda). Repetir o\n  MESMO pedido não dá erro: devolve o job já em andamento. Até\n  20 exportações por período de 24h.\n- **O link de `url` vale 1 hora**; expirou, consulte o job de novo e receba\n  outro. **O arquivo vale 48 horas**; depois disso o status vira `expirada` e\n  é preciso exportar de novo.\n- **Sucesso parcial**: documento sem XML completo não derruba o lote. Ele entra\n  no `manifesto.csv` com o motivo (`sem_xml_completo`, por exemplo) e nos\n  contadores `incluidos_xml` / `incluidos_pdf` / `falhas` do job. XML de\n  **resumo** entra no ZIP com o sufixo `-resumo.xml`, como no endpoint\n  unitário.\n- **Exportação é para fechar período** (o mês do contador, uma auditoria), não\n  para sincronização contínua. Para manter seu sistema atualizado, use\n  `data_atualizacao_apos` na listagem, que é incremental e muito mais barato.\n\n## Limites de uso\n\nCada chave tem um custo permitido por minuto (padrão 60). Endpoints mais caros\nconsomem mais de uma unidade:\n\n| Endpoint | Custo |\n| --- | --- |\n| `/v1/me`, `/v1/notas`, `/v1/notas/resumo`, `/v1/notas/{id}`, `/v1/notas/{id}/itens`, `/v1/notas/{id}/eventos`, `/v1/etiquetas` | 1 |\n| `GET /v1/notas/exportacoes`, `GET /v1/notas/exportacoes/{id}` | 1 |\n| `/v1/notas/{id}/xml` | 2 |\n| `/v1/notas/{id}/pdf` | 10 |\n| `POST /v1/notas/exportacoes` com entrega `direta` | 10 |\n| `POST /v1/notas/exportacoes` com entrega `arquivo` | 20 |\n\nRepare que o lote é muito mais barato que o equivalente unitário: 50\nXMLs pela entrega direta custam 10 unidades, contra 100 baixando um a um. Se a\nsua integração busca vários arquivos, o lote é o caminho certo.\n\n**Requisição que falha antes do trabalho pesado custa 1 unidade, não o preço\ncheio.** Um `/pdf` que responde `404` ou `409 xml_indisponivel` consome 1, não\n10, porque nenhuma geração começou. O preço cheio só é cobrado quando o arquivo\nrealmente vai ser produzido ou baixado.\n\nAinda assim, o jeito certo de varrer o acervo é filtrar antes:\n`GET /v1/notas?xml_completo_disponivel=true` devolve só os documentos que\nconseguem gerar PDF, em vez de descobrir isso um a um.\n\nAcompanhe pelos headers `X-RateLimit-Limit`, `X-RateLimit-Remaining` e\n`X-RateLimit-Reset`. Ao receber `429`, respeite o `Retry-After`.\n\n> **Precisa de um limite maior?** O limite é ajustável por empresa e não depende\n> de mudança no seu código nem de troca de chave.\n> [Fale com o suporte](https://notaguard.com.br/suporte) informando o volume que\n> a sua integração precisa.\n\n## Erros\n\nToda resposta de erro tem o mesmo formato, com um `codigo` estável e um\n`id_requisicao` para o suporte:\n\n```json\n{\n  \"erro\": {\n    \"codigo\": \"parametro_invalido\",\n    \"mensagem\": \"tipo inválido: 'nfe'. Valores aceitos: NFe, NFCe, NFSe.\",\n    \"id_requisicao\": \"req_01JQ8Z2K9M\"\n  }\n}\n```\n\n- `nao_autorizado`: Header `Authorization` ausente ou malformado.\n- `token_invalido`: O token não corresponde a nenhuma chave ativa.\n- `token_revogado`: A chave foi revogada no painel.\n- `token_expirado`: A chave passou da data de expiração.\n- `ip_nao_autorizado`: A chave tem lista de IPs permitidos e a requisição veio de outro IP.\n- `escopo_insuficiente`: A chave não tem o escopo exigido por este endpoint.\n- `recurso_nao_disponivel_no_plano`: O plano da empresa não inclui acesso via API.\n- `nao_encontrado`: Documento inexistente ou pertencente a outra empresa. A API não diferencia os dois casos de propósito, para não permitir descoberta de documentos de terceiros. **Só isso**: quando o documento existe mas o arquivo pedido ainda não, o código é `xml_indisponivel`.\n- `xml_indisponivel`: O documento existe, mas o XML necessário para atender a requisição ainda não chegou da SEFAZ. Em `/pdf` significa que só há o resumo (o PDF exige o XML completo); em `/xml`, que não há nem o completo nem o resumo. **Não é permanente em nota recebida**: o XML completo é liberado pela SEFAZ após a manifestação do destinatário. Veja \"Documentos que só têm resumo\" e não trate como erro definitivo antes de checar `xml_completo_disponivel` na listagem.\n- `parametro_invalido`: Algum parâmetro da query é inválido ou desconhecido. A mensagem indica qual é e quais valores são aceitos.\n- `cursor_invalido`: O cursor de paginação está corrompido ou não foi gerado por esta API.\n- `limite_de_requisicoes_excedido`: Limite de requisições por minuto excedido. Respeite o header `Retry-After`.\n- `metodo_nao_permitido`: A API v1 é somente leitura: apenas `GET` é aceito.\n- `nao_disponivel_para_este_tipo`: O recurso existe, mas não se aplica a este tipo de documento. Hoje acontece na lista de itens de NFS-e: serviço não tem itens, a descrição está em `descricao_servico`, no detalhe da nota.\n- `exportacao_em_andamento`: Já existe uma exportação pendente ou em processamento para esta empresa (uma por vez). A mensagem traz o `id` dela: acompanhe por `GET /v1/notas/exportacoes/{id}` e crie a próxima quando concluir. Repetir o MESMO pedido não dá este erro: devolve o job existente.\n- `exportacao_acima_do_limite`: O pedido casa com mais documentos do que o limite permite. A mensagem traz a contagem real e o limite: restrinja os filtros (por exemplo, um período menor) ou divida em mais de uma exportação. Na entrega `direta`, acima do limite o caminho é usar a entrega `arquivo`.\n- `exportacao_sem_documentos`: Nenhum documento casa com os filtros ou ids informados.\n- `limite_diario_de_exportacoes`: Limite de exportações nas últimas 24 horas atingido. O limite é ajustável por empresa: fale com o suporte se o seu volume precisar de mais.\n- `erro_interno`: Falha inesperada. O `id_requisicao` identifica a ocorrência no suporte.\n\nCódigos publicados são estáveis: dentro de `/v1` nunca são renomeados nem\nremovidos.",
+    "contact": {
+      "name": "Suporte NotaGuard",
+      "url": "https://notaguard.com.br/suporte"
+    },
+    "x-jentic-source-url": "https://notaguard.com.br/api/openapi.json"
+  },
+  "servers": [
+    {
+      "url": "https://api.notaguard.com.br",
+      "description": "Produção"
+    }
+  ],
+  "paths": {
+    "/v1/me": {
+      "get": {
+        "summary": "Dados da chave e da empresa",
+        "description": "Valida a chave e devolve a empresa que ela abre, os escopos concedidos e o limite restante na janela atual. Use como primeira chamada de qualquer integração.",
+        "tags": [
+          "Conta"
+        ],
+        "security": [
+          {
+            "chaveApi": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Chave válida.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Me"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Parâmetro inválido ou cursor corrompido.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Erro"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Chave ausente, inválida, revogada ou expirada.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Erro"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Escopo insuficiente ou plano sem acesso via API.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Erro"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Limite de requisições excedido.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Erro"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Erro interno.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Erro"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/notas": {
+      "get": {
+        "summary": "Listar notas",
+        "description": "Lista NF-e, NFC-e e NFS-e da empresa, com filtros e paginação por cursor. Ordenação padrão: `criada_em` decrescente. `incluir=cfop` adiciona a cada item a lista de CFOPs distintos do documento.",
+        "tags": [
+          "Notas"
+        ],
+        "security": [
+          {
+            "chaveApi": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "Filtra por tipo. Aceita múltiplos separados por vírgula: `tipo=NFe,NFCe`. Valores aceitos: NFe, NFCe, NFSe."
+            },
+            "required": false,
+            "description": "Filtra por tipo. Aceita múltiplos separados por vírgula: `tipo=NFe,NFCe`. Valores aceitos: NFe, NFCe, NFSe.",
+            "name": "tipo",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Filtra por situação. Múltiplos separados por vírgula. Valores aceitos: autorizada, resumida, cancelada, denegada, desconhecido."
+            },
+            "required": false,
+            "description": "Filtra por situação. Múltiplos separados por vírgula. Valores aceitos: autorizada, resumida, cancelada, denegada, desconhecido.",
+            "name": "status",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Filtra pelo vínculo da sua empresa com o documento. Múltiplos separados por vírgula. `indefinido` retorna os documentos cujo vínculo ainda não foi determinado. Valores aceitos: emissor, receptor, transportador, terceiro, indefinido."
+            },
+            "required": false,
+            "description": "Filtra pelo vínculo da sua empresa com o documento. Múltiplos separados por vírgula. `indefinido` retorna os documentos cujo vínculo ainda não foi determinado. Valores aceitos: emissor, receptor, transportador, terceiro, indefinido.",
+            "name": "vinculo",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Filtra pela manifestação registrada. Múltiplos separados por vírgula. Valores aceitos: ciencia, confirmacao, desconhecimento."
+            },
+            "required": false,
+            "description": "Filtra pela manifestação registrada. Múltiplos separados por vírgula. Valores aceitos: ciencia, confirmacao, desconhecimento.",
+            "name": "manifestacao",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}(T\\d{2}:\\d{2}(:\\d{2}(\\.\\d+)?)?(Z|[+-]\\d{2}:\\d{2})?)?$",
+              "description": "Data de referência a partir de (AAAA-MM-DD ou ISO 8601). A data de referência é a mesma da coluna \"Data\" do painel: emissão em NF-e e NFC-e, competência em NFS-e. Atenção: documentos sem essa data (só resumo) são excluídos quando este filtro é usado."
+            },
+            "required": false,
+            "description": "Data de referência a partir de (AAAA-MM-DD ou ISO 8601). A data de referência é a mesma da coluna \"Data\" do painel: emissão em NF-e e NFC-e, competência em NFS-e. Atenção: documentos sem essa data (só resumo) são excluídos quando este filtro é usado.",
+            "name": "data_ref_de",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}(T\\d{2}:\\d{2}(:\\d{2}(\\.\\d+)?)?(Z|[+-]\\d{2}:\\d{2})?)?$",
+              "description": "Data de referência até, **inclusive o dia inteiro**. AAAA-MM-DD ou ISO 8601."
+            },
+            "required": false,
+            "description": "Data de referência até, **inclusive o dia inteiro**. AAAA-MM-DD ou ISO 8601.",
+            "name": "data_ref_ate",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}(T\\d{2}:\\d{2}(:\\d{2}(\\.\\d+)?)?(Z|[+-]\\d{2}:\\d{2})?)?$",
+              "description": "Data de emissão a partir de (AAAA-MM-DD ou ISO 8601). Atenção: documentos sem data de emissão (só resumo) são excluídos quando este filtro é usado."
+            },
+            "required": false,
+            "description": "Data de emissão a partir de (AAAA-MM-DD ou ISO 8601). Atenção: documentos sem data de emissão (só resumo) são excluídos quando este filtro é usado.",
+            "name": "data_emissao_de",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}(T\\d{2}:\\d{2}(:\\d{2}(\\.\\d+)?)?(Z|[+-]\\d{2}:\\d{2})?)?$",
+              "description": "Data de emissão até, **inclusive o dia inteiro**. AAAA-MM-DD ou ISO 8601."
+            },
+            "required": false,
+            "description": "Data de emissão até, **inclusive o dia inteiro**. AAAA-MM-DD ou ISO 8601.",
+            "name": "data_emissao_ate",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}(T\\d{2}:\\d{2}(:\\d{2}(\\.\\d+)?)?(Z|[+-]\\d{2}:\\d{2})?)?$",
+              "description": "Filtra por quando o documento entrou no NotaGuard (`criada_em`), a partir de. AAAA-MM-DD ou ISO 8601."
+            },
+            "required": false,
+            "description": "Filtra por quando o documento entrou no NotaGuard (`criada_em`), a partir de. AAAA-MM-DD ou ISO 8601.",
+            "name": "data_criacao_de",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}(T\\d{2}:\\d{2}(:\\d{2}(\\.\\d+)?)?(Z|[+-]\\d{2}:\\d{2})?)?$",
+              "description": "Filtra por quando o documento entrou no NotaGuard (`criada_em`), até, **inclusive o dia inteiro**. AAAA-MM-DD ou ISO 8601."
+            },
+            "required": false,
+            "description": "Filtra por quando o documento entrou no NotaGuard (`criada_em`), até, **inclusive o dia inteiro**. AAAA-MM-DD ou ISO 8601.",
+            "name": "data_criacao_ate",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}(T\\d{2}:\\d{2}(:\\d{2}(\\.\\d+)?)?(Z|[+-]\\d{2}:\\d{2})?)?$",
+              "description": "Retorna apenas documentos alterados depois deste instante (AAAA-MM-DD ou ISO 8601). É o parâmetro recomendado para sincronização incremental: guarde o maior `atualizada_em` recebido e mande de volta na próxima chamada."
+            },
+            "required": false,
+            "description": "Retorna apenas documentos alterados depois deste instante (AAAA-MM-DD ou ISO 8601). É o parâmetro recomendado para sincronização incremental: guarde o maior `atualizada_em` recebido e mande de volta na próxima chamada.",
+            "name": "data_atualizacao_apos",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "number",
+              "minimum": 0,
+              "description": "Valor mínimo. Documentos sem valor conhecido são excluídos quando este filtro é usado."
+            },
+            "required": false,
+            "description": "Valor mínimo. Documentos sem valor conhecido são excluídos quando este filtro é usado.",
+            "name": "valor_min",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "number",
+              "minimum": 0,
+              "description": "Valor máximo. Documentos sem valor conhecido são excluídos quando este filtro é usado."
+            },
+            "required": false,
+            "description": "Valor máximo. Documentos sem valor conhecido são excluídos quando este filtro é usado.",
+            "name": "valor_max",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^\\d{20,60}$",
+              "description": "Busca exata por chave de acesso."
+            },
+            "required": false,
+            "description": "Busca exata por chave de acesso.",
+            "name": "chave",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "description": "Busca exata pelo número do documento."
+            },
+            "required": false,
+            "description": "Busca exata pelo número do documento.",
+            "name": "numero",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^\\d{11}$|^\\d{14}$",
+              "description": "CNPJ ou CPF do emissor, somente dígitos."
+            },
+            "required": false,
+            "description": "CNPJ ou CPF do emissor, somente dígitos.",
+            "name": "documento_emissor",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 2,
+              "description": "Busca textual em nome do emissor, chave e número. Use para consulta livre; para filtro exato prefira os parâmetros dedicados."
+            },
+            "required": false,
+            "description": "Busca textual em nome do emissor, chave e número. Use para consulta livre; para filtro exato prefira os parâmetros dedicados.",
+            "name": "busca",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "true",
+                "false"
+              ],
+              "description": "`true` retorna apenas documentos com XML completo disponível; `false`, apenas os que têm só o resumo."
+            },
+            "required": false,
+            "description": "`true` retorna apenas documentos com XML completo disponível; `false`, apenas os que têm só o resumo.",
+            "name": "xml_completo_disponivel",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[^:\\s]+(:.+)?$",
+              "description": "Filtra por etiqueta aplicada no painel. `etiqueta=centro-custo` retorna notas que têm a etiqueta com qualquer valor; `etiqueta=centro-custo:matriz` filtra pelo valor (aceita o `valor` ou o `rotulo` da opção; em booleanas use `true`/`false`; em data use AAAA-MM-DD). Os slugs vêm de `GET /v1/etiquetas`."
+            },
+            "required": false,
+            "description": "Filtra por etiqueta aplicada no painel. `etiqueta=centro-custo` retorna notas que têm a etiqueta com qualquer valor; `etiqueta=centro-custo:matriz` filtra pelo valor (aceita o `valor` ou o `rotulo` da opção; em booleanas use `true`/`false`; em data use AAAA-MM-DD). Os slugs vêm de `GET /v1/etiquetas`.",
+            "name": "etiqueta",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[^:\\s]+(:.+)?$",
+              "description": "Inverso de `etiqueta`, mesmo formato. `sem_etiqueta=centro-custo` retorna as notas que ainda não têm a etiqueta; `sem_etiqueta=centro-custo:matriz` retorna as que não têm esse valor, incluindo as sem a etiqueta. Serve para classificar em rodadas, pegando só o que falta."
+            },
+            "required": false,
+            "description": "Inverso de `etiqueta`, mesmo formato. `sem_etiqueta=centro-custo` retorna as notas que ainda não têm a etiqueta; `sem_etiqueta=centro-custo:matriz` retorna as que não têm esse valor, incluindo as sem a etiqueta. Serve para classificar em rodadas, pegando só o que falta.",
+            "name": "sem_etiqueta",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Filtra por CFOP dos itens. Múltiplos separados por vírgula: `cfop=5905,6905` retorna documentos com item em qualquer um deles. O CFOP vem dos itens do XML completo, então documentos sem extração completa são excluídos quando este filtro é usado; NFS-e não tem CFOP e também fica de fora."
+            },
+            "required": false,
+            "description": "Filtra por CFOP dos itens. Múltiplos separados por vírgula: `cfop=5905,6905` retorna documentos com item em qualquer um deles. O CFOP vem dos itens do XML completo, então documentos sem extração completa são excluídos quando este filtro é usado; NFS-e não tem CFOP e também fica de fora.",
+            "name": "cfop",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Blocos opcionais a incluir em cada item da listagem, separados por vírgula. Bloco não pedido não aparece na resposta. Valores aceitos: cfop."
+            },
+            "required": false,
+            "description": "Blocos opcionais a incluir em cada item da listagem, separados por vírgula. Bloco não pedido não aparece na resposta. Valores aceitos: cfop.",
+            "name": "incluir",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 50,
+              "description": "Itens por página. Entre 1 e 100. Padrão 50."
+            },
+            "required": false,
+            "description": "Itens por página. Entre 1 e 100. Padrão 50.",
+            "name": "limite",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Cursor de paginação devolvido em `proximo_cursor`."
+            },
+            "required": false,
+            "description": "Cursor de paginação devolvido em `proximo_cursor`.",
+            "name": "cursor",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Página de resultados (até 100 itens).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListaNotas"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Parâmetro inválido ou cursor corrompido.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Erro"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Chave ausente, inválida, revogada ou expirada.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Erro"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Escopo insuficiente ou plano sem acesso via API.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Erro"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Limite de requisições excedido.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Erro"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Erro interno.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Erro"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/notas/resumo": {
+      "get": {
+        "summary": "Totais agregados",
+        "description": "Devolve contagem e soma de valores para os mesmos filtros da listagem, em uma única chamada. Use no lugar de paginar tudo e somar no cliente.",
+        "tags": [
+          "Notas"
+        ],
+        "security": [
+          {
+            "chaveApi": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "Filtra por tipo. Aceita múltiplos separados por vírgula: `tipo=NFe,NFCe`. Valores aceitos: NFe, NFCe, NFSe."
+            },
+            "required": false,
+            "description": "Filtra por tipo. Aceita múltiplos separados por vírgula: `tipo=NFe,NFCe`. Valores aceitos: NFe, NFCe, NFSe.",
+            "name": "tipo",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Filtra por situação. Múltiplos separados por vírgula. Valores aceitos: autorizada, resumida, cancelada, denegada, desconhecido."
+            },
+            "required": false,
+            "description": "Filtra por situação. Múltiplos separados por vírgula. Valores aceitos: autorizada, resumida, cancelada, denegada, desconhecido.",
+            "name": "status",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Filtra pelo vínculo da sua empresa com o documento. Múltiplos separados por vírgula. `indefinido` retorna os documentos cujo vínculo ainda não foi determinado. Valores aceitos: emissor, receptor, transportador, terceiro, indefinido."
+            },
+            "required": false,
+            "description": "Filtra pelo vínculo da sua empresa com o documento. Múltiplos separados por vírgula. `indefinido` retorna os documentos cujo vínculo ainda não foi determinado. Valores aceitos: emissor, receptor, transportador, terceiro, indefinido.",
+            "name": "vinculo",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Filtra pela manifestação registrada. Múltiplos separados por vírgula. Valores aceitos: ciencia, confirmacao, desconhecimento."
+            },
+            "required": false,
+            "description": "Filtra pela manifestação registrada. Múltiplos separados por vírgula. Valores aceitos: ciencia, confirmacao, desconhecimento.",
+            "name": "manifestacao",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}(T\\d{2}:\\d{2}(:\\d{2}(\\.\\d+)?)?(Z|[+-]\\d{2}:\\d{2})?)?$",
+              "description": "Data de referência a partir de (AAAA-MM-DD ou ISO 8601). A data de referência é a mesma da coluna \"Data\" do painel: emissão em NF-e e NFC-e, competência em NFS-e. Atenção: documentos sem essa data (só resumo) são excluídos quando este filtro é usado."
+            },
+            "required": false,
+            "description": "Data de referência a partir de (AAAA-MM-DD ou ISO 8601). A data de referência é a mesma da coluna \"Data\" do painel: emissão em NF-e e NFC-e, competência em NFS-e. Atenção: documentos sem essa data (só resumo) são excluídos quando este filtro é usado.",
+            "name": "data_ref_de",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}(T\\d{2}:\\d{2}(:\\d{2}(\\.\\d+)?)?(Z|[+-]\\d{2}:\\d{2})?)?$",
+              "description": "Data de referência até, **inclusive o dia inteiro**. AAAA-MM-DD ou ISO 8601."
+            },
+            "required": false,
+            "description": "Data de referência até, **inclusive o dia inteiro**. AAAA-MM-DD ou ISO 8601.",
+            "name": "data_ref_ate",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}(T\\d{2}:\\d{2}(:\\d{2}(\\.\\d+)?)?(Z|[+-]\\d{2}:\\d{2})?)?$",
+              "description": "Data de emissão a partir de (AAAA-MM-DD ou ISO 8601). Atenção: documentos sem data de emissão (só resumo) são excluídos quando este filtro é usado."
+            },
+            "required": false,
+            "description": "Data de emissão a partir de (AAAA-MM-DD ou ISO 8601). Atenção: documentos sem data de emissão (só resumo) são excluídos quando este filtro é usado.",
+            "name": "data_emissao_de",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}(T\\d{2}:\\d{2}(:\\d{2}(\\.\\d+)?)?(Z|[+-]\\d{2}:\\d{2})?)?$",
+              "description": "Data de emissão até, **inclusive o dia inteiro**. AAAA-MM-DD ou ISO 8601."
+            },
+            "required": false,
+            "description": "Data de emissão até, **inclusive o dia inteiro**. AAAA-MM-DD ou ISO 8601.",
+            "name": "data_emissao_ate",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}(T\\d{2}:\\d{2}(:\\d{2}(\\.\\d+)?)?(Z|[+-]\\d{2}:\\d{2})?)?$",
+              "description": "Filtra por quando o documento entrou no NotaGuard (`criada_em`), a partir de. AAAA-MM-DD ou ISO 8601."
+            },
+            "required": false,
+            "description": "Filtra por quando o documento entrou no NotaGuard (`criada_em`), a partir de. AAAA-MM-DD ou ISO 8601.",
+            "name": "data_criacao_de",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}(T\\d{2}:\\d{2}(:\\d{2}(\\.\\d+)?)?(Z|[+-]\\d{2}:\\d{2})?)?$",
+              "description": "Filtra por quando o documento entrou no NotaGuard (`criada_em`), até, **inclusive o dia inteiro**. AAAA-MM-DD ou ISO 8601."
+            },
+            "required": false,
+            "description": "Filtra por quando o documento entrou no NotaGuard (`criada_em`), até, **inclusive o dia inteiro**. AAAA-MM-DD ou ISO 8601.",
+            "name": "data_criacao_ate",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}(T\\d{2}:\\d{2}(:\\d{2}(\\.\\d+)?)?(Z|[+-]\\d{2}:\\d{2})?)?$",
+              "description": "Retorna apenas documentos alterados depois deste instante (AAAA-MM-DD ou ISO 8601). É o parâmetro recomendado para sincronização incremental: guarde o maior `atualizada_em` recebido e mande de volta na próxima chamada."
+            },
+            "required": false,
+            "description": "Retorna apenas documentos alterados depois deste instante (AAAA-MM-DD ou ISO 8601). É o parâmetro recomendado para sincronização incremental: guarde o maior `atualizada_em` recebido e mande de volta na próxima chamada.",
+            "name": "data_atualizacao_apos",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "number",
+              "minimum": 0,
+              "description": "Valor mínimo. Documentos sem valor conhecido são excluídos quando este filtro é usado."
+            },
+            "required": false,
+            "description": "Valor mínimo. Documentos sem valor conhecido são excluídos quando este filtro é usado.",
+            "name": "valor_min",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "number",
+              "minimum": 0,
+              "description": "Valor máximo. Documentos sem valor conhecido são excluídos quando este filtro é usado."
+            },
+            "required": false,
+            "description": "Valor máximo. Documentos sem valor conhecido são excluídos quando este filtro é usado.",
+            "name": "valor_max",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^\\d{20,60}$",
+              "description": "Busca exata por chave de acesso."
+            },
+            "required": false,
+            "description": "Busca exata por chave de acesso.",
+            "name": "chave",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "description": "Busca exata pelo número do documento."
+            },
+            "required": false,
+            "description": "Busca exata pelo número do documento.",
+            "name": "numero",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^\\d{11}$|^\\d{14}$",
+              "description": "CNPJ ou CPF do emissor, somente dígitos."
+            },
+            "required": false,
+            "description": "CNPJ ou CPF do emissor, somente dígitos.",
+            "name": "documento_emissor",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 2,
+              "description": "Busca textual em nome do emissor, chave e número. Use para consulta livre; para filtro exato prefira os parâmetros dedicados."
+            },
+            "required": false,
+            "description": "Busca textual em nome do emissor, chave e número. Use para consulta livre; para filtro exato prefira os parâmetros dedicados.",
+            "name": "busca",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "true",
+                "false"
+              ],
+              "description": "`true` retorna apenas documentos com XML completo disponível; `false`, apenas os que têm só o resumo."
+            },
+            "required": false,
+            "description": "`true` retorna apenas documentos com XML completo disponível; `false`, apenas os que têm só o resumo.",
+            "name": "xml_completo_disponivel",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[^:\\s]+(:.+)?$",
+              "description": "Filtra por etiqueta aplicada no painel. `etiqueta=centro-custo` retorna notas que têm a etiqueta com qualquer valor; `etiqueta=centro-custo:matriz` filtra pelo valor (aceita o `valor` ou o `rotulo` da opção; em booleanas use `true`/`false`; em data use AAAA-MM-DD). Os slugs vêm de `GET /v1/etiquetas`."
+            },
+            "required": false,
+            "description": "Filtra por etiqueta aplicada no painel. `etiqueta=centro-custo` retorna notas que têm a etiqueta com qualquer valor; `etiqueta=centro-custo:matriz` filtra pelo valor (aceita o `valor` ou o `rotulo` da opção; em booleanas use `true`/`false`; em data use AAAA-MM-DD). Os slugs vêm de `GET /v1/etiquetas`.",
+            "name": "etiqueta",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[^:\\s]+(:.+)?$",
+              "description": "Inverso de `etiqueta`, mesmo formato. `sem_etiqueta=centro-custo` retorna as notas que ainda não têm a etiqueta; `sem_etiqueta=centro-custo:matriz` retorna as que não têm esse valor, incluindo as sem a etiqueta. Serve para classificar em rodadas, pegando só o que falta."
+            },
+            "required": false,
+            "description": "Inverso de `etiqueta`, mesmo formato. `sem_etiqueta=centro-custo` retorna as notas que ainda não têm a etiqueta; `sem_etiqueta=centro-custo:matriz` retorna as que não têm esse valor, incluindo as sem a etiqueta. Serve para classificar em rodadas, pegando só o que falta.",
+            "name": "sem_etiqueta",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Filtra por CFOP dos itens. Múltiplos separados por vírgula: `cfop=5905,6905` retorna documentos com item em qualquer um deles. O CFOP vem dos itens do XML completo, então documentos sem extração completa são excluídos quando este filtro é usado; NFS-e não tem CFOP e também fica de fora."
+            },
+            "required": false,
+            "description": "Filtra por CFOP dos itens. Múltiplos separados por vírgula: `cfop=5905,6905` retorna documentos com item em qualquer um deles. O CFOP vem dos itens do XML completo, então documentos sem extração completa são excluídos quando este filtro é usado; NFS-e não tem CFOP e também fica de fora.",
+            "name": "cfop",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Agregado calculado.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResumoNotas"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Parâmetro inválido ou cursor corrompido.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Erro"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Chave ausente, inválida, revogada ou expirada.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Erro"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Escopo insuficiente ou plano sem acesso via API.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Erro"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Limite de requisições excedido.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Erro"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Erro interno.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Erro"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/notas/{id}": {
+      "get": {
+        "summary": "Detalhe de uma nota",
+        "description": "Busca um documento por `id` ou por chave de acesso. Devolve mais campos que a listagem (destinatário, natureza da operação, protocolo de autorização, finalidade) e aceita blocos opcionais via `incluir=tributos,referencias,etiquetas,duplicatas,cfop`.",
+        "tags": [
+          "Notas"
+        ],
+        "security": [
+          {
+            "chaveApi": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "`id` (UUID) devolvido na listagem **ou** a chave de acesso do documento. Os dois resolvem para o mesmo documento: se o seu sistema já tem a chave, use a chave direto, sem buscar o UUID antes.",
+            "schema": {
+              "type": "string"
+            },
+            "example": "35260112345678000195550010000000011123456782"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Blocos opcionais a incluir na resposta, separados por vírgula: `incluir=tributos,etiquetas`. Bloco não pedido não aparece na resposta. Valores aceitos: tributos, referencias, etiquetas, duplicatas, cfop."
+            },
+            "required": false,
+            "description": "Blocos opcionais a incluir na resposta, separados por vírgula: `incluir=tributos,etiquetas`. Bloco não pedido não aparece na resposta. Valores aceitos: tributos, referencias, etiquetas, duplicatas, cfop.",
+            "name": "incluir",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Documento encontrado.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotaDetalhe"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Parâmetro inválido ou cursor corrompido.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Erro"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Chave ausente, inválida, revogada ou expirada.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Erro"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Escopo insuficiente ou plano sem acesso via API.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Erro"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Documento não encontrado nesta empresa.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Erro"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Limite de requisições excedido.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Erro"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Erro interno.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Erro"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/notas/{id}/itens": {
+      "get": {
+        "summary": "Itens da nota",
+        "description": "Lista os itens de uma NF-e ou NFC-e: NCM, CFOP, quantidade, valor unitário e descrição. Sem paginação (o leiaute limita a 990 itens por documento). Lista vazia significa que a extração completa do XML ainda não aconteceu para este documento. Em NFS-e responde `501`: serviço não tem lista de itens, a descrição está em `nfse.descricao_servico` no detalhe.",
+        "tags": [
+          "Notas"
+        ],
+        "security": [
+          {
+            "chaveApi": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "`id` (UUID) devolvido na listagem **ou** a chave de acesso do documento. Os dois resolvem para o mesmo documento: se o seu sistema já tem a chave, use a chave direto, sem buscar o UUID antes.",
+            "schema": {
+              "type": "string"
+            },
+            "example": "35260112345678000195550010000000011123456782"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Itens do documento.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ItensNota"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Parâmetro inválido ou cursor corrompido.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Erro"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Chave ausente, inválida, revogada ou expirada.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Erro"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Escopo insuficiente ou plano sem acesso via API.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Erro"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Documento não encontrado nesta empresa.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Erro"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Limite de requisições excedido.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Erro"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Erro interno.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Erro"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "NFS-e não tem lista de itens.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Erro"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/notas/{id}/eventos": {
+      "get": {
+        "summary": "Eventos SEFAZ da nota",
+        "description": "Timeline de eventos registrados na SEFAZ para o documento, em ordem cronológica: manifestações do destinatário, carta de correção, cancelamento e o rastro logístico (CT-e e MDF-e vinculados ao transporte).",
+        "tags": [
+          "Notas"
+        ],
+        "security": [
+          {
+            "chaveApi": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "`id` (UUID) devolvido na listagem **ou** a chave de acesso do documento. Os dois resolvem para o mesmo documento: se o seu sistema já tem a chave, use a chave direto, sem buscar o UUID antes.",
+            "schema": {
+              "type": "string"
+            },
+            "example": "35260112345678000195550010000000011123456782"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Eventos do documento (lista vazia quando não há nenhum).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EventosNota"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Parâmetro inválido ou cursor corrompido.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Erro"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Chave ausente, inválida, revogada ou expirada.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Erro"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Escopo insuficiente ou plano sem acesso via API.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Erro"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Documento não encontrado nesta empresa.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Erro"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Limite de requisições excedido.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Erro"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Erro interno.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Erro"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/etiquetas": {
+      "get": {
+        "summary": "Etiquetas da empresa",
+        "description": "Lista as etiquetas definidas pela empresa no painel, com tipos e opções. Os slugs devolvidos aqui são os valores aceitos no filtro `etiqueta` da listagem de notas.",
+        "tags": [
+          "Etiquetas"
+        ],
+        "security": [
+          {
+            "chaveApi": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Definições de etiqueta.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListaEtiquetas"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Parâmetro inválido ou cursor corrompido.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Erro"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Chave ausente, inválida, revogada ou expirada.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Erro"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Escopo insuficiente ou plano sem acesso via API.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Erro"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Limite de requisições excedido.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Erro"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Erro interno.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Erro"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/notas/{id}/xml": {
+      "get": {
+        "summary": "XML autorizado",
+        "description": "Devolve o XML do documento, exatamente como veio da SEFAZ. Quando `xml_completo_disponivel` é `true`, é o XML completo autorizado; quando é `false`, devolve o XML de **resumo** (o nome do arquivo em `Content-Disposition` termina em `-resumo.xml` para não haver confusão). Responde `409 xml_indisponivel` quando o documento existe mas não há nenhum dos dois, e `404` só quando o documento não existe nesta empresa. Custo: 2 unidades quando há arquivo para baixar; 1 quando a requisição falha antes disso.\n\nO corpo é servido como `application/octet-stream`, com o nome do arquivo em `Content-Disposition`. Não use o `Content-Type` para decidir se deve fazer o parse: trate o corpo como XML sempre. O motivo é que a borda da infraestrutura reescreve respostas declaradas como `application/xml`.",
+        "tags": [
+          "Documentos"
+        ],
+        "security": [
+          {
+            "chaveApi": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "`id` (UUID) devolvido na listagem **ou** a chave de acesso do documento. Os dois resolvem para o mesmo documento: se o seu sistema já tem a chave, use a chave direto, sem buscar o UUID antes.",
+            "schema": {
+              "type": "string"
+            },
+            "example": "35260112345678000195550010000000011123456782"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Bytes do XML (completo ou de resumo, conforme disponível).",
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Parâmetro inválido ou cursor corrompido.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Erro"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Chave ausente, inválida, revogada ou expirada.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Erro"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Escopo insuficiente ou plano sem acesso via API.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Erro"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Documento não encontrado nesta empresa.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Erro"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "O documento existe, mas não há XML disponível (nem o resumo).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Erro"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Limite de requisições excedido.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Erro"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Erro interno.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Erro"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/notas/{id}/pdf": {
+      "get": {
+        "summary": "PDF do documento (DANFE ou DANFSe)",
+        "description": "Gera o PDF de representação do documento: DANFE para NF-e e NFC-e, DANFSe para NFS-e. Exige o XML completo (`xml_completo_disponivel: true`); documento só com resumo responde `409 xml_indisponivel`, que **não é definitivo** em nota recebida — o XML completo é liberado após a manifestação do destinatário (veja \"Como o XML completo é liberado\"). `404` só quando o documento não existe nesta empresa. Custo: 10 unidades quando o PDF é gerado; 1 quando a requisição falha antes da geração.",
+        "tags": [
+          "Documentos"
+        ],
+        "security": [
+          {
+            "chaveApi": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "`id` (UUID) devolvido na listagem **ou** a chave de acesso do documento. Os dois resolvem para o mesmo documento: se o seu sistema já tem a chave, use a chave direto, sem buscar o UUID antes.",
+            "schema": {
+              "type": "string"
+            },
+            "example": "35260112345678000195550010000000011123456782"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "PDF gerado.",
+            "content": {
+              "application/pdf": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Parâmetro inválido ou cursor corrompido.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Erro"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Chave ausente, inválida, revogada ou expirada.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Erro"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Escopo insuficiente ou plano sem acesso via API.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Erro"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Documento não encontrado nesta empresa.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Erro"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "O documento existe, mas só tem o resumo: sem XML completo não há PDF.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Erro"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Limite de requisições excedido.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Erro"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Erro interno.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Erro"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/notas/exportacoes": {
+      "post": {
+        "summary": "Criar exportação em lote",
+        "description": "Exporta XML e/ou PDF de vários documentos de uma vez, num ZIP com `manifesto.csv`. A seleção usa os mesmos filtros de `GET /v1/notas` (campo `filtros`, que exige um período fechado: `data_ref_de`+`data_ref_ate`, `data_emissao_de`+`data_emissao_ate` ou `data_criacao_de`+`data_criacao_ate`) ou uma lista explícita (`ids`). Entrega `arquivo` (padrão): assíncrona, responde `202` com um job para acompanhar. Entrega `direta`: síncrona, só XML e até 50 documentos, com o ZIP no corpo da resposta (`200`). Veja a seção \"Exportação em lote\". Custo: 20 unidades (`arquivo`) ou 10 (`direta`); requisição que falha na validação custa 1.",
+        "tags": [
+          "Exportações"
+        ],
+        "security": [
+          {
+            "chaveApi": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CriarExportacao"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Entrega `direta`: o ZIP vem no corpo da resposta.",
+            "content": {
+              "application/zip": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Entrega `arquivo`: exportação aceita. Acompanhe em `GET /v1/notas/exportacoes/{id}` (o header `Location` aponta para lá).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Exportacao"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Parâmetro inválido ou cursor corrompido.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Erro"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Chave ausente, inválida, revogada ou expirada.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Erro"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Escopo insuficiente ou plano sem acesso via API.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Erro"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Já existe uma exportação em andamento para esta empresa.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Erro"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "O pedido casa com documentos demais para o limite, ou com nenhum.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Erro"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Limite de requisições por minuto, ou de exportações em 24 horas.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Erro"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Erro interno.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Erro"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "summary": "Listar exportações",
+        "description": "As exportações mais recentes da empresa, com status e contadores. A listagem não traz `url` de download: consulte a exportação específica para receber o link.",
+        "tags": [
+          "Exportações"
+        ],
+        "security": [
+          {
+            "chaveApi": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Exportações mais recentes primeiro.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListaExportacoes"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Parâmetro inválido ou cursor corrompido.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Erro"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Chave ausente, inválida, revogada ou expirada.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Erro"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Escopo insuficiente ou plano sem acesso via API.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Erro"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Limite de requisições excedido.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Erro"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Erro interno.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Erro"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/notas/exportacoes/{id}": {
+      "get": {
+        "summary": "Status de uma exportação",
+        "description": "Situação do job e, quando `concluida`, o link de download em `url` (válido por 1 hora; consulte de novo para receber outro). Enquanto `pendente`/`processando`, a resposta traz `Retry-After: 5`: respeite-o no polling.",
+        "tags": [
+          "Exportações"
+        ],
+        "security": [
+          {
+            "chaveApi": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "`id` da exportação, devolvido na criação e na listagem.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "example": "0b2f7c1a-9d34-4e6b-8a15-3c9d7e5f2a10"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Estado atual da exportação.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Exportacao"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Parâmetro inválido ou cursor corrompido.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Erro"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Chave ausente, inválida, revogada ou expirada.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Erro"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Escopo insuficiente ou plano sem acesso via API.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Erro"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Exportação não encontrada nesta empresa.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Erro"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Limite de requisições excedido.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Erro"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Erro interno.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Erro"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "webhooks": {},
+  "components": {
+    "securitySchemes": {
+      "chaveApi": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "Chave de API do NotaGuard, no formato `ng_live_...`. Gerada em Configurações > Integrações > API."
+      }
+    },
+    "schemas": {
+      "Nota": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Identificador interno, estável."
+          },
+          "chave": {
+            "type": "string",
+            "pattern": "^\\d{20,60}$",
+            "description": "Chave de acesso do documento, somente dígitos. O tamanho varia por tipo: 44 em NF-e e NFC-e, 50 na NFS-e do padrão nacional, 26 em alguns municípios."
+          },
+          "tipo": {
+            "type": "string",
+            "enum": [
+              "NFe",
+              "NFCe",
+              "NFSe"
+            ]
+          },
+          "numero": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "Número do documento."
+          },
+          "serie": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "emissor": {
+            "type": "object",
+            "properties": {
+              "documento": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "pattern": "^\\d{11}$|^\\d{14}$",
+                "description": "CNPJ (14 dígitos) ou CPF (11 dígitos), somente dígitos. O NotaGuard suporta empresa pessoa física, por isso o campo aceita os dois."
+              },
+              "nome": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Razão social ou nome do emissor."
+              }
+            },
+            "required": [
+              "documento",
+              "nome"
+            ]
+          },
+          "destinatario": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "properties": {
+              "documento": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "pattern": "^\\d{11}$|^\\d{14}$",
+                "description": "CNPJ (14 dígitos) ou CPF (11 dígitos), somente dígitos. O NotaGuard suporta empresa pessoa física, por isso o campo aceita os dois."
+              },
+              "nome": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Razão social ou nome. Em NF-e depende da extração completa do XML, então pode vir `null` mesmo com o documento presente."
+              }
+            },
+            "required": [
+              "documento",
+              "nome"
+            ],
+            "description": "A outra parte do documento: destinatário na NF-e e NFC-e, tomador na NFS-e. `null` quando ainda não conhecido."
+          },
+          "vinculo": {
+            "type": "string",
+            "enum": [
+              "emissor",
+              "receptor",
+              "transportador",
+              "terceiro",
+              "indefinido"
+            ],
+            "description": "Vínculo da sua empresa com este documento (mesmo termo do painel). `indefinido` quando ainda não foi determinado, o que é comum em documentos que só têm resumo; dá para filtrar por ele na listagem."
+          },
+          "valor": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "description": "Valor total. `null` quando o XML completo ainda não chegou. Nulo significa desconhecido, não zero."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "autorizada",
+              "resumida",
+              "cancelada",
+              "denegada",
+              "desconhecido"
+            ],
+            "description": "Situação do documento.\n\n- `autorizada`: Documento autorizado, com XML completo disponível.\n- `resumida`: Só existe o **resumo** do documento, sem o XML completo: `valor` e `data_emissao` geralmente vêm `null` e `xml_completo_disponivel` é `false` (o XML de resumo continua disponível para download). Em nota recebida é um estado transitório, que dura até o documento completo chegar; em nota emitida pela sua empresa é permanente, porque a SEFAZ não devolve pela distribuição o XML da própria emissão. Veja a seção \"Documentos que só têm resumo\".\n- `cancelada`: Documento cancelado na SEFAZ.\n- `denegada`: Emissão denegada pela SEFAZ.\n- `desconhecido`: A SEFAZ não informou situação reconhecível para o documento."
+          },
+          "status_motivo": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Descrição devolvida pela SEFAZ para o status atual."
+          },
+          "manifestacao": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "ciencia",
+              "confirmacao",
+              "desconhecimento"
+            ],
+            "description": "Manifestação do destinatário registrada na SEFAZ. Apenas NF-e."
+          },
+          "natureza_operacao": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Natureza da operação declarada no XML (`natOp`). Apenas NF-e e NFC-e."
+          },
+          "cfop": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "description": "Presente apenas com `incluir=cfop`: CFOPs distintos dos itens do documento, em ordem crescente. Um documento pode ter mais de um (medido em produção: 10% têm; ex.: 5102 e 5405 na mesma nota). `null` quando o CFOP não é conhecido: documento sem XML completo processado, ou NFS-e (serviço não tem CFOP). O CFOP por item está em `GET /v1/notas/{id}/itens`."
+          },
+          "data_emissao": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "Data e hora de emissão (ISO 8601, UTC). `null` em documentos que só têm resumo."
+          },
+          "data_competencia": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Competência (AAAA-MM-DD). Apenas NFS-e."
+          },
+          "data_recebimento": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "Quando a SEFAZ disponibilizou o documento para a sua empresa (ISO 8601, UTC). Apenas NF-e e NFC-e."
+          },
+          "origem": {
+            "type": "string",
+            "enum": [
+              "monitored",
+              "imported",
+              "fisco_facil_rj"
+            ],
+            "description": "`monitored`: capturado automaticamente na SEFAZ. `imported`: XML enviado manualmente. `fisco_facil_rj`: NFC-e obtida via Fisco Fácil RJ."
+          },
+          "xml_completo_disponivel": {
+            "type": "boolean",
+            "description": "Se `true`, o XML completo autorizado está disponível e o PDF pode ser gerado. Se `false`, `GET /v1/notas/{id}/xml` ainda pode devolver o XML de **resumo** da SEFAZ, mas `GET /v1/notas/{id}/pdf` responde `409 xml_indisponivel`. Use este campo como filtro (`?xml_completo_disponivel=true`) em vez de descobrir documento a documento."
+          },
+          "criada_em": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Quando o documento entrou no NotaGuard (ISO 8601, UTC). Nunca nulo."
+          },
+          "atualizada_em": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Última alteração no documento (ISO 8601, UTC). Nunca nulo."
+          }
+        },
+        "required": [
+          "id",
+          "chave",
+          "tipo",
+          "numero",
+          "serie",
+          "emissor",
+          "destinatario",
+          "vinculo",
+          "valor",
+          "status",
+          "status_motivo",
+          "manifestacao",
+          "natureza_operacao",
+          "data_emissao",
+          "data_competencia",
+          "data_recebimento",
+          "origem",
+          "xml_completo_disponivel",
+          "criada_em",
+          "atualizada_em"
+        ]
+      },
+      "NotaDetalhe": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Identificador interno, estável."
+          },
+          "chave": {
+            "type": "string",
+            "pattern": "^\\d{20,60}$",
+            "description": "Chave de acesso do documento, somente dígitos. O tamanho varia por tipo: 44 em NF-e e NFC-e, 50 na NFS-e do padrão nacional, 26 em alguns municípios."
+          },
+          "tipo": {
+            "type": "string",
+            "enum": [
+              "NFe",
+              "NFCe",
+              "NFSe"
+            ]
+          },
+          "numero": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "Número do documento."
+          },
+          "serie": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "emissor": {
+            "type": "object",
+            "properties": {
+              "documento": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "pattern": "^\\d{11}$|^\\d{14}$",
+                "description": "CNPJ (14 dígitos) ou CPF (11 dígitos), somente dígitos. O NotaGuard suporta empresa pessoa física, por isso o campo aceita os dois."
+              },
+              "nome": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Razão social ou nome do emissor."
+              }
+            },
+            "required": [
+              "documento",
+              "nome"
+            ]
+          },
+          "destinatario": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "properties": {
+              "documento": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "pattern": "^\\d{11}$|^\\d{14}$",
+                "description": "CNPJ (14 dígitos) ou CPF (11 dígitos), somente dígitos. O NotaGuard suporta empresa pessoa física, por isso o campo aceita os dois."
+              },
+              "nome": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Razão social ou nome. Em NF-e depende da extração completa do XML, então pode vir `null` mesmo com o documento presente."
+              }
+            },
+            "required": [
+              "documento",
+              "nome"
+            ],
+            "description": "A outra parte do documento: destinatário na NF-e e NFC-e, tomador na NFS-e. `null` quando ainda não conhecido."
+          },
+          "vinculo": {
+            "type": "string",
+            "enum": [
+              "emissor",
+              "receptor",
+              "transportador",
+              "terceiro",
+              "indefinido"
+            ],
+            "description": "Vínculo da sua empresa com este documento (mesmo termo do painel). `indefinido` quando ainda não foi determinado, o que é comum em documentos que só têm resumo; dá para filtrar por ele na listagem."
+          },
+          "valor": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "description": "Valor total. `null` quando o XML completo ainda não chegou. Nulo significa desconhecido, não zero."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "autorizada",
+              "resumida",
+              "cancelada",
+              "denegada",
+              "desconhecido"
+            ],
+            "description": "Situação do documento.\n\n- `autorizada`: Documento autorizado, com XML completo disponível.\n- `resumida`: Só existe o **resumo** do documento, sem o XML completo: `valor` e `data_emissao` geralmente vêm `null` e `xml_completo_disponivel` é `false` (o XML de resumo continua disponível para download). Em nota recebida é um estado transitório, que dura até o documento completo chegar; em nota emitida pela sua empresa é permanente, porque a SEFAZ não devolve pela distribuição o XML da própria emissão. Veja a seção \"Documentos que só têm resumo\".\n- `cancelada`: Documento cancelado na SEFAZ.\n- `denegada`: Emissão denegada pela SEFAZ.\n- `desconhecido`: A SEFAZ não informou situação reconhecível para o documento."
+          },
+          "status_motivo": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Descrição devolvida pela SEFAZ para o status atual."
+          },
+          "manifestacao": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "ciencia",
+              "confirmacao",
+              "desconhecimento"
+            ],
+            "description": "Manifestação do destinatário registrada na SEFAZ. Apenas NF-e."
+          },
+          "natureza_operacao": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Natureza da operação declarada no XML (`natOp`). Apenas NF-e e NFC-e."
+          },
+          "cfop": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "description": "Presente apenas com `incluir=cfop`: CFOPs distintos dos itens do documento, em ordem crescente. Um documento pode ter mais de um (medido em produção: 10% têm; ex.: 5102 e 5405 na mesma nota). `null` quando o CFOP não é conhecido: documento sem XML completo processado, ou NFS-e (serviço não tem CFOP). O CFOP por item está em `GET /v1/notas/{id}/itens`."
+          },
+          "data_emissao": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "Data e hora de emissão (ISO 8601, UTC). `null` em documentos que só têm resumo."
+          },
+          "data_competencia": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Competência (AAAA-MM-DD). Apenas NFS-e."
+          },
+          "data_recebimento": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "Quando a SEFAZ disponibilizou o documento para a sua empresa (ISO 8601, UTC). Apenas NF-e e NFC-e."
+          },
+          "origem": {
+            "type": "string",
+            "enum": [
+              "monitored",
+              "imported",
+              "fisco_facil_rj"
+            ],
+            "description": "`monitored`: capturado automaticamente na SEFAZ. `imported`: XML enviado manualmente. `fisco_facil_rj`: NFC-e obtida via Fisco Fácil RJ."
+          },
+          "xml_completo_disponivel": {
+            "type": "boolean",
+            "description": "Se `true`, o XML completo autorizado está disponível e o PDF pode ser gerado. Se `false`, `GET /v1/notas/{id}/xml` ainda pode devolver o XML de **resumo** da SEFAZ, mas `GET /v1/notas/{id}/pdf` responde `409 xml_indisponivel`. Use este campo como filtro (`?xml_completo_disponivel=true`) em vez de descobrir documento a documento."
+          },
+          "criada_em": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Quando o documento entrou no NotaGuard (ISO 8601, UTC). Nunca nulo."
+          },
+          "atualizada_em": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Última alteração no documento (ISO 8601, UTC). Nunca nulo."
+          },
+          "nfe": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "properties": {
+              "finalidade": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Finalidade de emissão: `normal`, `complementar`, `ajuste` ou `devolucao`."
+              },
+              "tipo_operacao": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "`entrada` ou `saida`, do ponto de vista do emissor."
+              },
+              "emissor_uf": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "emissor_municipio": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Código IBGE do município do emissor."
+              },
+              "destinatario_uf": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "protocolo": {
+                "type": [
+                  "object",
+                  "null"
+                ],
+                "properties": {
+                  "numero": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Número do protocolo de autorização."
+                  },
+                  "autorizada_em": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Momento em que a SEFAZ autorizou o documento (ISO 8601, UTC)."
+                  },
+                  "ambiente": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "`producao` ou `homologacao`."
+                  }
+                },
+                "required": [
+                  "numero",
+                  "autorizada_em",
+                  "ambiente"
+                ],
+                "description": "Protocolo de autorização da SEFAZ."
+              },
+              "manifestacao": {
+                "type": [
+                  "object",
+                  "null"
+                ],
+                "properties": {
+                  "status": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "protocolo": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "data": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "status",
+                  "protocolo",
+                  "data"
+                ],
+                "description": "Detalhe da manifestação do destinatário, quando registrada."
+              }
+            },
+            "required": [
+              "finalidade",
+              "tipo_operacao",
+              "emissor_uf",
+              "emissor_municipio",
+              "destinatario_uf",
+              "protocolo",
+              "manifestacao"
+            ],
+            "description": "Campos específicos de NF-e/NFC-e. `null` em NFS-e."
+          },
+          "nfse": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "properties": {
+              "descricao_servico": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Descrição do serviço prestado."
+              },
+              "codigo_tributacao_nacional": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Código de tributação nacional do serviço (padrão nacional da NFS-e)."
+              },
+              "local_prestacao_codigo": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Código IBGE do município de prestação."
+              },
+              "inscricao_municipal_prestador": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "valor_liquido": {
+                "type": [
+                  "number",
+                  "null"
+                ],
+                "description": "Valor líquido após retenções."
+              }
+            },
+            "required": [
+              "descricao_servico",
+              "codigo_tributacao_nacional",
+              "local_prestacao_codigo",
+              "inscricao_municipal_prestador",
+              "valor_liquido"
+            ],
+            "description": "Campos específicos de NFS-e. `null` em NF-e/NFC-e."
+          },
+          "tributos": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "total_tributos": {
+                    "type": [
+                      "number",
+                      "null"
+                    ],
+                    "description": "Valor aproximado total de tributos (`vTotTrib`), quando informado."
+                  },
+                  "icms": {
+                    "type": [
+                      "number",
+                      "null"
+                    ]
+                  },
+                  "icms_st": {
+                    "type": [
+                      "number",
+                      "null"
+                    ]
+                  },
+                  "icms_desonerado": {
+                    "type": [
+                      "number",
+                      "null"
+                    ]
+                  },
+                  "fcp": {
+                    "type": [
+                      "number",
+                      "null"
+                    ]
+                  },
+                  "ipi": {
+                    "type": [
+                      "number",
+                      "null"
+                    ]
+                  },
+                  "pis": {
+                    "type": [
+                      "number",
+                      "null"
+                    ]
+                  },
+                  "cofins": {
+                    "type": [
+                      "number",
+                      "null"
+                    ]
+                  },
+                  "ibs": {
+                    "type": [
+                      "number",
+                      "null"
+                    ],
+                    "description": "IBS (reforma tributária), quando presente no XML."
+                  },
+                  "cbs": {
+                    "type": [
+                      "number",
+                      "null"
+                    ],
+                    "description": "CBS (reforma tributária), quando presente no XML."
+                  },
+                  "retencoes": {
+                    "type": "object",
+                    "properties": {
+                      "pis": {
+                        "type": [
+                          "number",
+                          "null"
+                        ]
+                      },
+                      "cofins": {
+                        "type": [
+                          "number",
+                          "null"
+                        ]
+                      },
+                      "csll": {
+                        "type": [
+                          "number",
+                          "null"
+                        ]
+                      },
+                      "irrf": {
+                        "type": [
+                          "number",
+                          "null"
+                        ]
+                      },
+                      "inss": {
+                        "type": [
+                          "number",
+                          "null"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "pis",
+                      "cofins",
+                      "csll",
+                      "irrf",
+                      "inss"
+                    ]
+                  }
+                },
+                "required": [
+                  "total_tributos",
+                  "icms",
+                  "icms_st",
+                  "icms_desonerado",
+                  "fcp",
+                  "ipi",
+                  "pis",
+                  "cofins",
+                  "ibs",
+                  "cbs",
+                  "retencoes"
+                ]
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "iss": {
+                    "type": [
+                      "number",
+                      "null"
+                    ]
+                  },
+                  "iss_retido": {
+                    "type": [
+                      "number",
+                      "null"
+                    ]
+                  },
+                  "total_retencoes": {
+                    "type": [
+                      "number",
+                      "null"
+                    ]
+                  },
+                  "ibs": {
+                    "type": [
+                      "number",
+                      "null"
+                    ]
+                  },
+                  "cbs": {
+                    "type": [
+                      "number",
+                      "null"
+                    ]
+                  },
+                  "retencoes": {
+                    "type": "object",
+                    "properties": {
+                      "pis": {
+                        "type": [
+                          "number",
+                          "null"
+                        ]
+                      },
+                      "cofins": {
+                        "type": [
+                          "number",
+                          "null"
+                        ]
+                      },
+                      "csll": {
+                        "type": [
+                          "number",
+                          "null"
+                        ]
+                      },
+                      "inss": {
+                        "type": [
+                          "number",
+                          "null"
+                        ]
+                      },
+                      "irrf": {
+                        "type": [
+                          "number",
+                          "null"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "pis",
+                      "cofins",
+                      "csll",
+                      "inss",
+                      "irrf"
+                    ]
+                  }
+                },
+                "required": [
+                  "iss",
+                  "iss_retido",
+                  "total_retencoes",
+                  "ibs",
+                  "cbs",
+                  "retencoes"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Presente apenas com `incluir=tributos`. Formato varia por tipo de documento; `null` quando a extração completa do XML não existe."
+          },
+          "referencias": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "sentido": {
+                  "type": "string",
+                  "enum": [
+                    "referencia",
+                    "referenciada_por"
+                  ],
+                  "description": "`referencia`: esta nota aponta para a outra. `referenciada_por`: a outra aponta para esta."
+                },
+                "chave": {
+                  "type": "string",
+                  "description": "Chave de acesso do outro documento."
+                },
+                "tipo": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "Tipo do outro documento (ex.: `nfe`, `cte`)."
+                },
+                "relacao": {
+                  "type": "string",
+                  "description": "Natureza do vínculo. Valores atuais: `NFref`, `devolucao`, `substituicao_nfse`, `cte_transporta_nf`."
+                },
+                "nota_id": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "format": "uuid",
+                  "description": "`id` do outro documento quando ele também está no acervo da sua empresa; use em `GET /v1/notas/{id}`. `null` quando o documento referenciado não está no NotaGuard."
+                }
+              },
+              "required": [
+                "sentido",
+                "chave",
+                "tipo",
+                "relacao",
+                "nota_id"
+              ]
+            },
+            "description": "Presente apenas com `incluir=referencias`."
+          },
+          "etiquetas": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "etiqueta": {
+                  "type": "string",
+                  "description": "Slug da etiqueta (mesmo valor de `/v1/etiquetas`)."
+                },
+                "nome": {
+                  "type": "string"
+                },
+                "tipo": {
+                  "type": "string",
+                  "enum": [
+                    "single_choice",
+                    "multi_choice",
+                    "boolean",
+                    "number",
+                    "text",
+                    "date"
+                  ]
+                },
+                "valor": {
+                  "description": "Formato depende de `tipo`: `single_choice`/`multi_choice` devolvem uma lista de `{valor, rotulo}`; `boolean`, `number`, `text` e `date` devolvem o valor direto."
+                },
+                "valor_personalizado": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "Valor livre digitado no painel, quando a etiqueta permite."
+                },
+                "atualizada_em": {
+                  "type": "string",
+                  "format": "date-time",
+                  "description": "Última alteração desta marcação."
+                }
+              },
+              "required": [
+                "etiqueta",
+                "nome",
+                "tipo",
+                "valor_personalizado",
+                "atualizada_em"
+              ]
+            },
+            "description": "Presente apenas com `incluir=etiquetas`."
+          },
+          "duplicatas": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "parcela": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "Número da duplicata (`nDup`)."
+                },
+                "vencimento": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "Data de vencimento (AAAA-MM-DD)."
+                },
+                "valor": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "situacao": {
+                  "type": "string",
+                  "description": "Situação no contas a pagar do NotaGuard: `rascunho`, `pendente`, `paga`, `vencida` ou `cancelada`."
+                },
+                "pago_em": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "valor_pago": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "forma_pagamento": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "Forma de pagamento declarada no XML."
+                }
+              },
+              "required": [
+                "parcela",
+                "vencimento",
+                "valor",
+                "situacao",
+                "pago_em",
+                "valor_pago",
+                "forma_pagamento"
+              ]
+            },
+            "description": "Presente apenas com `incluir=duplicatas`."
+          }
+        },
+        "required": [
+          "id",
+          "chave",
+          "tipo",
+          "numero",
+          "serie",
+          "emissor",
+          "destinatario",
+          "vinculo",
+          "valor",
+          "status",
+          "status_motivo",
+          "manifestacao",
+          "natureza_operacao",
+          "data_emissao",
+          "data_competencia",
+          "data_recebimento",
+          "origem",
+          "xml_completo_disponivel",
+          "criada_em",
+          "atualizada_em",
+          "nfe",
+          "nfse"
+        ]
+      },
+      "Erro": {
+        "type": "object",
+        "properties": {
+          "erro": {
+            "type": "object",
+            "properties": {
+              "codigo": {
+                "type": "string",
+                "enum": [
+                  "nao_autorizado",
+                  "token_invalido",
+                  "token_revogado",
+                  "token_expirado",
+                  "ip_nao_autorizado",
+                  "escopo_insuficiente",
+                  "recurso_nao_disponivel_no_plano",
+                  "nao_encontrado",
+                  "xml_indisponivel",
+                  "parametro_invalido",
+                  "cursor_invalido",
+                  "limite_de_requisicoes_excedido",
+                  "metodo_nao_permitido",
+                  "nao_disponivel_para_este_tipo",
+                  "exportacao_em_andamento",
+                  "exportacao_acima_do_limite",
+                  "exportacao_sem_documentos",
+                  "limite_diario_de_exportacoes",
+                  "erro_interno"
+                ],
+                "description": "Código estável de erro."
+              },
+              "mensagem": {
+                "type": "string",
+                "description": "Mensagem em pt-BR. Quando o erro é de parâmetro, inclui o valor recebido e os valores aceitos, para permitir correção automática pelo cliente."
+              },
+              "id_requisicao": {
+                "type": "string",
+                "description": "Identificador desta requisição. Também vem no header `X-Request-Id`. Informe no suporte."
+              }
+            },
+            "required": [
+              "codigo",
+              "mensagem",
+              "id_requisicao"
+            ]
+          }
+        },
+        "required": [
+          "erro"
+        ]
+      },
+      "Me": {
+        "type": "object",
+        "properties": {
+          "empresa": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "description": "Identificador da empresa no NotaGuard."
+              },
+              "nome": {
+                "type": "string"
+              },
+              "documento": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "pattern": "^\\d{11}$|^\\d{14}$",
+                "description": "CNPJ ou CPF da empresa."
+              }
+            },
+            "required": [
+              "id",
+              "nome",
+              "documento"
+            ]
+          },
+          "chave": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "nome": {
+                "type": "string",
+                "description": "Nome dado à chave no painel."
+              },
+              "prefixo": {
+                "type": "string",
+                "description": "Primeiros caracteres do token, para você identificar de qual chave se trata. O token completo nunca é devolvido."
+              },
+              "escopos": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "notas:read",
+                    "documentos:read"
+                  ]
+                }
+              },
+              "criada_em": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "expira_em": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time",
+                "description": "`null` quando a chave não tem prazo de expiração."
+              }
+            },
+            "required": [
+              "id",
+              "nome",
+              "prefixo",
+              "escopos",
+              "criada_em",
+              "expira_em"
+            ]
+          },
+          "plano": {
+            "type": "object",
+            "properties": {
+              "tier": {
+                "type": "string",
+                "description": "Plano vigente da empresa (por exemplo `professional`)."
+              },
+              "api_liberada": {
+                "type": "boolean",
+                "enum": [
+                  true
+                ],
+                "description": "Sempre `true` aqui: se o plano não liberasse a API, a requisição teria falhado com `recurso_nao_disponivel_no_plano`."
+              }
+            },
+            "required": [
+              "tier",
+              "api_liberada"
+            ]
+          },
+          "limites": {
+            "type": "object",
+            "properties": {
+              "requisicoes_por_minuto": {
+                "type": "integer",
+                "description": "Custo total permitido por minuto para esta chave."
+              },
+              "restante_no_minuto": {
+                "type": "integer",
+                "description": "Quanto ainda pode ser consumido na janela atual."
+              },
+              "reinicia_em": {
+                "type": "string",
+                "format": "date-time",
+                "description": "Quando a janela atual zera (ISO 8601, UTC)."
+              }
+            },
+            "required": [
+              "requisicoes_por_minuto",
+              "restante_no_minuto",
+              "reinicia_em"
+            ]
+          }
+        },
+        "required": [
+          "empresa",
+          "chave",
+          "plano",
+          "limites"
+        ]
+      },
+      "ResumoNotas": {
+        "type": "object",
+        "properties": {
+          "total": {
+            "type": "integer",
+            "description": "Quantidade de documentos que casam com os filtros."
+          },
+          "valor_total": {
+            "type": "number",
+            "description": "Soma de `valor`. Documentos sem valor conhecido contam em `total` mas somam zero aqui, por isso `total_sem_valor` existe."
+          },
+          "total_sem_valor": {
+            "type": "integer",
+            "description": "Quantos dos documentos contados não têm valor conhecido. Se for alto, `valor_total` subestima a realidade."
+          }
+        },
+        "required": [
+          "total",
+          "valor_total",
+          "total_sem_valor"
+        ]
+      },
+      "ListaNotas": {
+        "type": "object",
+        "properties": {
+          "dados": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Nota"
+            }
+          },
+          "proximo_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Passe este valor em `cursor` para obter a próxima página. `null` na última página. Trate como opaco: o formato interno pode mudar sem aviso."
+          },
+          "tem_mais": {
+            "type": "boolean",
+            "description": "`true` se existe pelo menos uma página adiante."
+          }
+        },
+        "required": [
+          "dados",
+          "proximo_cursor",
+          "tem_mais"
+        ]
+      },
+      "Etiqueta": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Identificador interno da etiqueta, estável ao longo da vida dela."
+          },
+          "etiqueta": {
+            "type": "string",
+            "description": "Identificador estável (slug). Use este valor no filtro `etiqueta` da listagem."
+          },
+          "nome": {
+            "type": "string",
+            "description": "Nome exibido no painel."
+          },
+          "descricao": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "tipo": {
+            "type": "string",
+            "enum": [
+              "single_choice",
+              "multi_choice",
+              "boolean",
+              "number",
+              "text",
+              "date"
+            ],
+            "description": "Determina o formato de `valor` quando a etiqueta aparece aplicada em uma nota."
+          },
+          "permite_valor_personalizado": {
+            "type": "boolean",
+            "description": "Se `true`, além das opções, a nota pode ter um valor livre em `valor_personalizado`."
+          },
+          "opcoes": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "object",
+              "properties": {
+                "valor": {
+                  "type": "string",
+                  "description": "Identificador estável da opção. Use este valor no filtro `etiqueta`."
+                },
+                "rotulo": {
+                  "type": "string",
+                  "description": "Texto exibido no painel."
+                },
+                "cor": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "Cor da opção no painel, quando definida."
+                }
+              },
+              "required": [
+                "valor",
+                "rotulo",
+                "cor"
+              ]
+            },
+            "description": "Opções disponíveis. Preenchido apenas em `single_choice` e `multi_choice`."
+          }
+        },
+        "required": [
+          "id",
+          "etiqueta",
+          "nome",
+          "descricao",
+          "tipo",
+          "permite_valor_personalizado",
+          "opcoes"
+        ]
+      },
+      "ListaEtiquetas": {
+        "type": "object",
+        "properties": {
+          "dados": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Etiqueta"
+            }
+          }
+        },
+        "required": [
+          "dados"
+        ]
+      },
+      "ItensNota": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "chave": {
+            "type": "string",
+            "pattern": "^\\d{20,60}$",
+            "description": "Chave de acesso do documento, somente dígitos. O tamanho varia por tipo: 44 em NF-e e NFC-e, 50 na NFS-e do padrão nacional, 26 em alguns municípios."
+          },
+          "itens": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "numero": {
+                  "type": "integer",
+                  "description": "Posição do item no documento (`nItem`)."
+                },
+                "codigo": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "Código do produto no emissor (`cProd`)."
+                },
+                "descricao": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "ncm": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "cest": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "cfop": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "unidade": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "Unidade comercial (`uCom`)."
+                },
+                "quantidade": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "valor_unitario": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "valor": {
+                  "type": [
+                    "number",
+                    "null"
+                  ],
+                  "description": "Valor total do item (`vProd`)."
+                },
+                "desconto": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "numero",
+                "codigo",
+                "descricao",
+                "ncm",
+                "cest",
+                "cfop",
+                "unidade",
+                "quantidade",
+                "valor_unitario",
+                "valor",
+                "desconto"
+              ]
+            }
+          }
+        },
+        "required": [
+          "id",
+          "chave",
+          "itens"
+        ]
+      },
+      "EventosNota": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "chave": {
+            "type": "string",
+            "pattern": "^\\d{20,60}$",
+            "description": "Chave de acesso do documento, somente dígitos. O tamanho varia por tipo: 44 em NF-e e NFC-e, 50 na NFS-e do padrão nacional, 26 em alguns municípios."
+          },
+          "eventos": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "tipo": {
+                  "type": "string",
+                  "description": "Código do tipo de evento na SEFAZ (`tpEvento`). Exemplos: `110110` carta de correção, `110111` cancelamento, `210210` ciência da operação, `610600` CT-e autorizado para a NF-e."
+                },
+                "descricao": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "Descrição do evento como veio da SEFAZ."
+                },
+                "sequencia": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                },
+                "data": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "Quando o evento aconteceu."
+                },
+                "registrado_em": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "Quando a SEFAZ registrou o evento."
+                },
+                "protocolo": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "correcao": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "Texto da correção, quando o evento é carta de correção."
+                },
+                "justificativa": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "Justificativa, quando o evento é cancelamento."
+                }
+              },
+              "required": [
+                "tipo",
+                "descricao",
+                "sequencia",
+                "data",
+                "registrado_em",
+                "protocolo",
+                "correcao",
+                "justificativa"
+              ]
+            }
+          }
+        },
+        "required": [
+          "id",
+          "chave",
+          "eventos"
+        ]
+      },
+      "CriarExportacao": {
+        "type": "object",
+        "properties": {
+          "formatos": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "xml",
+                "pdf"
+              ]
+            },
+            "minItems": 1,
+            "maxItems": 2,
+            "description": "Formatos a incluir no ZIP: `[\"xml\"]`, `[\"pdf\"]` ou `[\"xml\", \"pdf\"]`. PDF exige o XML completo do documento; documentos só com resumo entram no manifesto com o motivo e não derrubam o lote."
+          },
+          "entrega": {
+            "type": "string",
+            "enum": [
+              "arquivo",
+              "direta"
+            ],
+            "default": "arquivo",
+            "description": "`arquivo` (padrão): assíncrono, responde 202 com um job para acompanhar por GET. `direta`: síncrono, o ZIP vem no corpo da resposta; somente `formatos: [\"xml\"]` e até 50 documentos."
+          },
+          "filtros": {
+            "type": "object",
+            "properties": {
+              "tipo": {
+                "type": "string",
+                "description": "Filtra por tipo. Aceita múltiplos separados por vírgula: `tipo=NFe,NFCe`. Valores aceitos: NFe, NFCe, NFSe."
+              },
+              "status": {
+                "type": "string",
+                "description": "Filtra por situação. Múltiplos separados por vírgula. Valores aceitos: autorizada, resumida, cancelada, denegada, desconhecido."
+              },
+              "vinculo": {
+                "type": "string",
+                "description": "Filtra pelo vínculo da sua empresa com o documento. Múltiplos separados por vírgula. `indefinido` retorna os documentos cujo vínculo ainda não foi determinado. Valores aceitos: emissor, receptor, transportador, terceiro, indefinido."
+              },
+              "manifestacao": {
+                "type": "string",
+                "description": "Filtra pela manifestação registrada. Múltiplos separados por vírgula. Valores aceitos: ciencia, confirmacao, desconhecimento."
+              },
+              "data_ref_de": {
+                "type": "string",
+                "pattern": "^\\d{4}-\\d{2}-\\d{2}(T\\d{2}:\\d{2}(:\\d{2}(\\.\\d+)?)?(Z|[+-]\\d{2}:\\d{2})?)?$",
+                "description": "Data de referência a partir de (AAAA-MM-DD ou ISO 8601). A data de referência é a mesma da coluna \"Data\" do painel: emissão em NF-e e NFC-e, competência em NFS-e. Atenção: documentos sem essa data (só resumo) são excluídos quando este filtro é usado."
+              },
+              "data_ref_ate": {
+                "type": "string",
+                "pattern": "^\\d{4}-\\d{2}-\\d{2}(T\\d{2}:\\d{2}(:\\d{2}(\\.\\d+)?)?(Z|[+-]\\d{2}:\\d{2})?)?$",
+                "description": "Data de referência até, **inclusive o dia inteiro**. AAAA-MM-DD ou ISO 8601."
+              },
+              "data_emissao_de": {
+                "type": "string",
+                "pattern": "^\\d{4}-\\d{2}-\\d{2}(T\\d{2}:\\d{2}(:\\d{2}(\\.\\d+)?)?(Z|[+-]\\d{2}:\\d{2})?)?$",
+                "description": "Data de emissão a partir de (AAAA-MM-DD ou ISO 8601). Atenção: documentos sem data de emissão (só resumo) são excluídos quando este filtro é usado."
+              },
+              "data_emissao_ate": {
+                "type": "string",
+                "pattern": "^\\d{4}-\\d{2}-\\d{2}(T\\d{2}:\\d{2}(:\\d{2}(\\.\\d+)?)?(Z|[+-]\\d{2}:\\d{2})?)?$",
+                "description": "Data de emissão até, **inclusive o dia inteiro**. AAAA-MM-DD ou ISO 8601."
+              },
+              "data_criacao_de": {
+                "type": "string",
+                "pattern": "^\\d{4}-\\d{2}-\\d{2}(T\\d{2}:\\d{2}(:\\d{2}(\\.\\d+)?)?(Z|[+-]\\d{2}:\\d{2})?)?$",
+                "description": "Filtra por quando o documento entrou no NotaGuard (`criada_em`), a partir de. AAAA-MM-DD ou ISO 8601."
+              },
+              "data_criacao_ate": {
+                "type": "string",
+                "pattern": "^\\d{4}-\\d{2}-\\d{2}(T\\d{2}:\\d{2}(:\\d{2}(\\.\\d+)?)?(Z|[+-]\\d{2}:\\d{2})?)?$",
+                "description": "Filtra por quando o documento entrou no NotaGuard (`criada_em`), até, **inclusive o dia inteiro**. AAAA-MM-DD ou ISO 8601."
+              },
+              "data_atualizacao_apos": {
+                "type": "string",
+                "pattern": "^\\d{4}-\\d{2}-\\d{2}(T\\d{2}:\\d{2}(:\\d{2}(\\.\\d+)?)?(Z|[+-]\\d{2}:\\d{2})?)?$",
+                "description": "Retorna apenas documentos alterados depois deste instante (AAAA-MM-DD ou ISO 8601). É o parâmetro recomendado para sincronização incremental: guarde o maior `atualizada_em` recebido e mande de volta na próxima chamada."
+              },
+              "valor_min": {
+                "type": [
+                  "number",
+                  "null"
+                ],
+                "minimum": 0,
+                "description": "Valor mínimo. Documentos sem valor conhecido são excluídos quando este filtro é usado."
+              },
+              "valor_max": {
+                "type": [
+                  "number",
+                  "null"
+                ],
+                "minimum": 0,
+                "description": "Valor máximo. Documentos sem valor conhecido são excluídos quando este filtro é usado."
+              },
+              "chave": {
+                "type": "string",
+                "pattern": "^\\d{20,60}$",
+                "description": "Busca exata por chave de acesso."
+              },
+              "numero": {
+                "type": "integer",
+                "exclusiveMinimum": 0,
+                "description": "Busca exata pelo número do documento."
+              },
+              "documento_emissor": {
+                "type": "string",
+                "pattern": "^\\d{11}$|^\\d{14}$",
+                "description": "CNPJ ou CPF do emissor, somente dígitos."
+              },
+              "busca": {
+                "type": "string",
+                "minLength": 2,
+                "description": "Busca textual em nome do emissor, chave e número. Use para consulta livre; para filtro exato prefira os parâmetros dedicados."
+              },
+              "xml_completo_disponivel": {
+                "type": "string",
+                "enum": [
+                  "true",
+                  "false"
+                ],
+                "description": "`true` retorna apenas documentos com XML completo disponível; `false`, apenas os que têm só o resumo."
+              },
+              "etiqueta": {
+                "type": "string",
+                "pattern": "^[^:\\s]+(:.+)?$",
+                "description": "Filtra por etiqueta aplicada no painel. `etiqueta=centro-custo` retorna notas que têm a etiqueta com qualquer valor; `etiqueta=centro-custo:matriz` filtra pelo valor (aceita o `valor` ou o `rotulo` da opção; em booleanas use `true`/`false`; em data use AAAA-MM-DD). Os slugs vêm de `GET /v1/etiquetas`."
+              },
+              "sem_etiqueta": {
+                "type": "string",
+                "pattern": "^[^:\\s]+(:.+)?$",
+                "description": "Inverso de `etiqueta`, mesmo formato. `sem_etiqueta=centro-custo` retorna as notas que ainda não têm a etiqueta; `sem_etiqueta=centro-custo:matriz` retorna as que não têm esse valor, incluindo as sem a etiqueta. Serve para classificar em rodadas, pegando só o que falta."
+              },
+              "cfop": {
+                "type": "string",
+                "description": "Filtra por CFOP dos itens. Múltiplos separados por vírgula: `cfop=5905,6905` retorna documentos com item em qualquer um deles. O CFOP vem dos itens do XML completo, então documentos sem extração completa são excluídos quando este filtro é usado; NFS-e não tem CFOP e também fica de fora."
+              }
+            },
+            "description": "Mesmos filtros de `GET /v1/notas`, no mesmo formato (listas separadas por vírgula em string). Obrigatório quando `ids` não é informado, e precisa conter um **período fechado**: `data_ref_de`+`data_ref_ate` (data de referência, a mesma do painel), `data_emissao_de`+`data_emissao_ate` ou `data_criacao_de`+`data_criacao_ate`. Não pode ser combinado com `ids`."
+          },
+          "ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^\\d{20,60}$|^[0-9a-fA-F-]{36}$",
+              "description": "`id` (UUID) da listagem ou chave de acesso. Os dois resolvem para o mesmo documento."
+            },
+            "minItems": 1,
+            "maxItems": 5000,
+            "description": "Lista explícita de documentos, por `id` (UUID) ou chave de acesso. Não pode ser combinado com `filtros`. Documento repetido conta uma vez; documento inexistente é ignorado na contagem."
+          }
+        },
+        "required": [
+          "formatos"
+        ],
+        "additionalProperties": false
+      },
+      "Exportacao": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Identificador da exportação."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pendente",
+              "processando",
+              "concluida",
+              "erro",
+              "expirada"
+            ],
+            "description": "Situação do processamento.\n\n- `pendente`: Aceita e aguardando processamento.\n- `processando`: O arquivo está sendo montado.\n- `concluida`: Pronta: o campo `url` traz o link de download (válido por 1 hora; basta consultar de novo para obter outro).\n- `erro`: O processamento falhou em definitivo após as tentativas automáticas. Crie uma nova exportação; se persistir, informe o `id` ao suporte.\n- `expirada`: O arquivo passou das 48 horas de retenção e foi removido. Crie uma nova exportação."
+          },
+          "formatos": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "xml",
+                "pdf"
+              ]
+            }
+          },
+          "total_documentos": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "Quantos documentos casaram com o pedido no momento da criação."
+          },
+          "incluidos_xml": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "Quantos XMLs entraram no ZIP (completos e de resumo). Preenchido na conclusão."
+          },
+          "incluidos_pdf": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "Quantos PDFs entraram no ZIP. Preenchido na conclusão."
+          },
+          "falhas": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "Documentos que não puderam ser incluídos em algum formato. O `manifesto.csv` dentro do ZIP detalha cada um com o motivo."
+          },
+          "url": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Link de download do ZIP. Presente apenas com `status: concluida`. Válido por 1 hora a partir desta resposta; expirou, basta consultar o job de novo para receber um link novo."
+          },
+          "url_expira_em": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "Validade do link em `url` (ISO 8601, UTC)."
+          },
+          "arquivo_bytes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "Tamanho do ZIP em bytes. Preenchido na conclusão."
+          },
+          "arquivo_expira_em": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Quando o arquivo é removido do armazenamento (48 horas após a criação). Depois disso o status vira `expirada`."
+          },
+          "erro": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Descrição da falha quando `status: erro`."
+          },
+          "criada_em": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "concluida_em": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "status",
+          "formatos",
+          "total_documentos",
+          "incluidos_xml",
+          "incluidos_pdf",
+          "falhas",
+          "url",
+          "url_expira_em",
+          "arquivo_bytes",
+          "arquivo_expira_em",
+          "erro",
+          "criada_em",
+          "concluida_em"
+        ]
+      },
+      "ListaExportacoes": {
+        "type": "object",
+        "properties": {
+          "dados": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Exportacao"
+            }
+          }
+        },
+        "required": [
+          "dados"
+        ]
+      }
+    },
+    "parameters": {}
+  },
+  "tags": [
+    {
+      "name": "Conta",
+      "description": "Identificação da chave e da empresa."
+    },
+    {
+      "name": "Notas",
+      "description": "NF-e, NFC-e e NFS-e."
+    },
+    {
+      "name": "Etiquetas",
+      "description": "Marcadores definidos e aplicados pela empresa no painel."
+    },
+    {
+      "name": "Documentos",
+      "description": "XML autorizado e representações em PDF."
+    },
+    {
+      "name": "Exportações",
+      "description": "Download em lote de XML e PDF, num ZIP com manifesto. Síncrono para lotes pequenos de XML, assíncrono com acompanhamento para o resto."
+    }
+  ]
+}
