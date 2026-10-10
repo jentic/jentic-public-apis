@@ -1,0 +1,725 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "볼테나 ERP 외부연동 API",
+    "version": "1.21.21",
+    "description": "- 모든 요청에 `x-api-key` 헤더로 발급받은 키를 넣습니다. 키에 회사 정보가 담겨 있어 회사코드를 따로 보내지 않습니다.\n- 호출 주소는 모든 고객이 같습니다(회사별 주소가 따로 있지 않습니다) — 어느 회사인지는 키가 정합니다. 전용 서버(온프렘)로 쓰시는 경우에만 계약된 주소를 사용하세요.\n- 외부연동은 연동(CONN) 모듈 계약이 있어야 열립니다. 계약이 해지되면 기준정보 내려받기(GET)와 이미 보낸 자료의 취소(DELETE)는 계속 되지만, 새로 보내는 것(POST)과 AI 비서 연결(MCP) 은 닫힙니다 — 이미 보낸 자료를 정리할 길은 항상 열어 두되, AI 조회는 이 모듈이 제공하는 기능 자체이기 때문입니다.\n- 장부 자료 자체는 계약과 무관합니다. AI 조회가 닫혀도 재고·매출·미수채권·시산표는 제품 화면에서 계속 보시고 엑셀로 내보낼 수 있습니다 — 잠기는 것은 자료가 아니라 AI 가 읽는 통로입니다.\n- 보내는 쪽 고유번호(extRef)를 반드시 남겨 두세요. 통신이 끊겨 같은 자료를 다시 보내도 중복이 생기지 않고, 나중에 취소할 때도 이 번호로 찾습니다.\n- 기준정보는 ERP 가 원본입니다. 외부에서 품목·거래처를 만들거나 고치는 API 는 열려 있지 않습니다(한 장부 원칙).\n- 호출 한도는 분당 600회입니다(초과 시 429).\n- AI 비서 연결(MCP): 같은 키로 `POST /api/ext/mcp` 에 연결하면 Claude·ChatGPT 같은 AI 비서가 재고·매출·미수채권·수주/발주 잔량·시산표를 직접 조회합니다. 조회 전용이며 입력·수정·삭제 도구는 제공하지 않습니다.\n- 키를 발급할 때 그 키의 AI 조회 범위를 지정할 수 있습니다(미지정이면 전체). 범위 밖 도구는 `tools/list` 에 나오지 않고, 이름을 알고 호출해도 데이터 없이 사유만 돌아옵니다. 발급 후 범위 변경은 불가하며 새 키를 발급합니다.\n- MCP 조회는 감사 기록에 남습니다 — 어느 키가 언제 어떤 자료를 읽었는지 제품의 사용현황 화면에서 확인할 수 있습니다.",
+    "contact": {
+      "name": "볼테나 도입 문의",
+      "url": "https://boltena.com/contact"
+    }
+  },
+  "servers": [
+    {
+      "url": "https://app.boltena.com",
+      "description": "클라우드(공통 주소 — 회사는 API 키가 정합니다)"
+    }
+  ],
+  "security": [
+    {
+      "ApiKeyAuth": []
+    }
+  ],
+  "tags": [
+    {
+      "name": "기본",
+      "description": "연동(CONN) 모듈만 있으면 사용"
+    },
+    {
+      "name": "EQP 모듈 필요",
+      "description": "EQP 모듈 계약이 있어야 호출됩니다"
+    },
+    {
+      "name": "HR 모듈 필요",
+      "description": "HR 모듈 계약이 있어야 호출됩니다"
+    }
+  ],
+  "paths": {
+    "/api/ext/ping": {
+      "get": {
+        "summary": "연결 확인",
+        "description": "키가 유효한지, 어느 회사에 연결되는지, 그 회사가 어떤 모듈을 쓰는지 돌려줍니다. 연동을 시작할 때 가장 먼저 호출합니다.",
+        "operationId": "get_api_ext_ping",
+        "tags": [
+          "기본"
+        ],
+        "responses": {
+          "200": {
+            "description": "성공",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                },
+                "example": {
+                  "ok": true,
+                  "co": "2000",
+                  "modules": [
+                    "MES",
+                    "HR"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          }
+        }
+      }
+    },
+    "/api/ext/masters/{entity}": {
+      "get": {
+        "summary": "기준정보 내려받기",
+        "description": "품목·거래처·창고·사원·BOM·작업지시를 내려받습니다. since 를 주면 그 시각 이후 변경분만 옵니다(증분 동기화). 한 번에 최대 1000행이며, 더 있으면 truncated: true 로 알려줍니다.",
+        "operationId": "get_api_ext_masters_entity",
+        "tags": [
+          "기본"
+        ],
+        "responses": {
+          "200": {
+            "description": "성공",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                },
+                "example": {
+                  "entity": "item",
+                  "since": "20260801",
+                  "truncated": false,
+                  "rows": [
+                    {
+                      "ITEM_CD": "...",
+                      "ITEM_NM": "...",
+                      "CHG_DT": "20260805123000"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          }
+        },
+        "parameters": [
+          {
+            "name": "entity",
+            "in": "path",
+            "required": true,
+            "description": "item · trade · warehouse · emp · bom · workorder",
+            "schema": {
+              "type": "string",
+              "description": "item · trade · warehouse · emp · bom · workorder",
+              "enum": [
+                "item",
+                "trade",
+                "warehouse",
+                "emp",
+                "bom",
+                "workorder"
+              ],
+              "example": "item"
+            }
+          },
+          {
+            "name": "since",
+            "in": "query",
+            "required": false,
+            "description": "YYYYMMDD 또는 YYYYMMDDHHMMSS — 이 시각 이후 변경분만",
+            "schema": {
+              "type": "string",
+              "description": "YYYYMMDD 또는 YYYYMMDDHHMMSS — 이 시각 이후 변경분만",
+              "pattern": "^[0-9]{8}([0-9]{6})?$",
+              "example": "20260801"
+            }
+          }
+        ]
+      }
+    },
+    "/api/ext/production/result": {
+      "post": {
+        "summary": "생산실적 보내기",
+        "description": "현장 시스템의 생산실적을 ERP 에 기록합니다. extRef(보내는 쪽의 고유번호)가 멱등키라, 같은 값으로 다시 보내면 중복 저장 없이 이전 결과를 돌려줍니다(통신 실패 재전송이 안전합니다). matIssues 를 함께 보내면 그 실적의 자재는 실투입 기준으로 기록됩니다(BOM 자동차감과 이중공제되지 않습니다).",
+        "operationId": "post_api_ext_production_result",
+        "tags": [
+          "기본"
+        ],
+        "responses": {
+          "200": {
+            "description": "성공",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                },
+                "example": {
+                  "ok": true,
+                  "docNb": "WR2608000012",
+                  "dup": false
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "extRef": {
+                    "type": "string",
+                    "description": "보내는 쪽 고유번호(100자 이내)",
+                    "maxLength": 100,
+                    "example": "MES-WR-20260810-001"
+                  },
+                  "itemCd": {
+                    "type": "string",
+                    "description": "생산 품목코드",
+                    "example": "I0001"
+                  },
+                  "wrDt": {
+                    "type": "string",
+                    "description": "실적일자 YYYYMMDD",
+                    "pattern": "^[0-9]{8}$",
+                    "example": "20260810"
+                  },
+                  "goodQt": {
+                    "type": "number",
+                    "description": "양품 수량(0 이상)",
+                    "minimum": 0,
+                    "example": 100
+                  },
+                  "badQt": {
+                    "type": "number",
+                    "description": "불량 수량(0 이상)",
+                    "minimum": 0,
+                    "example": 2
+                  },
+                  "woNb": {
+                    "type": "string",
+                    "description": "작업지시번호(있으면 연결)",
+                    "example": "WO2608000007"
+                  },
+                  "matIssues": {
+                    "type": "array",
+                    "description": "실투입 자재 [{ itemCd, qty }]",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "itemCd": {
+                          "type": "string"
+                        },
+                        "qty": {
+                          "type": "number"
+                        }
+                      },
+                      "required": [
+                        "itemCd",
+                        "qty"
+                      ]
+                    }
+                  }
+                },
+                "required": [
+                  "extRef",
+                  "itemCd",
+                  "wrDt",
+                  "goodQt",
+                  "badQt"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/ext/production/result/{extRef}": {
+      "delete": {
+        "summary": "생산실적 취소",
+        "description": "보냈던 실적을 취소합니다. 보낸 쪽의 고유번호로 지웁니다 — ERP 문서번호를 몰라도 됩니다.",
+        "operationId": "delete_api_ext_production_result_extref",
+        "tags": [
+          "기본"
+        ],
+        "responses": {
+          "200": {
+            "description": "성공",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                },
+                "example": {
+                  "ok": true,
+                  "canceled": "WR2608000012"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          }
+        },
+        "parameters": [
+          {
+            "name": "extRef",
+            "in": "path",
+            "required": true,
+            "description": "보낼 때 쓴 고유번호",
+            "schema": {
+              "type": "string",
+              "description": "보낼 때 쓴 고유번호",
+              "example": "MES-WR-20260810-001"
+            }
+          }
+        ]
+      }
+    },
+    "/api/ext/eqp/downtime": {
+      "post": {
+        "summary": "설비 비가동 보내기",
+        "description": "설비가 멈춘 시간을 기록합니다(OEE 계산의 재료). 생산실적과 같은 멱등 규칙이 적용됩니다.",
+        "operationId": "post_api_ext_eqp_downtime",
+        "tags": [
+          "EQP 모듈 필요"
+        ],
+        "responses": {
+          "200": {
+            "description": "성공",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                },
+                "example": {
+                  "ok": true,
+                  "docNb": "ED2608000003",
+                  "dup": false
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "extRef": {
+                    "type": "string",
+                    "description": "보내는 쪽 고유번호",
+                    "maxLength": 100,
+                    "example": "IOT-DN-20260810-003"
+                  },
+                  "eqpCd": {
+                    "type": "string",
+                    "description": "설비코드",
+                    "example": "EQ001"
+                  },
+                  "dnDt": {
+                    "type": "string",
+                    "description": "발생일자 YYYYMMDD",
+                    "pattern": "^[0-9]{8}$",
+                    "example": "20260810"
+                  },
+                  "downMin": {
+                    "type": "number",
+                    "description": "비가동 분(分)",
+                    "minimum": 0,
+                    "example": 45
+                  },
+                  "rsnCd": {
+                    "type": "string",
+                    "description": "사유코드",
+                    "example": "BRK"
+                  }
+                },
+                "required": [
+                  "extRef",
+                  "eqpCd",
+                  "dnDt",
+                  "downMin"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/ext/eqp/downtime/{extRef}": {
+      "delete": {
+        "summary": "설비 비가동 취소",
+        "description": "보냈던 비가동 기록을 취소합니다.",
+        "operationId": "delete_api_ext_eqp_downtime_extref",
+        "tags": [
+          "EQP 모듈 필요"
+        ],
+        "responses": {
+          "200": {
+            "description": "성공",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                },
+                "example": {
+                  "ok": true
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          }
+        },
+        "parameters": [
+          {
+            "name": "extRef",
+            "in": "path",
+            "required": true,
+            "description": "보낼 때 쓴 고유번호",
+            "schema": {
+              "type": "string",
+              "description": "보낼 때 쓴 고유번호",
+              "example": "MES-WR-20260810-001"
+            }
+          }
+        ]
+      }
+    },
+    "/api/ext/mcp": {
+      "post": {
+        "summary": "AI 비서 연결(MCP)",
+        "description": "AI 비서(Claude·ChatGPT 등)가 이 회사 장부를 조회하는 표준 연결부입니다. MCP(Model Context Protocol) 규격 2025-06-18, JSON-RPC 2.0 over HTTP. initialize · tools/list · tools/call · ping 을 처리합니다. 조회 전용 — 입력·수정·삭제 도구는 제공하지 않습니다. 도구는 그 회사에서 실제로 열리는 것만 목록에 나옵니다.",
+        "operationId": "post_api_ext_mcp",
+        "tags": [
+          "기본"
+        ],
+        "responses": {
+          "200": {
+            "description": "성공",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                },
+                "example": {
+                  "jsonrpc": "2.0",
+                  "id": 1,
+                  "result": {
+                    "content": [
+                      {
+                        "type": "text",
+                        "text": "현재고 조회 — 전체 1721건\n..."
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "jsonrpc": {
+                    "type": "string",
+                    "description": "\"2.0\" 고정",
+                    "example": "2.0"
+                  },
+                  "id": {
+                    "type": "string",
+                    "description": "요청 식별자(알림 요청이면 생략)",
+                    "example": "1"
+                  },
+                  "method": {
+                    "type": "string",
+                    "description": "initialize · tools/list · tools/call · ping",
+                    "enum": [
+                      "initialize",
+                      "notifications/initialized",
+                      "tools/list",
+                      "tools/call",
+                      "ping"
+                    ],
+                    "example": "tools/list"
+                  },
+                  "params": {
+                    "type": "object",
+                    "description": "메서드별 인자(tools/call 은 { name, arguments })"
+                  }
+                },
+                "required": [
+                  "jsonrpc",
+                  "method"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/ext/attendance": {
+      "post": {
+        "summary": "근태 보내기",
+        "description": "근태기(출퇴근 기록기)의 월 근태를 보냅니다. 급여 계산의 근태 자료가 됩니다. 이미 마감된 달은 거부됩니다(마감 후 조용한 변경 금지).",
+        "operationId": "post_api_ext_attendance",
+        "tags": [
+          "HR 모듈 필요"
+        ],
+        "responses": {
+          "200": {
+            "description": "성공",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                },
+                "example": {
+                  "ok": true,
+                  "saved": 23
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "ym": {
+                    "type": "string",
+                    "description": "대상 월 YYYYMM",
+                    "pattern": "^[0-9]{6}$",
+                    "example": "202608"
+                  },
+                  "rows": {
+                    "type": "array",
+                    "description": "사원별 근태 [{ empCd, ... }]",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "empCd": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "empCd"
+                      ]
+                    }
+                  }
+                },
+                "required": [
+                  "ym",
+                  "rows"
+                ]
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "ApiKeyAuth": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "x-api-key",
+        "description": "제품의 시스템 > API 키 관리에서 발급합니다. 키에 회사 정보가 담겨 있어 회사코드를 따로 보내지 않습니다."
+      }
+    },
+    "responses": {
+      "BadRequest": {
+        "description": "필수값 누락·형식 오류(메시지에 어느 값인지 명시)",
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "properties": {
+                "error": {
+                  "type": "string",
+                  "description": "사람이 읽을 수 있는 오류 사유"
+                },
+                "module": {
+                  "type": "string",
+                  "description": "모듈 게이트로 막힌 경우 그 모듈키"
+                }
+              }
+            },
+            "example": {
+              "error": "extRef(멱등키, 100자 이내)는 필수입니다"
+            }
+          }
+        }
+      },
+      "Unauthorized": {
+        "description": "키가 없거나 유효하지 않음",
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "properties": {
+                "error": {
+                  "type": "string",
+                  "description": "사람이 읽을 수 있는 오류 사유"
+                },
+                "module": {
+                  "type": "string",
+                  "description": "모듈 게이트로 막힌 경우 그 모듈키"
+                }
+              }
+            },
+            "example": {
+              "error": "유효하지 않은 API 키입니다"
+            }
+          }
+        }
+      },
+      "Forbidden": {
+        "description": "연동(CONN) 또는 해당 모듈 미계약 · 해지 상태에서 신규 전송 또는 AI 조회(MCP)",
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "properties": {
+                "error": {
+                  "type": "string",
+                  "description": "사람이 읽을 수 있는 오류 사유"
+                },
+                "module": {
+                  "type": "string",
+                  "description": "모듈 게이트로 막힌 경우 그 모듈키"
+                }
+              }
+            },
+            "example": {
+              "error": "...",
+              "module": "CONN"
+            }
+          }
+        }
+      },
+      "TooManyRequests": {
+        "description": "분당 호출 한도 초과",
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "properties": {
+                "error": {
+                  "type": "string",
+                  "description": "사람이 읽을 수 있는 오류 사유"
+                },
+                "module": {
+                  "type": "string",
+                  "description": "모듈 게이트로 막힌 경우 그 모듈키"
+                }
+              }
+            },
+            "example": {
+              "error": "요청이 너무 많습니다..."
+            }
+          }
+        }
+      }
+    }
+  }
+}
