@@ -1,0 +1,1219 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Housing Sentinel Open API（房哨兵开放API）",
+    "version": "1.3",
+    "description": "中国12个主要城市官方房产成交数据与进攻/防守市场信号。\n登录 housingsentinel.cn「我的→接入AI Agent」即可生成 API Key。\n账号层级：\n- 免费试用（trial）：首次调用起 3 天内可查询全部 12 城（限10次/分、100次/天，历史最近30天）；\n- 免费层（free）：试用结束后永久可查深圳当前市场信号（/cities /signals /cities/shenzhen/signal，限10次/分、50次/天）；\n- 点数包（credits）：¥39 / 1000 次 / 30 天，全部 12 城，历史最近 90 天；\n- 订阅（paid）：单城市 ¥299/年，全国 12 城 ¥1888/年，全量数据与历史，60次/分、2000次/天；\n- 机构版（institution）：300次/分、20000次/天，请联系微信 SheldonZhuang。\n订阅/购买入口 https://housingsentinel.cn/agent，付款后即刻生效。\n公开端点 GET /cities/{city}/card 无需 API Key，返回当日成交与市场档位（不含库存原值）。\n数据每日更新一次，建议轮询间隔≥1小时。变化驱动：/signals?since=<上次 nextSince> 只返回有变动的城市；/signals 与 /cities/{city}/signal 返回弱 ETag，带 If-None-Match 未变化时 304。\nWebhook（试用/点数包/订阅/机构版）：POST /webhooks 注册 https 地址，城市有新数据（data.updated）或市场阶段变化（phase.changed）时服务端主动推送，签名见 createWebhook 的 callbacks。\n数据仅限订阅者/试用者本人使用，不得对外提供数据服务。\n",
+    "contact": {
+      "url": "https://housingsentinel.cn"
+    },
+    "x-jentic-source-url": "https://www.housingsentinel.cn/openapi.yaml"
+  },
+  "servers": [
+    {
+      "url": "https://api.housingsentinel.cn/api/v1"
+    }
+  ],
+  "paths": {
+    "/cities/{city}/card": {
+      "get": {
+        "operationId": "getCityCard",
+        "summary": "公开·当日成交与市场档位（无需 API Key）",
+        "description": "免鉴权\"试吃口\"：返回该城市最新一日一手/二手成交、当月累计、月度参考成交、二手去化周期与市场阶段；不含库存原值。响应带 subscribeUrl 指向解锁全量数据的入口。60 秒缓存。",
+        "security": [],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/City"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "数据卡载荷",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CityCard"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "城市不存在或暂无数据"
+          }
+        }
+      }
+    },
+    "/signals": {
+      "get": {
+        "operationId": "getSignals",
+        "summary": "获取全部可访问城市的当前市场信号快照（主接口）",
+        "description": "返回每个可访问城市的市场阶段（防守/观察/进攻/快速进攻）、一手/二手库存去化周期、月均成交、库存与数据日期。试用期为全部 12 城；免费层为深圳；订阅为订阅城市。变化驱动轮询：首次不带 since，之后带上次响应的 nextSince，只返回该时间后有数据变动的城市；同时保存响应头 ETag，下次带 If-None-Match，未变化返回 304（304 同样计入调用次数，但无需解析响应体）。",
+        "parameters": [
+          {
+            "name": "since",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "description": "ISO 8601 时间（取上次响应的 nextSince）；只返回 updatedAt 晚于该时间的城市。非法值返回 400 BAD_SINCE"
+          },
+          {
+            "$ref": "#/components/parameters/IfNoneMatch"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "信号列表",
+            "headers": {
+              "ETag": {
+                "$ref": "#/components/headers/ETag"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "generatedAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "tier": {
+                      "$ref": "#/components/schemas/Tier"
+                    },
+                    "scope": {
+                      "type": "string",
+                      "enum": [
+                        "full",
+                        "signal"
+                      ],
+                      "description": "signal=仅信号端点可用（free/public-demo）"
+                    },
+                    "tierNote": {
+                      "type": "string",
+                      "nullable": true,
+                      "description": "当前层级范围与升级提示"
+                    },
+                    "subscribeUrl": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "pricing": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "since": {
+                      "type": "string",
+                      "format": "date-time",
+                      "description": "仅带 since 时返回：规范化后的 since"
+                    },
+                    "changedSince": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "description": "仅带 since 时返回：since 之后有数据变动的城市代码（为空表示无变化）"
+                    },
+                    "nextSince": {
+                      "type": "string",
+                      "format": "date-time",
+                      "description": "仅带 since 时返回：下次轮询应传入的 since（无变动时等于 since）"
+                    },
+                    "cities": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/CitySignal"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "304": {
+            "$ref": "#/components/responses/NotModified"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      }
+    },
+    "/cities": {
+      "get": {
+        "operationId": "listCities",
+        "summary": "当前可访问城市列表与阈值元数据",
+        "responses": {
+          "200": {
+            "description": "城市列表",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "tier": {
+                      "$ref": "#/components/schemas/Tier"
+                    },
+                    "scope": {
+                      "type": "string",
+                      "enum": [
+                        "full",
+                        "signal"
+                      ]
+                    },
+                    "trialEndsAt": {
+                      "type": "string",
+                      "format": "date-time",
+                      "nullable": true,
+                      "description": "试用截止时间（trial/free 返回）"
+                    },
+                    "credits": {
+                      "type": "object",
+                      "nullable": true,
+                      "description": "点数包余量（credits 层返回）",
+                      "properties": {
+                        "remaining": {
+                          "type": "integer"
+                        },
+                        "expiresAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        }
+                      }
+                    },
+                    "tierNote": {
+                      "type": "string",
+                      "nullable": true,
+                      "description": "当前层级范围与升级提示"
+                    },
+                    "subscribeUrl": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "pricing": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "cities": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "cityCode": {
+                            "type": "string",
+                            "example": "xiamen"
+                          },
+                          "city": {
+                            "type": "string",
+                            "example": "厦门"
+                          },
+                          "thresholds": {
+                            "$ref": "#/components/schemas/Thresholds"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/cities/{city}/signal": {
+      "get": {
+        "operationId": "getCitySignal",
+        "summary": "单城市当前市场信号",
+        "description": "返回弱 ETag；带 If-None-Match 且信号未变化时返回 304。",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/City"
+          },
+          {
+            "$ref": "#/components/parameters/IfNoneMatch"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "城市信号",
+            "headers": {
+              "ETag": {
+                "$ref": "#/components/headers/ETag"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CitySignal"
+                }
+              }
+            }
+          },
+          "304": {
+            "$ref": "#/components/responses/NotModified"
+          },
+          "403": {
+            "$ref": "#/components/responses/NotSubscribed"
+          },
+          "404": {
+            "description": "城市不存在或暂无数据"
+          }
+        }
+      }
+    },
+    "/cities/{city}/metrics": {
+      "get": {
+        "operationId": "getCityMetrics",
+        "summary": "逐日指标时间序列（去化周期/库存/月均成交，用于趋势分析）",
+        "description": "需要 full scope（试用/点数包/订阅）。免费层与公共演示密钥返回 403 FREE_TIER_LIMIT。",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/City"
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date"
+            },
+            "description": "开始日期，默认 to 往前90天；试用期最早为30天前、点数包最早为90天前（自动钳制）"
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date"
+            },
+            "description": "结束日期，默认今天；跨度最长366天"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "指标序列",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "cityCode": {
+                      "type": "string"
+                    },
+                    "metrics": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "date": {
+                            "type": "string",
+                            "format": "date"
+                          },
+                          "firstHandCycle": {
+                            "type": "number",
+                            "nullable": true,
+                            "description": "一手去化周期（月）"
+                          },
+                          "secondHandCycle": {
+                            "type": "number",
+                            "nullable": true,
+                            "description": "二手去化周期（月）"
+                          },
+                          "firstHandInventory": {
+                            "type": "integer",
+                            "nullable": true
+                          },
+                          "secondHandInventory": {
+                            "type": "integer",
+                            "nullable": true
+                          },
+                          "firstHandAvgMonthly": {
+                            "type": "integer",
+                            "nullable": true
+                          },
+                          "secondHandAvgMonthly": {
+                            "type": "integer",
+                            "nullable": true
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/NotSubscribed"
+          }
+        }
+      }
+    },
+    "/cities/{city}/history": {
+      "get": {
+        "operationId": "getCityHistory",
+        "summary": "原始日度成交/库存数据（单次最多400条）",
+        "description": "需要 full scope（试用/点数包/订阅）。免费层与公共演示密钥返回 403 FREE_TIER_LIMIT。",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/City"
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "原始数据",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "count": {
+                      "type": "integer"
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "date": {
+                            "type": "string",
+                            "format": "date"
+                          },
+                          "firstHandSubscription": {
+                            "type": "integer",
+                            "nullable": true,
+                            "description": "一手认购套数"
+                          },
+                          "firstHandTransaction": {
+                            "type": "integer",
+                            "nullable": true,
+                            "description": "一手网签成交套数"
+                          },
+                          "firstHandInventory": {
+                            "type": "integer",
+                            "nullable": true,
+                            "description": "一手库存套数"
+                          },
+                          "secondHandTransaction": {
+                            "type": "integer",
+                            "nullable": true,
+                            "description": "二手网签成交套数"
+                          },
+                          "secondHandInventory": {
+                            "type": "integer",
+                            "nullable": true,
+                            "description": "二手库存套数"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/NotSubscribed"
+          }
+        }
+      }
+    },
+    "/webhooks": {
+      "post": {
+        "operationId": "createWebhook",
+        "summary": "注册 Webhook（数据更新/阶段变化时主动推送）",
+        "description": "需要 full scope（机构版/订阅/点数包/试用）；免费层与公共演示密钥返回 403 FREE_TIER_LIMIT。url 必须为 https，禁止内网/回环/链路本地地址与带账号密码的 URL。每账号最多 5 个。secret 仅在创建时返回一次。服务端每 5 分钟检测一次，推送需 5 秒内返回 2xx（不跟随重定向），连续失败 10 次自动停用（调用 /webhooks/{id}/test 成功可重新激活）；订阅/试用过期后停止推送。",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "url"
+                ],
+                "properties": {
+                  "url": {
+                    "type": "string",
+                    "format": "uri",
+                    "example": "https://example.com/hs-webhook",
+                    "description": "接收地址，必须 https"
+                  },
+                  "cities": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "城市代码数组；省略=全部可访问城市"
+                  },
+                  "events": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "data.updated",
+                        "phase.changed"
+                      ]
+                    },
+                    "description": "省略=两种事件都订阅"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "创建成功（secret 只返回这一次）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "webhook": {
+                      "$ref": "#/components/schemas/Webhook"
+                    },
+                    "secret": {
+                      "type": "string",
+                      "example": "whsec_...",
+                      "description": "签名密钥，仅返回一次"
+                    },
+                    "note": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/NotSubscribed"
+          }
+        },
+        "callbacks": {
+          "webhookEvent": {
+            "{$request.body#/url}": {
+              "post": {
+                "summary": "推送事件（服务端 → 你的 url）",
+                "description": "请求头：X-HS-Event（事件名）、X-HS-Delivery（事件 id）、X-HS-Signature: t=<unix秒>,v1=<hex>。验签：v1 = HMAC-SHA256(secret, `${t}.${原始请求体}`)，用原始字节而非重新序列化的 JSON，常数时间比较，并拒绝 |now - t| > 300 秒的请求防重放。",
+                "parameters": [
+                  {
+                    "name": "X-HS-Event",
+                    "in": "header",
+                    "required": true,
+                    "schema": {
+                      "type": "string",
+                      "enum": [
+                        "data.updated",
+                        "phase.changed",
+                        "ping"
+                      ]
+                    }
+                  },
+                  {
+                    "name": "X-HS-Delivery",
+                    "in": "header",
+                    "required": true,
+                    "schema": {
+                      "type": "string",
+                      "example": "evt_..."
+                    }
+                  },
+                  {
+                    "name": "X-HS-Signature",
+                    "in": "header",
+                    "required": true,
+                    "schema": {
+                      "type": "string",
+                      "example": "t=1790000000,v1=5f2c..."
+                    }
+                  }
+                ],
+                "requestBody": {
+                  "required": true,
+                  "content": {
+                    "application/json": {
+                      "schema": {
+                        "$ref": "#/components/schemas/WebhookEvent"
+                      }
+                    }
+                  }
+                },
+                "responses": {
+                  "2XX": {
+                    "description": "5 秒内返回任意 2xx 视为投递成功"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "operationId": "listWebhooks",
+        "summary": "列出本账号的 Webhook（不含 secret）",
+        "responses": {
+          "200": {
+            "description": "Webhook 列表",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "webhooks": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Webhook"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/NotSubscribed"
+          }
+        }
+      }
+    },
+    "/webhooks/{id}": {
+      "delete": {
+        "operationId": "deleteWebhook",
+        "summary": "删除 Webhook",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/WebhookId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "已删除",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "webhook 不存在（code=NOT_FOUND）"
+          }
+        }
+      }
+    },
+    "/webhooks/{id}/test": {
+      "post": {
+        "operationId": "testWebhook",
+        "summary": "立即推送一次 ping 事件（成功会重新激活已停用的 Webhook）",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/WebhookId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "投递结果",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "delivered": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string",
+                      "description": "投递失败原因（仅失败时）"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "webhook 不存在（code=NOT_FOUND）"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "房哨兵 API Key（hs_live_...），在「我的→接入AI Agent」生成"
+      }
+    },
+    "parameters": {
+      "City": {
+        "name": "city",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "enum": [
+            "shenzhen",
+            "shanghai",
+            "beijing",
+            "guangzhou",
+            "hangzhou",
+            "nanjing",
+            "suzhou",
+            "wuxi",
+            "chengdu",
+            "chongqing",
+            "dongguan",
+            "xiamen"
+          ]
+        },
+        "description": "城市代码（拼音全拼）"
+      },
+      "IfNoneMatch": {
+        "name": "If-None-Match",
+        "in": "header",
+        "schema": {
+          "type": "string"
+        },
+        "description": "上次响应的 ETag；未变化时返回 304"
+      },
+      "WebhookId": {
+        "name": "id",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "integer"
+        },
+        "description": "Webhook id"
+      }
+    },
+    "headers": {
+      "ETag": {
+        "description": "弱 ETag（只对业务载荷取哈希，不受 generatedAt 影响）",
+        "schema": {
+          "type": "string",
+          "example": "W/\"abc123\""
+        }
+      }
+    },
+    "schemas": {
+      "Tier": {
+        "type": "string",
+        "enum": [
+          "institution",
+          "paid",
+          "credits",
+          "trial",
+          "free",
+          "public-demo"
+        ],
+        "description": "账号层级：institution 机构版 / paid 订阅 / credits 点数包 / trial 3天试用（全12城）/ free 免费层（深圳信号永久）/ public-demo 公共演示密钥"
+      },
+      "Thresholds": {
+        "type": "object",
+        "properties": {
+          "cycleDefense": {
+            "type": "number",
+            "example": 18,
+            "description": "防守期阈值（月）"
+          },
+          "cycleWatch": {
+            "type": "number",
+            "example": 12,
+            "description": "观察期阈值（月）"
+          },
+          "cycleBuy": {
+            "type": "number",
+            "example": 8,
+            "description": "进攻期阈值（月）"
+          },
+          "monthlyBullLine": {
+            "type": "integer",
+            "description": "月成交荣枯线（套）"
+          },
+          "monthlyBoomLine": {
+            "type": "integer",
+            "description": "月成交暴涨线（套）"
+          }
+        }
+      },
+      "HandStats": {
+        "type": "object",
+        "properties": {
+          "inventoryCycle": {
+            "type": "number",
+            "nullable": true,
+            "description": "库存去化周期（月）；成都/重庆一手恒为null"
+          },
+          "inventory": {
+            "type": "integer",
+            "nullable": true,
+            "description": "库存套数"
+          },
+          "avgMonthly": {
+            "type": "integer",
+            "nullable": true,
+            "description": "月均成交套数"
+          },
+          "monthTotal": {
+            "type": "integer",
+            "description": "当月累计成交套数"
+          },
+          "refYearMonth": {
+            "type": "string",
+            "nullable": true,
+            "description": "月均成交参考月份"
+          },
+          "isMonthlySnapshot": {
+            "type": "boolean",
+            "description": "true=月均来自月度快照而非当月日报投影"
+          }
+        }
+      },
+      "CitySignal": {
+        "type": "object",
+        "properties": {
+          "cityCode": {
+            "type": "string",
+            "example": "xiamen"
+          },
+          "city": {
+            "type": "string",
+            "example": "厦门"
+          },
+          "dataDate": {
+            "type": "string",
+            "format": "date",
+            "description": "数据截止日期"
+          },
+          "phase": {
+            "type": "string",
+            "description": "市场阶段",
+            "enum": [
+              "防守期",
+              "观察期",
+              "进攻/买入期",
+              "快速进攻/买入期",
+              "突破荣枯线",
+              "突破景气线",
+              "突破暴涨线",
+              "数据不足"
+            ]
+          },
+          "phaseSource": {
+            "type": "string",
+            "enum": [
+              "cycle",
+              "volume",
+              "none"
+            ],
+            "description": "判定依据（去化周期/成交量/数据不足）"
+          },
+          "firstHand": {
+            "$ref": "#/components/schemas/HandStats"
+          },
+          "secondHand": {
+            "$ref": "#/components/schemas/HandStats"
+          },
+          "thresholds": {
+            "$ref": "#/components/schemas/Thresholds"
+          },
+          "updatedAt": {
+            "type": "string",
+            "nullable": true,
+            "description": "该城市数据最近一次变动时间（ISO 8601），与 since 比较"
+          }
+        }
+      },
+      "Webhook": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer"
+          },
+          "url": {
+            "type": "string"
+          },
+          "cities": {
+            "type": "array",
+            "nullable": true,
+            "items": {
+              "type": "string"
+            },
+            "description": "null=全部可访问城市"
+          },
+          "events": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "data.updated",
+                "phase.changed"
+              ]
+            }
+          },
+          "active": {
+            "type": "boolean",
+            "description": "连续失败 10 次自动置 false"
+          },
+          "failureCount": {
+            "type": "integer"
+          },
+          "lastSuccessAt": {
+            "type": "string",
+            "nullable": true
+          },
+          "lastError": {
+            "type": "string",
+            "nullable": true
+          },
+          "createdAt": {
+            "type": "string"
+          }
+        }
+      },
+      "WebhookEvent": {
+        "type": "object",
+        "description": "推送请求体。ping 事件只含 id/event/createdAt/webhookId。",
+        "properties": {
+          "id": {
+            "type": "string",
+            "example": "evt_..."
+          },
+          "event": {
+            "type": "string",
+            "enum": [
+              "data.updated",
+              "phase.changed",
+              "ping"
+            ]
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "cityCode": {
+            "type": "string",
+            "example": "shenzhen"
+          },
+          "previousPhase": {
+            "type": "string",
+            "nullable": true,
+            "description": "仅 phase.changed：变化前阶段"
+          },
+          "phase": {
+            "type": "string",
+            "description": "仅 phase.changed：新阶段"
+          },
+          "webhookId": {
+            "type": "integer",
+            "description": "仅 ping"
+          },
+          "signal": {
+            "$ref": "#/components/schemas/CitySignal"
+          }
+        }
+      },
+      "CityCard": {
+        "type": "object",
+        "description": "公开数据卡载荷（不含库存原值）",
+        "properties": {
+          "success": {
+            "type": "boolean"
+          },
+          "cityCode": {
+            "type": "string"
+          },
+          "city": {
+            "type": "string"
+          },
+          "firstHandPeriod": {
+            "type": "string",
+            "enum": [
+              "daily",
+              "monthly"
+            ],
+            "description": "成都/重庆为 monthly（一手仅月末记录）"
+          },
+          "date": {
+            "type": "string",
+            "format": "date",
+            "description": "最新数据日期"
+          },
+          "firstHandSubscription": {
+            "type": "integer",
+            "nullable": true
+          },
+          "firstHandTransaction": {
+            "type": "integer",
+            "nullable": true
+          },
+          "secondHandTransaction": {
+            "type": "integer",
+            "nullable": true
+          },
+          "prev": {
+            "type": "object",
+            "nullable": true,
+            "properties": {
+              "date": {
+                "type": "string",
+                "format": "date"
+              },
+              "firstHandTransaction": {
+                "type": "integer",
+                "nullable": true
+              },
+              "secondHandTransaction": {
+                "type": "integer",
+                "nullable": true
+              }
+            }
+          },
+          "month": {
+            "type": "object",
+            "properties": {
+              "yearMonth": {
+                "type": "string",
+                "example": "2026-09"
+              },
+              "passedDays": {
+                "type": "integer",
+                "nullable": true
+              },
+              "totalDaysInMonth": {
+                "type": "integer",
+                "nullable": true
+              },
+              "firstHandTotal": {
+                "type": "integer",
+                "nullable": true
+              },
+              "secondHandTotal": {
+                "type": "integer",
+                "nullable": true
+              }
+            }
+          },
+          "secondHandRef": {
+            "type": "object",
+            "properties": {
+              "value": {
+                "type": "integer",
+                "nullable": true,
+                "description": "二手月度参考成交（月均）"
+              },
+              "refYearMonth": {
+                "type": "string",
+                "nullable": true
+              },
+              "isSnapshot": {
+                "type": "boolean"
+              }
+            }
+          },
+          "secondHandCycle": {
+            "type": "number",
+            "nullable": true,
+            "description": "二手去化周期（月）"
+          },
+          "phase": {
+            "type": "string"
+          },
+          "phaseSource": {
+            "type": "string",
+            "enum": [
+              "cycle",
+              "volume",
+              "none"
+            ]
+          },
+          "thresholds": {
+            "$ref": "#/components/schemas/Thresholds"
+          },
+          "subscribeUrl": {
+            "type": "string"
+          },
+          "docs": {
+            "type": "string"
+          },
+          "generatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      }
+    },
+    "responses": {
+      "NotModified": {
+        "description": "If-None-Match 与当前 ETag 一致，数据未变化（无响应体）"
+      },
+      "BadRequest": {
+        "description": "参数错误（BAD_SINCE / BAD_URL / BAD_CITIES / BAD_EVENTS / TOO_MANY_WEBHOOKS）",
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "properties": {
+                "success": {
+                  "type": "boolean",
+                  "example": false
+                },
+                "error": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "BAD_SINCE",
+                        "BAD_URL",
+                        "BAD_CITIES",
+                        "BAD_EVENTS",
+                        "TOO_MANY_WEBHOOKS"
+                      ]
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "Unauthorized": {
+        "description": "API Key 缺失或无效",
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "properties": {
+                "success": {
+                  "type": "boolean",
+                  "example": false
+                },
+                "error": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "example": "INVALID_API_KEY"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "NotSubscribed": {
+        "description": "无权访问（code=CITY_NOT_SUBSCRIBED 城市不在当前层级；code=FREE_TIER_LIMIT 免费层/演示密钥不可用 metrics/history）。响应 error 附 subscribeUrl 与 pricing。",
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "properties": {
+                "success": {
+                  "type": "boolean",
+                  "example": false
+                },
+                "error": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "CITY_NOT_SUBSCRIBED",
+                        "FREE_TIER_LIMIT"
+                      ]
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "subscribeUrl": {
+                      "type": "string",
+                      "example": "https://housingsentinel.cn/agent"
+                    },
+                    "pricing": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "RateLimited": {
+        "description": "超出限流（订阅 60次/分、2000次/天；点数包 60次/分；试用 10次/分、100次/天；免费层 10次/分、50次/天）。响应 error 附 subscribeUrl 与 pricing。"
+      }
+    }
+  },
+  "security": [
+    {
+      "bearerAuth": []
+    }
+  ]
+}
