@@ -1,0 +1,941 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "BounceWatch API",
+    "version": "1.0.0",
+    "description": "Company enrichment and buying-signal data.\n\nEvery endpoint below is live — put your API key in the panel above and press **Send**.\n\nAccount endpoints are free. Enrichment spends credits, and a domain enriched within the last 24 hours comes back instantly at no cost.",
+    "contact": {
+      "name": "BounceWatch Support",
+      "email": "sedat@bouncewatch.com",
+      "url": "https://docs.bouncewatch.com"
+    }
+  },
+  "servers": [
+    {
+      "url": "https://api.bouncewatch.com/api/v1",
+      "description": "Production"
+    }
+  ],
+  "security": [
+    {
+      "apiKey": []
+    }
+  ],
+  "tags": [
+    {
+      "name": "Company",
+      "description": "Enrich a company by domain."
+    },
+    {
+      "name": "Enrichment",
+      "description": "Track an enrichment batch while it runs, and collect the results."
+    },
+    {
+      "name": "Account",
+      "description": "Plan, credits, usage and webhook configuration. None of these consume credits."
+    },
+    {
+      "name": "Status",
+      "description": "Liveness. No key, no credits — point your uptime monitor here."
+    }
+  ],
+  "paths": {
+    "/health": {
+      "get": {
+        "tags": ["Status"],
+        "summary": "Health check",
+        "operationId": "getHealth",
+        "security": [],
+        "description": "Is the API able to serve a request? No API key, no credits, no rate-limit cost worth worrying about.\n\n**Point your uptime monitor at this and nothing else.** Monitoring `/company/{domain}` instead needs a key, spends credits on every poll, and reports a `401` as an outage.\n\nDeliberately narrow: it answers whether the request path is up, not whether every part of the platform is well. A slow scraper or a backed-up queue is a real problem and still not a reason to call the API down, so neither is checked here.\n\n`200` means serving. `503` means the API cannot reach its database and cannot answer a single call — treat it as down.",
+        "responses": {
+          "200": {
+            "description": "Serving normally.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": { "type": "string", "example": "ok" },
+                    "service": { "type": "string", "example": "bouncewatch-api" },
+                    "time": { "type": "string", "format": "date-time" },
+                    "checks": {
+                      "type": "object",
+                      "properties": {
+                        "database": { "type": "boolean", "example": true }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Degraded — the API cannot reach its database. Treat as down."
+          }
+        }
+      }
+    },
+    "/company/{domain}": {
+      "get": {
+        "tags": ["Company"],
+        "summary": "Get company data",
+        "operationId": "getCompany",
+        "description": "Returns company data for a domain, enriching it first when we do not already hold something recent.\n\n**Two outcomes, and both are success:**\n\n- `200` — the domain was enriched within the last 24 hours, so you get the data straight away and spend **0 credits**.\n- `202` — nothing recent on file, so enrichment is queued. Credits are reserved now; results arrive at your webhook, or you poll `status_endpoint`.\n\nA `409` is normal too: we deduplicate per domain, so a second request while one is in flight is refused rather than charged twice.\n\n**A webhook URL is required** for anything that triggers enrichment — send `X-Webhook-URL` here, or store one once via `POST /account/webhook`.",
+        "parameters": [
+          {
+            "name": "domain",
+            "in": "path",
+            "required": true,
+            "description": "Company domain. `stripe.com`, `www.stripe.com` and `https://stripe.com/pricing` all resolve to the same company.",
+            "schema": {
+              "type": "string",
+              "examples": ["stripe.com"]
+            }
+          },
+          {
+            "name": "enrich",
+            "in": "query",
+            "required": false,
+            "description": "Comma-separated enrichment modules. Base data (10 credits) is always included; each module adds its own cost. Requesting all six costs 60 credits.",
+            "schema": {
+              "type": "string",
+              "examples": ["funding,team"]
+            }
+          },
+          {
+            "name": "X-Webhook-URL",
+            "in": "header",
+            "required": false,
+            "description": "Where to deliver the results. Must be `https://`. Overrides the URL stored on the account. Required unless one is already stored — without either, enrichment is refused with `400 webhook_required` before any credits are spent.",
+            "schema": {
+              "type": "string",
+              "format": "uri",
+              "examples": ["https://webhook.site/YOUR-ID"]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Enriched within the last 24 hours — served from cache, 0 credits.",
+            "headers": {
+              "X-RateLimit-Limit": { "$ref": "#/components/headers/RateLimitLimit" },
+              "X-RateLimit-Remaining": { "$ref": "#/components/headers/RateLimitRemaining" },
+              "X-RateLimit-Reset": { "$ref": "#/components/headers/RateLimitReset" }
+            },
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/CompanyCached" }
+              }
+            }
+          },
+          "202": {
+            "description": "Enrichment queued. Credits reserved; results follow by webhook.",
+            "headers": {
+              "X-RateLimit-Limit": { "$ref": "#/components/headers/RateLimitLimit" },
+              "X-RateLimit-Remaining": { "$ref": "#/components/headers/RateLimitRemaining" }
+            },
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/EnrichmentQueued" }
+              }
+            }
+          },
+          "400": {
+            "description": "`webhook_required` — no usable https webhook. `invalid_domain` — the domain could not be parsed. `invalid_module` — an unknown name in `enrich`; the response lists the valid ones.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" },
+                "examples": {
+                  "webhook_required": {
+                    "summary": "No webhook configured",
+                    "value": {
+                      "success": false,
+                      "error": "webhook_required",
+                      "message": "Webhook URL is required for enrichment requests",
+                      "hint": "Configure a webhook URL in your API panel at https://bouncewatch.com/api-panel/webhooks or provide it via the X-Webhook-URL header.",
+                      "quick_test": "For quick testing, you can get a free webhook URL from https://webhook.site",
+                      "documentation": "https://docs.bouncewatch.com/webhooks"
+                    }
+                  },
+                  "invalid_module": {
+                    "summary": "Unknown enrichment module",
+                    "value": {
+                      "success": false,
+                      "error": "invalid_module",
+                      "message": "Invalid enrichment module requested",
+                      "valid_modules": ["business", "technology", "funding", "team", "signals", "competitors"]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "402": { "$ref": "#/components/responses/InsufficientCredits" },
+          "404": {
+            "description": "`company_not_found` — nothing on this domain and nothing to enrich.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/Error" } }
+            }
+          },
+          "409": {
+            "description": "Deduplicated, not failed. `enrichment_in_progress` — one is already running for this domain. `recently_enriched` — ask again and the data comes back free. `no_data_cooldown` — we looked recently and found nothing, so we are not looking again yet.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" },
+                "examples": {
+                  "enrichment_in_progress": {
+                    "summary": "Already running",
+                    "value": {
+                      "success": false,
+                      "error": "enrichment_in_progress",
+                      "message": "An enrichment is already in progress for this domain",
+                      "hint": "Please wait for the current enrichment to complete. Results will be delivered via webhook.",
+                      "batch_id": "batch_1gVwXby8PsYHoMQR"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "`deprecated_parameter` — `mode=cached` and `mode=realtime` were retired. Drop the parameter; the API is single-mode now.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/Error" } }
+            }
+          },
+          "429": { "$ref": "#/components/responses/RateLimited" }
+        }
+      }
+    },
+    "/enrichment/{batch_id}/status": {
+      "get": {
+        "tags": ["Enrichment"],
+        "summary": "Check enrichment status",
+        "operationId": "getEnrichmentStatus",
+        "description": "Poll a batch while it runs. Free — polling never costs credits.\n\nPrefer the webhook: it tells you the moment the batch lands. Polling is the fallback when you cannot receive one.",
+        "parameters": [
+          {
+            "name": "batch_id",
+            "in": "path",
+            "required": true,
+            "description": "The `batch_id` returned by the 202.",
+            "schema": {
+              "type": "string",
+              "examples": ["batch_1gVwXby8PsYHoMQR"]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Current state of the batch.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/EnrichmentStatus" }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": {
+            "description": "`batch_forbidden` — that batch belongs to another account.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/Error" } }
+            }
+          },
+          "404": {
+            "description": "`batch_not_found` — no batch with that id.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/Error" } }
+            }
+          },
+          "429": { "$ref": "#/components/responses/RateLimited" }
+        }
+      }
+    },
+    "/enrichment/{batch_id}/results": {
+      "get": {
+        "tags": ["Enrichment"],
+        "summary": "Get enrichment results",
+        "operationId": "getEnrichmentResults",
+        "description": "Fetch the finished data for a batch. Free — the credits were charged when the batch was queued.\n\nAvailable once status is `completed`. Asking earlier returns `enrichment_processing` rather than a partial payload.",
+        "parameters": [
+          {
+            "name": "batch_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "examples": ["batch_1gVwXby8PsYHoMQR"]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The enriched data.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/EnrichmentResults" }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": {
+            "description": "`batch_forbidden` — that batch belongs to another account.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/Error" } }
+            }
+          },
+          "404": {
+            "description": "`batch_not_found` — no batch with that id.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/Error" } }
+            }
+          },
+          "409": {
+            "description": "`enrichment_processing` — still running. `no_data_found` — finished with nothing; the credits were refunded. `enrichment_failed` — the batch failed.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/Error" } }
+            }
+          },
+          "429": { "$ref": "#/components/responses/RateLimited" }
+        }
+      }
+    },
+    "/account/info": {
+      "get": {
+        "tags": ["Account"],
+        "summary": "Get account info",
+        "operationId": "getAccountInfo",
+        "description": "Your account, plan and the limits actually enforced on it. Free.\n\nRead `limits` — it is what is enforced. `plan_defaults` is the catalogue value for your plan and differs only if a limit was raised for you individually.",
+        "responses": {
+          "200": {
+            "description": "Account details.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/AccountInfo" }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "429": { "$ref": "#/components/responses/RateLimited" }
+        }
+      }
+    },
+    "/account/credits": {
+      "get": {
+        "tags": ["Account"],
+        "summary": "Get credit balance",
+        "operationId": "getCredits",
+        "description": "What is left this period. Free.\n\n**Credits do not roll over.** Each period restarts at `limit` — 25,000 with 8,000 unspent renews at 25,000, not 33,000. The one exception is a mid-period upgrade, which keeps the remaining balance and adds the new plan's allowance on top.\n\nThere is no credit-threshold webhook to subscribe to; poll this endpoint if you want an alert.",
+        "responses": {
+          "200": {
+            "description": "Credit balance.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Credits" }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "429": { "$ref": "#/components/responses/RateLimited" }
+        }
+      }
+    },
+    "/account/usage": {
+      "get": {
+        "tags": ["Account"],
+        "summary": "Get usage statistics",
+        "operationId": "getUsage",
+        "description": "Aggregate usage for the current period. Free.\n\nThis is a summary and takes no parameters — it does not paginate. For the individual calls, use `GET /account/history`.",
+        "responses": {
+          "200": {
+            "description": "Usage summary.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Usage" }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "429": { "$ref": "#/components/responses/RateLimited" }
+        }
+      }
+    },
+    "/account/history": {
+      "get": {
+        "tags": ["Account"],
+        "summary": "Get request history",
+        "operationId": "getRequestHistory",
+        "description": "Every request this key has made, newest first. Free.",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Rows per page. Capped at 100 — a larger value is silently reduced.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 50
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "description": "Rows to skip. Page 2 of 50 is `offset=50`.",
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Paginated request log.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/RequestHistory" }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "429": { "$ref": "#/components/responses/RateLimited" }
+        }
+      }
+    },
+    "/account/webhook": {
+      "post": {
+        "tags": ["Account"],
+        "summary": "Set your webhook URL",
+        "operationId": "setWebhook",
+        "description": "Store one webhook URL on the account so you do not have to send `X-Webhook-URL` on every call. Free.\n\n**There is nothing to subscribe to.** That one URL receives every event for the account — `enrichment.completed`, `enrichment.failed`, `enrichment.no_data_found`. No `events` array, no per-event filtering.\n\nYour signing secret is not returned here; it lives in the API Panel, where you can also rotate it.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["webhook_url"],
+                "properties": {
+                  "webhook_url": {
+                    "type": "string",
+                    "format": "uri",
+                    "maxLength": 255,
+                    "description": "Must be `https://`. Plain http is rejected — the payload identifies the account, and the signature is only worth having over a channel nobody can rewrite in transit.",
+                    "examples": ["https://webhook.site/YOUR-ID"]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Stored.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean", "examples": [true] },
+                    "message": { "type": "string", "examples": ["Webhook URL updated successfully"] },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "webhook_url": { "type": "string", "examples": ["https://webhook.site/YOUR-ID"] }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "422": {
+            "description": "`invalid_webhook_url` — a placeholder host was sent. `example.com`, `your-domain.com`, `your-unique-url`, `localhost` and `127.0.0.1` are all refused, so do not paste the literal example from a tutorial.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" },
+                "examples": {
+                  "invalid_webhook_url": {
+                    "value": {
+                      "success": false,
+                      "error": "invalid_webhook_url",
+                      "message": "Please provide a real webhook URL, not a placeholder or example domain.",
+                      "hint": "For quick testing, get a free URL from https://webhook.site"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "429": { "$ref": "#/components/responses/RateLimited" }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "apiKey": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-API-Key",
+        "description": "Your API key, from the [API Panel](https://bouncewatch.com/api-panel/api-keys)."
+      }
+    },
+    "headers": {
+      "RateLimitLimit": {
+        "description": "Requests allowed per minute on this plan.",
+        "schema": { "type": "integer", "examples": [150] }
+      },
+      "RateLimitRemaining": {
+        "description": "Requests left in the current minute.",
+        "schema": { "type": "integer", "examples": [145] }
+      },
+      "RateLimitReset": {
+        "description": "Unix timestamp when the current window resets.",
+        "schema": { "type": "integer", "examples": [1786011345] }
+      }
+    },
+    "responses": {
+      "Unauthorized": {
+        "description": "`missing_api_key` — no key was sent. `invalid_api_key` — the key is not valid. `api_key_disabled`, `ip_not_allowed` and `subscription_required` also land here.",
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/Error" },
+            "examples": {
+              "missing_api_key": {
+                "value": {
+                  "success": false,
+                  "error": "missing_api_key",
+                  "message": "Please provide your API key in X-API-Key header or api_key parameter"
+                }
+              }
+            }
+          }
+        }
+      },
+      "InsufficientCredits": {
+        "description": "`insufficient_credits` — not enough balance for the modules requested. Nothing was charged.",
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/Error" },
+            "examples": {
+              "insufficient_credits": {
+                "value": {
+                  "success": false,
+                  "error": "insufficient_credits",
+                  "message": "Insufficient credits for enrichment",
+                  "credits_required": 26,
+                  "credits_available": 15
+                }
+              }
+            }
+          }
+        }
+      },
+      "RateLimited": {
+        "description": "`rate_limit_exceeded` — too many requests. `concurrent_limit_reached` — too many enrichments running at once. `Retry-After` says how long to wait.",
+        "headers": {
+          "Retry-After": {
+            "description": "Seconds to wait before retrying.",
+            "schema": { "type": "integer", "examples": [45] }
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/Error" },
+            "examples": {
+              "rate_limit_exceeded": {
+                "value": {
+                  "success": false,
+                  "error": "rate_limit_exceeded",
+                  "message": "Rate limit exceeded. Please retry after 45 seconds.",
+                  "retry_after": 45,
+                  "limits": {
+                    "per_minute": 150,
+                    "per_day": 5000,
+                    "current_minute": 150,
+                    "current_day": 3204
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "schemas": {
+      "Error": {
+        "type": "object",
+        "description": "Every failure carries a machine-readable `error` code. Branch on that, never on `message` — the wording changes, the code does not.",
+        "properties": {
+          "success": { "type": "boolean", "examples": [false] },
+          "error": {
+            "type": "string",
+            "description": "Stable machine-readable code.",
+            "examples": ["webhook_required"]
+          },
+          "message": {
+            "type": "string",
+            "description": "Human-readable explanation. Not stable — do not parse it.",
+            "examples": ["Webhook URL is required for enrichment requests"]
+          },
+          "hint": { "type": "string" },
+          "documentation": { "type": "string" }
+        },
+        "required": ["success", "error"]
+      },
+      "CompanyCached": {
+        "type": "object",
+        "properties": {
+          "success": { "type": "boolean", "examples": [true] },
+          "data": {
+            "type": "object",
+            "description": "The enriched company. Which keys are present depends on the modules requested — see [Response Schema](/api-reference/response-schema) for the full shape.",
+            "additionalProperties": true,
+            "examples": [
+              {
+                "company": {
+                  "name": "Stripe",
+                  "domain": "stripe.com",
+                  "description": "Financial infrastructure for the internet",
+                  "founded_year": 2010,
+                  "employee_count": 8000
+                },
+                "funding": {
+                  "total_funding": 8700000000,
+                  "funding_stage": "Series I"
+                }
+              }
+            ]
+          },
+          "credits_used": {
+            "type": "integer",
+            "description": "`0` when served from the 24-hour cache.",
+            "examples": [0]
+          },
+          "from_recent_enrichment": { "type": "boolean", "examples": [true] },
+          "credits_remaining": { "type": "integer", "examples": [4500] }
+        }
+      },
+      "EnrichmentQueued": {
+        "type": "object",
+        "description": "The 202 comes in two shapes depending on whether we already hold the company. Both always carry `success`, `batch_id`, `credits_reserved`, `status_endpoint` and `results_endpoint` — key your integration on those five.\n\nWhen we already hold the company you also get `current_data` (possibly stale, there so you have something to show while the refresh runs) and `modules_requested`. When the domain is new to us there is no `current_data`, the module list is called `requested_modules`, and `credits_remaining` is included.",
+        "properties": {
+          "success": { "type": "boolean", "examples": [true] },
+          "batch_id": { "type": "string", "examples": ["batch_1gVwXby8PsYHoMQR"] },
+          "enrichment_status": { "type": "string", "examples": ["processing"] },
+          "credits_reserved": {
+            "type": "integer",
+            "description": "Reserved now, refunded in full if the batch produces nothing.",
+            "examples": [26]
+          },
+          "credits_remaining": { "type": "integer", "examples": [4974] },
+          "status_endpoint": {
+            "type": "string",
+            "examples": ["https://api.bouncewatch.com/api/v1/enrichment/batch_1gVwXby8PsYHoMQR/status"]
+          },
+          "results_endpoint": {
+            "type": "string",
+            "examples": ["https://api.bouncewatch.com/api/v1/enrichment/batch_1gVwXby8PsYHoMQR/results"]
+          },
+          "webhook_notification": { "type": "string", "examples": ["enabled"] },
+          "current_data": {
+            "type": "object",
+            "description": "Only when we already held the company. Possibly stale, possibly incomplete.",
+            "additionalProperties": true
+          },
+          "modules_requested": {
+            "type": "array",
+            "items": { "type": "string" },
+            "examples": [["business", "funding"]]
+          },
+          "requested_modules": {
+            "type": "array",
+            "description": "The same list, under this name, when the domain is new to us.",
+            "items": { "type": "string" }
+          },
+          "message": { "type": "string" },
+          "hint": { "type": "string" }
+        },
+        "required": ["success", "batch_id", "credits_reserved", "status_endpoint", "results_endpoint"]
+      },
+      "EnrichmentStatus": {
+        "type": "object",
+        "properties": {
+          "success": { "type": "boolean", "examples": [true] },
+          "batch_id": { "type": "string", "examples": ["batch_1gVwXby8PsYHoMQR"] },
+          "domain": { "type": "string", "examples": ["stripe.com"] },
+          "status": {
+            "type": "string",
+            "enum": ["queued", "processing", "completed", "failed", "no_data_found"],
+            "examples": ["processing"]
+          },
+          "requested_modules": {
+            "type": "array",
+            "items": { "type": "string" },
+            "examples": [["business", "technology"]]
+          },
+          "message": { "type": ["string", "null"] },
+          "credits": {
+            "type": "object",
+            "properties": {
+              "reserved": { "type": "integer", "examples": [20] },
+              "used": { "type": "integer", "examples": [0] },
+              "refunded": { "type": "integer", "examples": [0] }
+            }
+          },
+          "timing": {
+            "type": "object",
+            "properties": {
+              "requested_at": { "type": "string", "format": "date-time" },
+              "started_at": { "type": ["string", "null"], "format": "date-time" },
+              "completed_at": { "type": ["string", "null"], "format": "date-time" },
+              "duration_seconds": { "type": ["number", "null"] }
+            }
+          },
+          "webhook": {
+            "type": "object",
+            "properties": {
+              "url": { "type": ["string", "null"] },
+              "sent_at": { "type": ["string", "null"], "format": "date-time" },
+              "status": { "type": ["string", "null"] },
+              "retries": { "type": "integer", "examples": [0] }
+            }
+          },
+          "results_endpoint": {
+            "type": ["string", "null"],
+            "description": "`null` until the batch completes."
+          }
+        }
+      },
+      "EnrichmentResults": {
+        "type": "object",
+        "properties": {
+          "success": { "type": "boolean", "examples": [true] },
+          "batch_id": { "type": "string", "examples": ["batch_1gVwXby8PsYHoMQR"] },
+          "domain": { "type": "string", "examples": ["stripe.com"] },
+          "status": { "type": "string", "examples": ["completed"] },
+          "data": {
+            "type": "object",
+            "description": "The enriched company — see [Response Schema](/api-reference/response-schema) for the full shape.",
+            "additionalProperties": true
+          },
+          "credits_used": { "type": "integer", "examples": [26] },
+          "credits_refunded": {
+            "type": "integer",
+            "description": "Full refund when the batch produced nothing.",
+            "examples": [0]
+          },
+          "credits_breakdown": {
+            "type": "object",
+            "additionalProperties": true,
+            "examples": [{ "base": 10, "enrichments": { "funding": 10, "team": 6 } }]
+          },
+          "modules_included": {
+            "type": "array",
+            "items": { "type": "string" },
+            "examples": [["base", "funding", "team"]]
+          },
+          "completed_at": { "type": "string", "format": "date-time" }
+        }
+      },
+      "AccountInfo": {
+        "type": "object",
+        "properties": {
+          "success": { "type": "boolean", "examples": [true] },
+          "data": {
+            "type": "object",
+            "properties": {
+              "account": {
+                "type": "object",
+                "properties": {
+                  "id": { "type": "integer", "examples": [1042] },
+                  "name": { "type": "string", "examples": ["John Doe"] },
+                  "email": { "type": "string", "examples": ["john@company.com"] },
+                  "company_name": { "type": ["string", "null"], "examples": ["Acme Corp"] },
+                  "plan_type": {
+                    "type": "string",
+                    "enum": ["trial", "starter", "professional", "business", "enterprise"],
+                    "examples": ["professional"]
+                  },
+                  "status": { "type": "string", "examples": ["active"] },
+                  "created_at": { "type": "string", "format": "date-time" }
+                }
+              },
+              "limits": {
+                "type": "object",
+                "description": "What is actually enforced on your account. Read this one.",
+                "properties": {
+                  "credits_per_month": { "type": "integer", "examples": [25000] },
+                  "rate_per_minute": { "type": "integer", "examples": [150] },
+                  "rate_per_day": { "type": "integer", "examples": [5000] }
+                }
+              },
+              "plan_defaults": {
+                "type": "object",
+                "description": "Catalogue values for the plan. Differs from `limits` only if a limit was raised for you individually.",
+                "properties": {
+                  "credits_per_month": { "type": "integer", "examples": [25000] },
+                  "rate_per_minute": { "type": "integer", "examples": [150] },
+                  "rate_per_day": { "type": "integer", "examples": [5000] }
+                }
+              },
+              "rate_limits": {
+                "type": "object",
+                "description": "The rate half of `limits`, kept for backwards compatibility.",
+                "properties": {
+                  "per_minute": { "type": "integer", "examples": [150] },
+                  "per_day": { "type": "integer", "examples": [5000] }
+                }
+              }
+            }
+          }
+        }
+      },
+      "Credits": {
+        "type": "object",
+        "properties": {
+          "success": { "type": "boolean", "examples": [true] },
+          "data": {
+            "type": "object",
+            "properties": {
+              "credits": {
+                "type": "object",
+                "properties": {
+                  "balance": {
+                    "type": "integer",
+                    "description": "Credits you can still spend this period. This is the number to watch.",
+                    "examples": [21000]
+                  },
+                  "used": {
+                    "type": "integer",
+                    "description": "Consumed this period. Returns to 0 at each renewal.",
+                    "examples": [4000]
+                  },
+                  "limit": {
+                    "type": "integer",
+                    "description": "Your plan's allowance for the period.",
+                    "examples": [25000]
+                  },
+                  "total_purchased": {
+                    "type": "integer",
+                    "description": "Lifetime total ever added by purchase. 0 on a free trial.",
+                    "examples": [0]
+                  },
+                  "percentage_used": {
+                    "type": "number",
+                    "description": "`used / limit`, as a percentage of this period's allowance.",
+                    "examples": [16]
+                  },
+                  "resets_at": {
+                    "type": ["string", "null"],
+                    "format": "date-time",
+                    "description": "When the allowance was last renewed. `null` if it never has been."
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "Usage": {
+        "type": "object",
+        "properties": {
+          "success": { "type": "boolean", "examples": [true] },
+          "data": {
+            "type": "object",
+            "properties": {
+              "current_limits": {
+                "type": "object",
+                "description": "Live counters behind your rate limits.",
+                "properties": {
+                  "requests_today": { "type": "integer", "examples": [45] },
+                  "requests_this_minute": { "type": "integer", "examples": [2] },
+                  "last_request": { "type": ["string", "null"], "format": "date-time" }
+                }
+              },
+              "monthly_usage": {
+                "type": "object",
+                "description": "Totals for the current calendar month.",
+                "properties": {
+                  "requests": { "type": "integer", "examples": [1250] },
+                  "credits_consumed": { "type": "integer", "examples": [3200] },
+                  "period": {
+                    "type": "object",
+                    "properties": {
+                      "start": { "type": "string", "format": "date-time" },
+                      "end": { "type": "string", "format": "date-time" }
+                    }
+                  }
+                }
+              },
+              "top_endpoints": {
+                "type": "array",
+                "description": "Your ten busiest endpoints this month.",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "endpoint": { "type": "string", "examples": ["/api/v1/company/stripe.com"] },
+                    "requests": { "type": "integer", "examples": [42] },
+                    "credits_used": { "type": "integer", "examples": [520] },
+                    "avg_credits_per_request": { "type": "number", "examples": [12.38] }
+                  }
+                }
+              },
+              "recent_requests": {
+                "type": "array",
+                "description": "Your last 20 requests. For more, page through `/account/history`.",
+                "items": { "$ref": "#/components/schemas/RequestLogEntry" }
+              }
+            }
+          }
+        }
+      },
+      "RequestLogEntry": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "integer", "examples": [90211] },
+          "endpoint": { "type": "string", "examples": ["/api/v1/company/stripe.com"] },
+          "method": { "type": "string", "examples": ["GET"] },
+          "credits_consumed": { "type": "integer", "examples": [26] },
+          "response_status": { "type": "integer", "examples": [202] },
+          "response_time": {
+            "type": "number",
+            "description": "Seconds.",
+            "examples": [0.184]
+          },
+          "requested_at": { "type": "string", "format": "date-time" }
+        }
+      },
+      "RequestHistory": {
+        "type": "object",
+        "properties": {
+          "success": { "type": "boolean", "examples": [true] },
+          "data": {
+            "type": "object",
+            "properties": {
+              "requests": {
+                "type": "array",
+                "items": { "$ref": "#/components/schemas/RequestLogEntry" }
+              },
+              "pagination": {
+                "type": "object",
+                "properties": {
+                  "total": { "type": "integer", "examples": [1250] },
+                  "limit": { "type": "integer", "examples": [50] },
+                  "offset": { "type": "integer", "examples": [0] },
+                  "has_more": { "type": "boolean", "examples": [true] }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
