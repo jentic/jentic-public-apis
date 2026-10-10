@@ -1,0 +1,2567 @@
+openapi: 3.1.0
+
+info:
+  title: WPConvert Developer API
+  version: 1.0.0
+  summary: Convert frontend projects into installable WordPress themes.
+  description: >-
+    The WPConvert Developer API converts a zipped frontend project (static HTML,
+    or a build output from tools such as Lovable, v0, Bolt, Cursor, Replit, or
+    Framer) into an installable WordPress theme.
+
+
+    ## Versioning
+
+
+    `info.version` is the version of this API **document**, not of the developer
+    tooling. The published CLI (`wpconvert`) and MCP server (`@wpconvert/mcp`)
+    are versioned independently and are currently at `0.3.0`.
+
+
+    ## Typical flow
+
+
+    1. `GET /api/convert/quota` — preflight. Read `capabilities.conversion` to
+       learn whether a conversion may start and what it will consume.
+    2. Submit the project: `POST /api/convert` for archives up to the multipart
+       ceiling, or the signed-upload flow (`POST /api/convert/upload-url`, an
+       external `PUT`, then `POST /api/convert/from-storage`) for larger inputs.
+    3. Poll `GET /api/convert/{jobId}/status` until `status` is `done` or `failed`.
+    4. On success, call `GET /api/download/{projectId}` for a short-lived signed
+       theme URL, and/or `POST /api/playground/sessions` for an in-browser
+       WordPress Playground preview.
+
+
+    ## Conversion modes
+
+
+    A submission resolves to one of two modes, reported as `conversion_mode`:
+
+
+    - `full` — a downloadable theme. Requires Pro/Agency entitlement or credits.
+    - `preview_only` — a free developer preview. Previewable in Playground but
+      **never downloadable**, even after a later upgrade. Running a paid
+      conversion again is required to obtain a downloadable artifact.
+
+
+    Use `capabilities.conversion.mode` from the quota endpoint to determine which
+    mode the next submission will use.
+
+
+    ## Response envelope variance
+
+
+    This API predates a unified error envelope, and the current production
+    behavior is deliberately documented as-is rather than normalized. API-key
+    requests usually receive `{"error": {"code", "message"}}`, but several
+    endpoints still emit legacy flat shapes. Operations that can return more than
+    one shape model that with `oneOf`. Branch on the HTTP status first, then on
+    `error.code` when the nested object is present.
+
+
+    ## Operational limits
+
+
+    The values below are the current production defaults. They are
+    environment-configurable and may change without a change to this document.
+    The stable part of the contract is the error **code** and response behavior,
+    not the exact counts.
+
+
+    | Limit | Current default |
+    | --- | --- |
+    | Conversion submissions (standard API key) | 3/min, 20/hour |
+    | Conversion submissions (preview-only entitlement) | 2/min, 5/hour |
+    | Status polling | 30/min |
+    | Concurrent in-flight conversions | Agency 3, Pro 2, PAYG 1, preview-only 1 |
+    | Signed upload URL creation | 20 per 10 minutes |
+    | Playground sessions | 10/hour |
+
+
+    Exceeding a throttle returns `rate_limited`; exceeding the concurrency cap
+    returns `too_many_active_jobs`.
+  contact:
+    name: WPConvert Support
+    url: https://wpconvert.ai/developers
+  license:
+    name: Proprietary
+    url: https://wpconvert.ai/terms
+
+servers:
+  - url: https://api.wpconvert.ai
+    description: Production
+
+security:
+  - ApiKeyAuth: []
+  - BearerAuth: []
+
+tags:
+  - name: Capabilities
+    description: >-
+      Preflight. Quota, entitlement, and the normalized developer capability
+      contract describing what the next conversion will do.
+  - name: Conversions
+    description: >-
+      Submitting conversions, either as a direct multipart upload or through the
+      signed-upload flow for larger archives.
+  - name: Status
+    description: Polling the lifecycle of a submitted conversion.
+  - name: Downloads
+    description: Resolving a short-lived signed URL for a completed theme.
+  - name: Playground
+    description: Creating in-browser WordPress Playground preview sessions.
+
+paths:
+  /api/convert/quota:
+    get:
+      operationId: getQuota
+      summary: Get quota and developer capabilities
+      description: >-
+        Returns the caller's current usage counters plus an additive
+        `capabilities` object describing what the next conversion would do.
+
+
+        This is the preflight endpoint for programmatic clients; there is no
+        separate capabilities URL. The released CLI and MCP server both call it
+        before building an archive so that an ineligible submission fails without
+        spending upload bandwidth or a credit.
+
+
+        Prefer `capabilities.conversion` over the flat legacy fields. In
+        particular, `capabilities.conversion.mode` accounts for API-key
+        authentication and feature flags, whereas the flat `api_conversion_mode`
+        reflects only plan-level entitlement.
+      tags: [Capabilities]
+      x-audience: developer
+      parameters:
+        - $ref: '#/components/parameters/ClientHeader'
+        - $ref: '#/components/parameters/ToolHeader'
+      responses:
+        '200':
+          description: >-
+            Current quota and capabilities. API-key responses omit
+            subscription/billing identifiers and internal rollout flags that are
+            only used by the dashboard.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QuotaResponse'
+              examples:
+                agencyFullMode:
+                  $ref: '#/components/examples/AgencyQuota'
+                starterPreviewOnly:
+                  $ref: '#/components/examples/StarterPreviewOnlyQuota'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          description: Quota lookup failed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LegacyFlatError'
+
+  /api/convert:
+    post:
+      operationId: submitConversion
+      summary: Submit a conversion (multipart upload)
+      description: >-
+        Uploads a zipped project and queues a conversion. Returns immediately
+        with a `jobId`; conversion runs asynchronously and can take several
+        minutes. Poll `GET /api/convert/{jobId}/status` for progress.
+
+
+        ## Archive size
+
+
+        The request body streams through the API, so this route is intended for
+        small and medium archives. Per-plan ceilings currently apply: Starter up
+        to 50 MB, paid modes (Pro, Agency, PAYG) up to 100 MB. An archive that
+        exceeds the caller's ceiling is rejected with `413`. For larger inputs,
+        use the signed-upload flow starting at `POST /api/convert/upload-url`;
+        the released CLI switches to that flow above 50 MB.
+
+
+        ## Export type
+
+
+        API-key conversions currently produce a WordPress theme only. Requesting
+        `elementor` or `gutenberg` with an API key returns `400`
+        `unsupported_export_type`. Those export types exist for the dashboard and
+        are not part of the developer contract yet.
+
+
+        ## Idempotency
+
+
+        Supplying `Idempotency-Key` makes the submission safely retryable after an
+        ambiguous transport failure. See the parameter description for replay
+        semantics.
+      tags: [Conversions]
+      x-audience: developer
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKeyHeader'
+        - $ref: '#/components/parameters/ClientHeader'
+        - $ref: '#/components/parameters/ToolHeader'
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ConversionSubmissionMultipartRequest'
+            encoding:
+              file:
+                contentType: application/zip
+      responses:
+        '200':
+          description: >-
+            Conversion queued, or an idempotent replay of an already-completed
+            submission. When the response is a replay, `idempotent_replay` is
+            `true` and the `Idempotent-Replay` header is set.
+          headers:
+            Idempotent-Replay:
+              $ref: '#/components/headers/IdempotentReplay'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConversionSubmissionResponse'
+              examples:
+                fullConversion:
+                  $ref: '#/components/examples/FullConversionSubmission'
+                previewOnlyConversion:
+                  $ref: '#/components/examples/PreviewOnlyConversionSubmission'
+                completedReplay:
+                  $ref: '#/components/examples/CompletedIdempotentReplay'
+        '202':
+          description: >-
+            Idempotent replay of a submission that is still being processed and
+            has a resolved job. The body may carry the synthetic `processing`
+            status; see `ConversionSubmissionResponse.status`.
+          headers:
+            Idempotent-Replay:
+              $ref: '#/components/headers/IdempotentReplay'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConversionSubmissionResponse'
+              examples:
+                inFlightReplay:
+                  $ref: '#/components/examples/InFlightIdempotentReplay'
+        '400':
+          description: >-
+            Invalid submission. Returns the API-key envelope for
+            `unsupported_export_type` and `invalid_idempotency_key`, but a legacy
+            flat body for archive-level rejections raised before the API-key
+            error mapper runs (missing file, non-zip upload).
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/ApiKeyError'
+                  - $ref: '#/components/schemas/LegacyFlatError'
+              examples:
+                unsupportedExportType:
+                  summary: Elementor/Gutenberg requested with an API key
+                  value:
+                    error:
+                      code: unsupported_export_type
+                      message: >-
+                        "elementor" conversions aren't available via the API yet
+                        — only "theme" is supported right now.
+                      supported_types: [theme]
+                noFileUploaded:
+                  summary: Legacy flat body from the upload middleware
+                  value:
+                    error: No file uploaded
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '402':
+          $ref: '#/components/responses/InsufficientCredits'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '413':
+          $ref: '#/components/responses/ArchiveTooLarge'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        '503':
+          description: >-
+            The idempotency store was unavailable, so the submission was not
+            accepted. Retry with the same `Idempotency-Key`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiKeyError'
+
+  /api/convert/upload-url:
+    post:
+      operationId: createUploadUrl
+      summary: Create a signed upload URL for a large archive
+      description: >-
+        Step 1 of the signed-upload flow. Mints a short-lived, single-object
+        signed URL so the client can upload an archive directly to object
+        storage, bypassing the multipart body limit of `POST /api/convert`.
+
+
+        ## Full flow
+
+
+        1. `POST /api/convert/upload-url` — returns `jobId` and `signedUrl`.
+        2. `PUT` the archive bytes to `signedUrl`. **This request goes to the
+           storage provider, not to `api.wpconvert.ai`**, so it is not modeled as
+           a path in this document. Send these headers:
+
+
+           ```
+           Content-Type: application/zip
+           x-upsert: true
+           ```
+
+
+           Do not send your WPConvert API key to the signed URL; the URL itself
+           carries the upload capability.
+        3. `POST /api/convert/from-storage` with the same `jobId` to queue the
+           conversion.
+
+
+        No conversion record is created by this call. An upload that never
+        reaches step 3 is swept as an orphan. Because nothing gates issuance,
+        this route is rate-limited (currently 20 per 10 minutes per account) and
+        returns a legacy flat body when throttled.
+
+
+        Compare `maxSizeMB` against your archive before uploading; the same
+        ceiling is enforced authoritatively at step 3.
+      tags: [Conversions]
+      x-audience: developer
+      parameters:
+        - $ref: '#/components/parameters/ClientHeader'
+        - $ref: '#/components/parameters/ToolHeader'
+      responses:
+        '200':
+          description: Signed upload target created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UploadUrlResponse'
+              examples:
+                signedUploadWorkflow:
+                  $ref: '#/components/examples/SignedUploadWorkflow'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '429':
+          description: >-
+            Too many signed upload URLs requested. This route predates the
+            API-key error envelope and returns a legacy flat body with a
+            `retryAfterSeconds` field, alongside the `Retry-After` header.
+          headers:
+            Retry-After:
+              $ref: '#/components/headers/RetryAfter'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LegacyFlatError'
+              examples:
+                uploadUrlThrottled:
+                  summary: Legacy flat throttle body
+                  value:
+                    error: rate_limited
+                    message: Too many upload requests. Please wait a moment and try again.
+                    retryAfterSeconds: 42
+        '500':
+          description: Could not create the upload URL.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LegacyFlatError'
+
+  /api/convert/from-storage:
+    post:
+      operationId: submitConversionFromStorage
+      summary: Submit a conversion from a previously uploaded archive
+      description: >-
+        Step 3 of the signed-upload flow. Queues a conversion for an archive that
+        was already uploaded to the signed URL returned by
+        `POST /api/convert/upload-url`.
+
+
+        The storage object path is derived server-side from the authenticated
+        account and the supplied `jobId`, so a caller can only ever reference
+        their own upload. The object must exist, be a non-empty archive, and fit
+        within the caller's plan ceiling; a rejected upload is deleted.
+
+
+        Billing, quota, and queueing behave exactly as in
+        `POST /api/convert`, and the same idempotency semantics apply. Several
+        precondition failures on this route return legacy flat bodies rather than
+        the API-key envelope.
+      tags: [Conversions]
+      x-audience: developer
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKeyHeader'
+        - $ref: '#/components/parameters/ClientHeader'
+        - $ref: '#/components/parameters/ToolHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConversionFromStorageRequest'
+            examples:
+              fromStorage:
+                summary: Queue a conversion for an uploaded archive
+                value:
+                  jobId: 11111111-1111-4111-8111-111111111111
+                  project_name: Example site
+                  export_type: theme
+                  platform: api
+      responses:
+        '200':
+          description: >-
+            Conversion queued, or an idempotent replay of an already-completed
+            submission.
+          headers:
+            Idempotent-Replay:
+              $ref: '#/components/headers/IdempotentReplay'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConversionSubmissionResponse'
+              examples:
+                fullConversion:
+                  $ref: '#/components/examples/FullConversionSubmission'
+                completedReplay:
+                  $ref: '#/components/examples/CompletedIdempotentReplay'
+        '202':
+          description: >-
+            Idempotent replay of a submission that is still processing and has a
+            resolved job.
+          headers:
+            Idempotent-Replay:
+              $ref: '#/components/headers/IdempotentReplay'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConversionSubmissionResponse'
+              examples:
+                inFlightReplay:
+                  $ref: '#/components/examples/InFlightIdempotentReplay'
+        '400':
+          description: >-
+            Invalid or unusable submission. `invalid_idempotency_key` and
+            `unsupported_export_type` use the API-key envelope; a malformed
+            `jobId` or an empty uploaded object returns a legacy flat body.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/ApiKeyError'
+                  - $ref: '#/components/schemas/LegacyFlatError'
+              examples:
+                invalidJobId:
+                  summary: Malformed jobId
+                  value:
+                    error: A valid jobId is required
+                emptyUpload:
+                  summary: Uploaded object was empty
+                  value:
+                    error: empty_upload
+                    message: The uploaded file is empty.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '402':
+          $ref: '#/components/responses/InsufficientCredits'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: >-
+            No uploaded object exists for this `jobId`. Complete the `PUT` to the
+            signed URL first. Returns a legacy flat body.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LegacyFlatError'
+              examples:
+                uploadNotFound:
+                  summary: Archive was never uploaded
+                  value:
+                    error: upload_not_found
+                    message: >-
+                      No uploaded file found for this jobId. PUT the zip to the
+                      signed URL first.
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '413':
+          $ref: '#/components/responses/ArchiveTooLarge'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        '503':
+          description: >-
+            The idempotency store was unavailable. Retry with the same
+            `Idempotency-Key`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiKeyError'
+
+  /api/convert/{jobId}/status:
+    get:
+      operationId: getConversionStatus
+      summary: Get conversion status
+      description: >-
+        Returns the current state of a conversion. Poll until `status` is `done`
+        or `failed`.
+
+
+        `status` values other than `done` and `failed` are pipeline stages and
+        should be treated as "still working" rather than branched on
+        individually. Progress reporting is advisory.
+
+
+        This response is shared with the dashboard, so it still carries some
+        fields that only the web UI consumes (share-unlock state, plan badges,
+        delta-entitlement flags). Programmatic clients should read `status`,
+        `progress`, `conversion_mode`, `preview_only`, `download_available`,
+        `preview_available`, and `error`.
+
+
+        `download_url` is populated only when the caller is actually entitled and
+        the artifact still exists; otherwise it is `null` and
+        `GET /api/download/{projectId}` is the correct way to obtain a link.
+
+
+        Polling is currently limited to 30 requests per minute.
+      tags: [Status]
+      x-audience: developer
+      parameters:
+        - $ref: '#/components/parameters/JobIdPath'
+        - $ref: '#/components/parameters/ClientHeader'
+        - $ref: '#/components/parameters/ToolHeader'
+      responses:
+        '200':
+          description: Current conversion state.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConversionStatus'
+              examples:
+                processing:
+                  $ref: '#/components/examples/ProcessingStatus'
+                completedDownloadable:
+                  $ref: '#/components/examples/CompletedDownloadableStatus'
+                completedPreviewOnly:
+                  $ref: '#/components/examples/CompletedPreviewOnlyStatus'
+                failed:
+                  $ref: '#/components/examples/FailedStatus'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/ConversionNotFound'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          description: Status lookup failed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LegacyFlatError'
+
+  /api/download/{projectId}:
+    get:
+      operationId: getDownload
+      summary: Get a download URL for a completed theme
+      description: >-
+        Returns **JSON containing a short-lived signed URL**. This endpoint is
+        not a redirect and does not stream the archive; fetch `download_url` in a
+        separate request to retrieve the theme bytes. Treat the URL as
+        expiring — mint a fresh one rather than storing it.
+
+
+        `projectId` is the same identifier returned as `jobId` at submission.
+
+
+        ## Preview-only conversions
+
+
+        A free developer preview is never downloadable. Upgrading afterwards does
+        not unlock an artifact that was created as `preview_only`; a new
+        conversion must be run under a paid entitlement. Such requests return
+        `403` `upgrade_required` with `preview_only: true`.
+
+
+        ## Response envelope
+
+
+        Ownership, readiness, and preview-only checks return the API-key
+        envelope. Retention expiry, unlock requirements, and link-signing
+        failures predate that mapper and return legacy flat bodies.
+      tags: [Downloads]
+      x-audience: developer
+      parameters:
+        - $ref: '#/components/parameters/ProjectIdPath'
+        - $ref: '#/components/parameters/ClientHeader'
+        - $ref: '#/components/parameters/ToolHeader'
+      responses:
+        '200':
+          description: A signed, short-lived download URL.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DownloadResponse'
+              examples:
+                downloadSuccess:
+                  $ref: '#/components/examples/DownloadSuccess'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: >-
+            Download not permitted. Preview-only developer conversions return the
+            API-key envelope with `upgrade_required`; dashboard-oriented unlock
+            and payment states return legacy flat bodies.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/ApiKeyError'
+                  - $ref: '#/components/schemas/LegacyFlatError'
+              examples:
+                previewOnlyDenied:
+                  $ref: '#/components/examples/PreviewOnlyDownloadDenied'
+                unlockRequired:
+                  summary: Legacy unlock-required body
+                  value:
+                    error: Unlock required
+                    message: This conversion requires unlock.
+                    requiresUnlock: true
+                    has_download_access: false
+        '404':
+          $ref: '#/components/responses/ConversionNotFound'
+        '409':
+          description: >-
+            The conversion has not finished. Keep polling
+            `GET /api/convert/{jobId}/status` until `status` is `done`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiKeyError'
+              examples:
+                notReady:
+                  summary: Conversion still running
+                  value:
+                    error:
+                      code: conversion_not_ready
+                      message: >-
+                        Conversion is not ready for download (status:
+                        generating). Keep polling status until it is "done".
+                      status: generating
+        '410':
+          description: >-
+            The theme artifact was deleted under the storage retention policy.
+            Returns a legacy flat body.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LegacyFlatError'
+              examples:
+                themeExpired:
+                  summary: Retention window elapsed
+                  value:
+                    error: Theme expired
+                    message: >-
+                      This theme has been deleted due to storage retention
+                      policy.
+                    storage_cleaned: true
+                    retention_days: 30
+                    project_age_days: 47
+        '500':
+          description: Download lookup failed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LegacyFlatError'
+        '503':
+          description: >-
+            The artifact exists but a signed URL could not be produced. Retry
+            shortly. Returns a legacy flat body.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LegacyFlatError'
+              examples:
+                signingUnavailable:
+                  summary: Link signing temporarily failed
+                  value:
+                    error: Download temporarily unavailable
+                    message: >-
+                      We could not prepare your download link. Please try again
+                      in a moment.
+
+  /api/playground/sessions:
+    post:
+      operationId: createPlaygroundSession
+      summary: Create a WordPress Playground preview session
+      description: >-
+        Creates an on-demand, expiring session that boots the converted theme in
+        an in-browser WordPress Playground. Open the returned `playground_url`.
+
+
+        ## Availability is decided per request
+
+
+        Three related signals must not be conflated:
+
+
+        - `capabilities.outputs.playground.supported` — the product supports
+          Playground for this account. It is not a guarantee for any given job.
+        - `capabilities.outputs.playground.available_after_conversion` — a
+          successful conversion is expected to be previewable.
+        - `preview_available` on the status response — a per-job hint that a
+          session can probably be created right now (conversion done, artifact
+          present, size within limits).
+        - This endpoint — the only authority. It performs the real ownership,
+          readiness, artifact, size, and rate checks, and only a `200` here means
+          a preview actually exists.
+
+
+        Do not promise a preview to an end user on the strength of a capability
+        flag alone.
+
+
+        Each call creates a **new** session; reopening a preview later means
+        calling this again. Sessions are short-lived (currently 10 minutes) with a
+        bounded number of artifact fetches, and creation is limited to roughly 10
+        sessions per hour.
+
+
+        Additional error codes may be introduced as preview support evolves;
+        treat `error.code` as an open set.
+      tags: [Playground]
+      x-audience: developer
+      parameters:
+        - $ref: '#/components/parameters/ClientHeader'
+        - $ref: '#/components/parameters/ToolHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PlaygroundSessionRequest'
+            examples:
+              createSession:
+                summary: Preview a completed conversion
+                value:
+                  projectId: 11111111-1111-4111-8111-111111111111
+      responses:
+        '200':
+          description: Preview session created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlaygroundSessionResponse'
+              examples:
+                playgroundSession:
+                  $ref: '#/components/examples/PlaygroundSession'
+        '400':
+          description: >-
+            Missing `projectId`, or the conversion is not finished yet
+            (`conversion_not_ready`).
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/ApiKeyError'
+                  - $ref: '#/components/schemas/LegacyFlatError'
+              examples:
+                missingProjectId:
+                  summary: projectId omitted
+                  value:
+                    error:
+                      code: invalid_request
+                      message: A projectId (jobId) is required.
+                notReady:
+                  summary: Conversion still running
+                  value:
+                    error:
+                      code: conversion_not_ready
+                      message: Project conversion must be completed before preview
+                      status: generating
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: >-
+            Preview is not permitted for this artifact, for example when a
+            preview variant is gated behind a rollout flag
+            (`elementor_preview_disabled`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiKeyError'
+        '404':
+          $ref: '#/components/responses/ConversionNotFound'
+        '410':
+          description: >-
+            The theme artifact has expired, so there is nothing to preview
+            (`theme_expired`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiKeyError'
+        '413':
+          description: >-
+            The artifact is too large to boot in the browser
+            (`theme_too_large_for_preview`). Download it and install on a real
+            WordPress site instead.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiKeyError'
+        '422':
+          description: >-
+            The conversion uses a structure the in-browser preview cannot
+            reproduce (`elementor_preview_unsupported_strategy`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiKeyError'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: >-
+        Programmatic API key, the primary authentication method for developer
+        access. Keys look like `wpc_live_` followed by a random string and are
+        created in the WPConvert dashboard under Settings → API & CLI.
+
+
+        Send the key in the `X-API-Key` header. Never place it in a URL, query
+        string, or a request to a signed storage URL, and never commit it.
+
+
+        A key that is unknown, revoked, or malformed returns `401`
+        `invalid_api_key`; the response deliberately does not distinguish between
+        those cases. Omitting credentials entirely returns `401`
+        `missing_credentials`.
+
+
+        API keys operate on the owner's personal workspace and currently produce
+        WordPress theme exports only. Entitlement is re-evaluated from the
+        account on every conversion, so a key does not carry a frozen plan.
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: >-
+        Dashboard session authentication. This is a **separate** mechanism from
+        API keys, not an alternative way to present one: the value is a
+        short-lived session JWT issued to the web application, and API keys are
+        not valid here.
+
+
+        The operations in this document accept a session JWT because the
+        dashboard shares them, and it is documented for completeness.
+        Programmatic integrations should use `ApiKeyAuth`.
+
+
+        Behavior differs in two ways worth noting. Session requests ignore
+        `Idempotency-Key` entirely, and several error responses use legacy
+        dashboard shapes instead of the API-key envelope. If both a bearer token
+        and an `X-API-Key` header are present, the bearer token wins.
+
+  parameters:
+    JobIdPath:
+      name: jobId
+      in: path
+      required: true
+      description: >-
+        Conversion identifier returned as `jobId` when the conversion was
+        submitted. Identical to the `project_id` / `projectId` used elsewhere.
+      schema:
+        type: string
+        format: uuid
+      example: 11111111-1111-4111-8111-111111111111
+    ProjectIdPath:
+      name: projectId
+      in: path
+      required: true
+      description: >-
+        Conversion identifier. Same value as the `jobId` returned at submission.
+      schema:
+        type: string
+        format: uuid
+      example: 11111111-1111-4111-8111-111111111111
+    ClientHeader:
+      name: X-WPConvert-Client
+      in: header
+      required: false
+      description: >-
+        Optional client attribution, formatted as `name/version`. Recognized
+        names are `cli`, `mcp`, and `api`; anything else is recorded as `api`.
+
+
+        This header only affects attribution and the default platform label
+        recorded on the conversion. It never changes entitlement, limits, or
+        response shape.
+      schema:
+        type: string
+      examples:
+        cli:
+          summary: Official CLI
+          value: cli/0.3.0
+        mcp:
+          summary: Official MCP server
+          value: mcp/0.3.0
+        custom:
+          summary: Custom integration
+          value: api/1.0
+    ToolHeader:
+      name: X-WPConvert-Tool
+      in: header
+      required: false
+      description: >-
+        Optional. Names the specific tool that triggered the request, used by MCP
+        clients so tool-level usage can be attributed. Purely informational.
+      schema:
+        type: string
+      example: wpconvert_convert_folder
+    IdempotencyKeyHeader:
+      name: Idempotency-Key
+      in: header
+      required: false
+      description: >-
+        Optional key that makes a conversion submission safely retryable.
+
+
+        Applies to `POST /api/convert` and `POST /api/convert/from-storage` only,
+        and only for **API-key** requests. Session (JWT) requests ignore this
+        header completely.
+
+
+        ## Format
+
+
+        After trimming, 1 to 128 printable ASCII characters (`0x20`-`0x7E`). A
+        value that fails validation returns `400` `invalid_idempotency_key`. Use
+        a fresh random value, such as a UUID, per intentional conversion; the
+        released CLI and MCP server generate `wpconvert-cli-<uuid>` and
+        `wpconvert-mcp-<uuid>`.
+
+
+        ## Replay semantics
+
+
+        The key is bound to the logical request: the archive contents (or the
+        uploaded object's identity for the storage flow) together with the
+        project name, export type, and platform. Reusing a key is only meaningful
+        for retrying the *same* request.
+
+
+        - Same key, same request, original attempt finished — the stored response
+          is replayed with `200` and `Idempotent-Replay: true`.
+        - Same key, same request, original attempt still running with a resolved
+          job — replayed with `202`.
+        - Same key, same request, original attempt still running with no job yet —
+          `409` `idempotency_request_in_progress`. Retry shortly with the same
+          key.
+        - Same key, **different** request — `409`
+          `idempotency_payload_mismatch`. Use a new key.
+        - Same key, original attempt failed — `409`
+          `idempotency_previous_failed`, carrying the original failure in
+          `original_code` and `original_message`. Use a new key to retry.
+
+
+        The intended pattern is to keep the key stable across retries of one
+        logical submission, especially after an ambiguous transport failure where
+        it is unknown whether the server accepted the request. Replays are exempt
+        from the submission throttle, so a retry is not penalized.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 128
+      example: wpconvert-cli-11111111-2222-4333-8444-555555555555
+
+  headers:
+    IdempotentReplay:
+      description: >-
+        Present and set to `true` when the response is a replay of an earlier
+        submission rather than a newly accepted one. Absent on first submission.
+      required: false
+      schema:
+        type: string
+        enum: ['true']
+    RetryAfter:
+      description: Seconds to wait before retrying.
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+
+  responses:
+    Unauthorized:
+      description: >-
+        Authentication failed. `missing_credentials` when no key or token was
+        supplied, `invalid_api_key` when the key is unknown, revoked, malformed,
+        or key access is not enabled.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiKeyError'
+          examples:
+            missingCredentials:
+              summary: No credentials supplied
+              value:
+                error:
+                  code: missing_credentials
+                  message: >-
+                    Missing credentials. Provide an X-API-Key header or a Bearer
+                    token.
+            invalidApiKey:
+              summary: Unknown or revoked key
+              value:
+                error:
+                  code: invalid_api_key
+                  message: Invalid or revoked API key.
+    Forbidden:
+      description: >-
+        The request is authenticated but not permitted. `upgrade_required` when
+        the account lacks the entitlement for the requested operation, including
+        an exhausted free developer preview allowance. Email verification
+        failures use a distinct legacy `{code, message}` body without an `error`
+        wrapper.
+      content:
+        application/json:
+          schema:
+            oneOf:
+              - $ref: '#/components/schemas/ApiKeyError'
+              - $ref: '#/components/schemas/LegacyCodeMessage'
+          examples:
+            freePreviewsExhausted:
+              $ref: '#/components/examples/FreePreviewsExhausted'
+            emailNotVerified:
+              summary: Legacy code/message body
+              value:
+                code: email_not_verified
+                message: Email not verified
+    InsufficientCredits:
+      description: Not enough credits remain to start a conversion.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiKeyError'
+          examples:
+            insufficientCredits:
+              summary: Out of credits
+              value:
+                error:
+                  code: insufficient_credits
+                  message: >-
+                    You don't have enough credits for this conversion. Buy
+                    credits or upgrade to continue.
+                  required_credits: 1
+                  available_credits: 0
+                  buy_credits_url: https://wpconvert.ai/billing
+    IdempotencyConflict:
+      description: >-
+        The supplied `Idempotency-Key` conflicts with an earlier submission. See
+        the `Idempotency-Key` parameter for when each code is returned and
+        whether the same key may be reused.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiKeyError'
+          examples:
+            requestInProgress:
+              summary: Original attempt still resolving
+              value:
+                error:
+                  code: idempotency_request_in_progress
+                  message: >-
+                    A conversion with this idempotency key is already in
+                    progress.
+            payloadMismatch:
+              $ref: '#/components/examples/IdempotencyPayloadMismatch'
+            previousFailed:
+              summary: Original attempt failed
+              value:
+                error:
+                  code: idempotency_previous_failed
+                  message: >-
+                    This idempotency key was already used for a failed conversion
+                    attempt. Use a new Idempotency-Key to retry.
+                  original_code: insufficient_credits
+                  original_message: >-
+                    You don't have enough credits for this conversion.
+    ArchiveTooLarge:
+      description: >-
+        The archive exceeds the caller's plan ceiling. This response predates the
+        API-key envelope and returns a legacy flat body that includes the
+        applicable ceiling and plan so a client can render accurate guidance.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/LegacyFlatError'
+          examples:
+            archiveTooLarge:
+              summary: Over the plan ceiling
+              value:
+                error: Your upload is larger than your plan's 50MB limit.
+                code: FILE_TOO_LARGE
+                maxSizeMB: 50
+                plan: starter
+                guidance: >-
+                  Starter supports uploads up to 50MB. Upgrade to Pro for up to
+                  100MB, or host large media on a CDN and re-zip.
+    RateLimited:
+      description: >-
+        A throttle or concurrency cap was hit. `rate_limited` means slow down;
+        `too_many_active_jobs` means wait for an in-flight conversion to finish.
+        `quota_exceeded` means the monthly allowance is used up and is not
+        resolved by waiting a moment.
+
+
+        `Retry-After` is set where a wait time is known. Note that the retry hint
+        also appears in the body as `retry_after` on these responses and as
+        `retryAfterSeconds` on `POST /api/convert/upload-url`; there is currently
+        no single universal field.
+      headers:
+        Retry-After:
+          $ref: '#/components/headers/RetryAfter'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiKeyError'
+          examples:
+            rateLimited:
+              summary: Submission throttle
+              value:
+                error:
+                  code: rate_limited
+                  message: >-
+                    Too many requests. Please slow down and try again shortly.
+                  retry_after: 20
+            tooManyActiveJobs:
+              summary: Concurrency cap
+              value:
+                error:
+                  code: too_many_active_jobs
+                  message: >-
+                    You already have the maximum number of conversions in
+                    progress (2/2). Wait for one to finish, then retry.
+                  current: 2
+                  cap: 2
+                  retry_after: 60
+            quotaExceeded:
+              summary: Monthly allowance exhausted
+              value:
+                error:
+                  code: quota_exceeded
+                  message: >-
+                    Monthly conversion quota exceeded. Buy credits or wait until
+                    your quota resets.
+                  buy_credits_url: https://wpconvert.ai/billing
+    ConversionNotFound:
+      description: >-
+        No conversion with this identifier is visible to the caller. Conversions
+        belonging to another account are reported as not found rather than
+        forbidden, so this does not confirm whether the identifier exists.
+      content:
+        application/json:
+          schema:
+            oneOf:
+              - $ref: '#/components/schemas/ApiKeyError'
+              - $ref: '#/components/schemas/LegacyFlatError'
+          examples:
+            notFound:
+              summary: API-key envelope
+              value:
+                error:
+                  code: not_found
+                  message: Conversion not found.
+            notFoundLegacy:
+              summary: Legacy session body
+              value:
+                error: Job not found
+    ServerError:
+      description: >-
+        An unexpected server-side failure. Some paths return the API-key envelope
+        with `server_error`, while others return a legacy flat body with a
+        `details` field.
+      content:
+        application/json:
+          schema:
+            oneOf:
+              - $ref: '#/components/schemas/ApiKeyError'
+              - $ref: '#/components/schemas/LegacyFlatError'
+          examples:
+            serverError:
+              summary: API-key envelope
+              value:
+                error:
+                  code: server_error
+                  message: Internal server error.
+            serverErrorLegacy:
+              summary: Legacy flat body
+              value:
+                error: Failed to start conversion
+                details: Database error
+
+  schemas:
+    ApiKeyError:
+      type: object
+      title: ApiKeyError
+      description: >-
+        The canonical error envelope for API-key requests. `code` is the stable
+        value to branch on; `message` is human-readable and may change. Extra
+        contextual fields are merged into the nested object depending on the code
+        (for example `retry_after`, `buy_credits_url`, `status`, `plan_needed`,
+        `original_code`), so treat the object as extensible.
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+              description: >-
+                Stable machine-readable error code. Known values are listed
+                below, but this is an open set and new codes may be added.
+              examples:
+                - missing_credentials
+                - invalid_api_key
+                - invalid_request
+                - unsupported_export_type
+                - insufficient_credits
+                - upgrade_required
+                - quota_exceeded
+                - rate_limited
+                - too_many_active_jobs
+                - invalid_idempotency_key
+                - idempotency_request_in_progress
+                - idempotency_previous_failed
+                - idempotency_payload_mismatch
+                - not_found
+                - conversion_not_ready
+                - theme_expired
+                - theme_too_large_for_preview
+                - server_error
+            message:
+              type: string
+              description: Human-readable explanation. Not intended for parsing.
+            retry_after:
+              type: integer
+              description: >-
+                Seconds to wait before retrying. Present on some throttle
+                responses; mirrors the `Retry-After` header.
+            buy_credits_url:
+              type: string
+              format: uri
+              description: Where the account owner can buy credits or upgrade.
+          additionalProperties: true
+      additionalProperties: false
+    LegacyFlatError:
+      type: object
+      title: LegacyFlatError
+      description: >-
+        Legacy flat error body used by endpoints that predate the API-key
+        envelope. `error` is a **string** here rather than an object, which is the
+        cheapest way to tell the two shapes apart: check whether `error` is an
+        object before reading `error.code`.
+
+
+        The string is sometimes a machine-ish token (`rate_limited`,
+        `upload_not_found`, `empty_upload`) and sometimes human prose
+        (`Theme expired`, `No file uploaded`), so it is not reliable to branch on.
+        Prefer the HTTP status. Additional fields vary by endpoint.
+      required: [error]
+      properties:
+        error:
+          type: string
+          description: Machine token or human-readable message, depending on the endpoint.
+        message:
+          type: string
+          description: Human-readable detail, when present.
+        code:
+          type: string
+          description: >-
+            Secondary code used by a few responses, notably `FILE_TOO_LARGE` on
+            archive-size rejections.
+        details:
+          type: string
+          description: Underlying failure detail on some server errors.
+        retryAfterSeconds:
+          type: integer
+          description: >-
+            Retry hint used by `POST /api/convert/upload-url` throttling. Note the
+            camelCase spelling, which differs from `retry_after` elsewhere.
+      additionalProperties: true
+    LegacyCodeMessage:
+      type: object
+      title: LegacyCodeMessage
+      description: >-
+        Legacy body with no `error` wrapper at all, currently used for email
+        verification failures. Distinguished from the other two shapes by the
+        absence of `error`.
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          examples:
+            - email_not_verified
+        message:
+          type: string
+      additionalProperties: true
+
+    ConversionSubmissionMultipartRequest:
+      type: object
+      title: ConversionSubmissionMultipartRequest
+      required: [file]
+      properties:
+        file:
+          type: string
+          format: binary
+          description: >-
+            The project archive. Must be a ZIP; the filename should end in
+            `.zip`. Size limits are per-plan (currently 50 MB on Starter, 100 MB
+            on paid modes) and are enforced after authentication.
+        project_name:
+          type: string
+          description: >-
+            Display name for the conversion. Defaults to `Untitled Project`. Also
+            participates in idempotency request binding.
+          examples:
+            - Example site
+        export_type:
+          type: string
+          description: >-
+            Export format. Defaults to `theme`, which is the only value accepted
+            for API-key conversions; `elementor` and `gutenberg` are dashboard
+            features and are rejected here with `unsupported_export_type`.
+          enum: [theme]
+          default: theme
+        platform:
+          type: string
+          description: >-
+            Optional label for the source tool or pipeline, recorded on the
+            conversion for reporting. When omitted, it is derived from
+            `X-WPConvert-Client`.
+          examples:
+            - api
+            - cli
+      additionalProperties: false
+    ConversionFromStorageRequest:
+      type: object
+      title: ConversionFromStorageRequest
+      required: [jobId]
+      properties:
+        jobId:
+          type: string
+          format: uuid
+          description: >-
+            The identifier returned by `POST /api/convert/upload-url`. Must
+            correspond to an archive already uploaded to the matching signed URL;
+            the server derives the object path from this value and the
+            authenticated account.
+        project_name:
+          type: string
+          description: Display name for the conversion. Defaults to `Untitled Project`.
+          examples:
+            - Example site
+        export_type:
+          type: string
+          description: >-
+            Export format. Defaults to `theme`, the only value accepted for
+            API-key conversions.
+          enum: [theme]
+          default: theme
+        platform:
+          type: string
+          description: Optional source-tool label recorded on the conversion.
+          examples:
+            - api
+      additionalProperties: true
+
+    FreeDevPreview:
+      type: object
+      title: FreeDevPreview
+      description: >-
+        Free developer preview accounting, present only on `preview_only`
+        submissions. The allowance is lifetime, not per month.
+      properties:
+        number:
+          type: integer
+          description: Which preview this submission consumed, starting at 1.
+        limit:
+          type: integer
+          description: Total lifetime free previews for the account.
+        remaining:
+          type: integer
+          description: Previews left after this submission.
+      additionalProperties: true
+    ConversionSubmissionResponse:
+      type: object
+      title: ConversionSubmissionResponse
+      description: >-
+        Returned when a conversion is accepted, and also when an earlier
+        submission is replayed via `Idempotency-Key`.
+
+
+        Several fields are present only in specific situations, which is
+        deliberate and reflects current production behavior rather than an
+        oversight:
+
+
+        - `conversion_mode` and `preview_only` are returned for API-key requests
+          and omitted for session requests.
+        - `download_available` is returned **only** on `preview_only` submissions,
+          where it is always `false`. It is *omitted* on `full` submissions rather
+          than being sent as `true`, so treat "absent" as "not yet known" and
+          confirm entitlement from the status or download endpoint.
+        - `free_dev_preview` appears only on `preview_only` submissions.
+        - `idempotent_replay` appears only when `Idempotency-Key` was supplied.
+      required: [jobId, status]
+      properties:
+        jobId:
+          type: string
+          format: uuid
+          description: >-
+            Conversion identifier. Note the camelCase spelling, which is what the
+            released CLI and MCP clients read. Use this value for the status,
+            download, and preview endpoints.
+        project_id:
+          type: string
+          format: uuid
+          description: >-
+            Same value as `jobId`. Present on replayed responses; may be absent on
+            a first submission.
+        status:
+          type: string
+          description: >-
+            `queued` on a newly accepted submission.
+
+
+            On a `202` idempotent replay this may be `processing`, which is a
+            **synthetic replay-only state** produced by the idempotency layer when
+            the stored response had no status recorded. It is not a persisted
+            conversion status and will never be returned by
+            `GET /api/convert/{jobId}/status`; see `ConversionStatus.status` for
+            the persisted set.
+          examples:
+            - queued
+            - processing
+        progress:
+          type: integer
+          minimum: 0
+          maximum: 100
+          description: Percentage complete. `0` on a newly accepted submission.
+        message:
+          type: string
+          description: Human-readable confirmation.
+          examples:
+            - Conversion started successfully
+        idempotent_replay:
+          type: boolean
+          description: >-
+            `true` when this response replays an earlier submission rather than
+            accepting a new one. Present only when `Idempotency-Key` was supplied.
+            The `Idempotent-Replay` response header carries the same signal.
+        conversion_mode:
+          type: string
+          enum: [full, preview_only]
+          description: >-
+            Whether this conversion will produce a downloadable theme (`full`) or
+            a preview-only artifact. Returned for API-key requests.
+        preview_only:
+          type: boolean
+          description: >-
+            `true` when the result will not be downloadable. Equivalent to
+            `conversion_mode == "preview_only"`.
+        download_available:
+          type: boolean
+          description: >-
+            Present only on `preview_only` submissions, always `false`. Omitted
+            entirely on `full` submissions.
+        free_dev_preview:
+          $ref: '#/components/schemas/FreeDevPreview'
+      additionalProperties: true
+
+    UploadUrlResponse:
+      type: object
+      title: UploadUrlResponse
+      description: >-
+        Signed upload target for the large-archive flow. Upload the archive to
+        `signedUrl` with `PUT`, then call `POST /api/convert/from-storage` with
+        the same `jobId`.
+      required: [jobId, signedUrl]
+      properties:
+        jobId:
+          type: string
+          format: uuid
+          description: >-
+            Identifier to pass to `POST /api/convert/from-storage`. This becomes
+            the conversion's `jobId` if the submission is accepted.
+        bucket:
+          type: string
+          description: Storage bucket holding the upload.
+        path:
+          type: string
+          description: >-
+            Object path the signed URL is bound to. Informational; the server
+            re-derives it from the account and `jobId`.
+        token:
+          type: string
+          description: >-
+            Upload token embedded in `signedUrl`. Provided for SDKs that take the
+            path and token separately instead of a full URL. It grants write
+            access to this one object, so treat it as a secret.
+        signedUrl:
+          type: string
+          format: uri
+          description: >-
+            Short-lived URL to `PUT` the archive to. This is a storage-provider
+            URL, not a WPConvert API endpoint. Send `Content-Type:
+            application/zip` and `x-upsert: true`, and do **not** send your API
+            key.
+        maxSizeMB:
+          type: integer
+          description: >-
+            The caller's current archive ceiling in megabytes. Check the archive
+            against this before uploading; the same limit is enforced when the
+            conversion is submitted.
+        plan:
+          type: string
+          description: Plan tier the ceiling was derived from.
+          examples:
+            - starter
+            - pro
+            - agency
+      additionalProperties: true
+
+    ConversionStatusMetadataSummary:
+      type: object
+      title: ConversionStatusMetadataSummary
+      description: >-
+        Numeric and descriptive counters about the conversion result, populated
+        progressively as the pipeline runs. Values are `null` until known. This
+        object is extended over time as the engine reports more detail, so treat
+        it as informational and tolerate unknown keys.
+      properties:
+        theme_size:
+          type: [integer, 'null']
+          description: Size of the generated theme archive in bytes.
+        wordpress_files:
+          type: [integer, 'null']
+        template_files:
+          type: [integer, 'null']
+        pages_created:
+          type: [integer, 'null']
+        routes_detected:
+          type: [integer, 'null']
+        sections_detected:
+          type: [integer, 'null']
+        export_type:
+          type: [string, 'null']
+        export_size:
+          type: [integer, 'null']
+        forms_detected:
+          type: [integer, 'null']
+        user_plan:
+          type: [string, 'null']
+      additionalProperties: true
+    ConversionStatus:
+      type: object
+      title: ConversionStatus
+      description: >-
+        Current state of a conversion.
+
+
+        This payload is shared with the dashboard and therefore includes fields
+        that only the web UI consumes, such as share-unlock state and
+        plan/entitlement badges. They are documented for completeness but are not
+        part of the intended programmatic surface.
+      required: [jobId, status]
+      properties:
+        jobId:
+          type: string
+          format: uuid
+        project_id:
+          type: string
+          format: uuid
+          description: Same value as `jobId`.
+        status:
+          type: string
+          description: >-
+            Persisted conversion status. `done` and `failed` are terminal;
+            everything else is a pipeline stage that should be treated simply as
+            "in progress" — the specific stage names are informational and their
+            order is not guaranteed.
+
+
+            The synthetic `processing` value that can appear on an idempotent
+            replay is intentionally **not** part of this set.
+          enum:
+            - queued
+            - analyzing
+            - building
+            - rendering
+            - labeling
+            - generating
+            - validating
+            - uploading
+            - done
+            - failed
+        progress:
+          type: [integer, 'null']
+          description: Percentage complete, advisory only.
+        download_url:
+          type: [string, 'null']
+          description: >-
+            Short-lived signed theme URL, populated only when the conversion is
+            `done`, the artifact exists, and the caller is entitled to download
+            it. `null` in every other case, including preview-only conversions.
+            `GET /api/download/{projectId}` is the supported way to obtain a link.
+        preview_url:
+          type: [string, 'null']
+          description: >-
+            Stored share-style preview link, when one exists. Not the same as an
+            on-demand Playground session; use `POST /api/playground/sessions` for
+            that.
+        preview_available:
+          type: boolean
+          description: >-
+            Hint that a Playground session can probably be created right now
+            (conversion done, artifact present, size within limits). Advisory
+            only — `POST /api/playground/sessions` performs the authoritative
+            checks and can still fail.
+        conversion_mode:
+          type: string
+          enum: [full, preview_only]
+          description: Whether this conversion produces a downloadable theme.
+        preview_only:
+          type: boolean
+          description: >-
+            `true` when the artifact is not downloadable. Preview-only
+            conversions never become downloadable, even after an upgrade.
+        download_available:
+          type: boolean
+          description: >-
+            Whether the caller may currently download the artifact. Unlike the
+            submission response, this field is populated for finished
+            conversions.
+        error:
+          type: [string, 'null']
+          description: >-
+            Failure detail when `status` is `failed`. May begin with a `WPC_`
+            prefixed engine code.
+        project_name:
+          type: [string, 'null']
+        project_name_slug:
+          type: [string, 'null']
+        download_filename:
+          type: [string, 'null']
+          description: Suggested filename for the theme archive.
+        metadata:
+          type: [object, 'null']
+          description: >-
+            Sparse bag of conversion detail (warnings, detected features, export
+            info). Intentionally extensible; only present when non-empty.
+          additionalProperties: true
+        metadata_summary:
+          $ref: '#/components/schemas/ConversionStatusMetadataSummary'
+        has_download_access:
+          type: [boolean, 'null']
+          description: >-
+            Entitlement flag. `null` on older conversions where it was never
+            recorded, so do not treat `null` as `false` when messaging users.
+        expires_at:
+          type: [string, 'null']
+          format: date-time
+          description: When a time-limited entitlement on this conversion elapses.
+        share_unlock_status:
+          type: [string, 'null']
+          description: Dashboard share-unlock state. Not part of the developer flow.
+        share_unlock_available_at:
+          type: [string, 'null']
+          format: date-time
+          description: Dashboard share-unlock timing. Not part of the developer flow.
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        user_plan:
+          type: [string, 'null']
+          description: Plan tier recorded for this conversion.
+        starter_pro_delta_redeemed:
+          type: boolean
+          description: Dashboard entitlement flag. Not part of the developer flow.
+        is_starter_purchase:
+          type: boolean
+          description: Dashboard entitlement flag. Not part of the developer flow.
+        unlock_method:
+          type: [string, 'null']
+          description: Dashboard entitlement flag. Not part of the developer flow.
+        delta_reconversion_used:
+          type: boolean
+          description: Dashboard entitlement flag. Not part of the developer flow.
+      additionalProperties: true
+
+    DownloadResponse:
+      type: object
+      title: DownloadResponse
+      description: >-
+        A short-lived signed URL for the converted theme. Fetch `download_url`
+        separately to retrieve the bytes.
+      required: [download_url]
+      properties:
+        project_id:
+          type: string
+          format: uuid
+        name:
+          type: string
+          description: Suggested filename for the downloaded archive.
+          examples:
+            - example-site-theme.zip
+        download_url:
+          type: string
+          format: uri
+          description: >-
+            Signed, time-limited URL for the theme archive. Expires quickly;
+            request a fresh one rather than caching or sharing it. Do not parse
+            it or depend on its structure.
+        status:
+          type: string
+          description: Conversion status at the time the link was minted, always `done`.
+          examples:
+            - done
+        created_at:
+          type: string
+          format: date-time
+      additionalProperties: true
+
+    PlaygroundSessionRequest:
+      type: object
+      title: PlaygroundSessionRequest
+      required: [projectId]
+      properties:
+        projectId:
+          type: string
+          format: uuid
+          description: >-
+            The conversion to preview, using the value returned as `jobId` at
+            submission. The conversion must be `done`.
+      additionalProperties: false
+    PlaygroundSessionResponse:
+      type: object
+      title: PlaygroundSessionResponse
+      description: >-
+        A newly created preview session. Each call creates a new session; they
+        are short-lived and allow a bounded number of artifact fetches.
+      required: [session_id, playground_url]
+      properties:
+        session_id:
+          type: string
+          description: Session identifier.
+        token:
+          type: string
+          description: >-
+            Session token used internally to authorize artifact fetches. Treat it
+            as a secret; there is no need to use it directly.
+        expires_at:
+          type: string
+          format: date-time
+          description: >-
+            When the session stops working. Currently about ten minutes after
+            creation. Create a new session to preview again afterwards.
+        entitlement:
+          type: string
+          description: >-
+            Coarse entitlement label the preview UI uses to decide which banner to
+            show. Informational.
+          examples:
+            - free
+            - has_credits
+            - entitled
+        blueprint_url:
+          type: string
+          format: uri
+          description: >-
+            WordPress Playground blueprint describing how to boot the theme.
+            Useful when embedding Playground directly instead of opening the
+            hosted app.
+        playground_url:
+          type: string
+          format: uri
+          description: >-
+            The URL to open in a browser to view the preview. Points at the hosted
+            WordPress Playground app with the blueprint attached.
+        admin_preview:
+          type: boolean
+          description: Internal QA flag. Normally `false`.
+        warning:
+          type: string
+          description: >-
+            Present only in non-production environments where shareable preview
+            links cannot resolve the API host.
+      additionalProperties: true
+
+    CapabilityAvailability:
+      type: object
+      title: CapabilityAvailability
+      description: >-
+        Whether one capability is available, with an optional machine-readable
+        reason when it is not.
+      properties:
+        available:
+          type: boolean
+        reason:
+          type: [string, 'null']
+          description: >-
+            Why the capability is unavailable, or `null` when it is available.
+            Open set of values; see `DeveloperCapabilities.reasons`.
+          examples:
+            - download_requires_upgrade
+            - export_not_supported
+      additionalProperties: true
+    CapabilityConversion:
+      type: object
+      title: CapabilityConversion
+      description: >-
+        What the next conversion submission would do. This is the object
+        programmatic clients should branch on before submitting.
+      properties:
+        can_start:
+          type: boolean
+          description: >-
+            Whether a conversion may be submitted right now. When `false`, submit
+            attempts are expected to fail, and `reason` plus `recommended_action`
+            explain what to do instead.
+
+
+            This reflects account entitlement only. It does not account for
+            request-time throttles or the in-flight concurrency cap, so a
+            submission can still be rejected with `rate_limited` or
+            `too_many_active_jobs` while `can_start` is `true`.
+        mode:
+          type: string
+          enum: [full, preview_only]
+          description: >-
+            The **effective** mode the next submission would use, accounting for
+            authentication type, feature flags, and preview eligibility. This is
+            authoritative and should be preferred over the flat
+            `api_conversion_mode` field.
+        consumes:
+          type: string
+          enum:
+            - subscription_quota
+            - payg_credit
+            - starter_credit
+            - free_preview
+            - none
+          description: >-
+            What a successful conversion would draw down. `none` means no
+            deduction, which applies to unlimited plans and to entitlements
+            already paid for.
+        reason:
+          type: [string, 'null']
+          description: >-
+            Primary machine-readable reason for the current conversion verdict.
+            Intentionally **not** a closed enum: the backend may add reasons, so
+            unknown values must be tolerated rather than treated as errors.
+            Currently known values are the same set documented on
+            `DeveloperCapabilities.reasons`.
+          examples:
+            - free_preview_available
+            - subscription_quota_available
+            - subscription_quota_exhausted
+      additionalProperties: true
+    CapabilitySubscriptionUsage:
+      type: object
+      title: CapabilitySubscriptionUsage
+      properties:
+        limit:
+          type: integer
+          description: Conversions included in the current period.
+        used:
+          type: integer
+        remaining:
+          type: integer
+      additionalProperties: true
+    CapabilityPreviewUsage:
+      type: object
+      title: CapabilityPreviewUsage
+      description: Lifetime free developer preview allowance.
+      properties:
+        limit:
+          type: integer
+        used:
+          type: integer
+        remaining:
+          type: integer
+      additionalProperties: true
+    CapabilityUsage:
+      type: object
+      title: CapabilityUsage
+      description: Normalized view of the account's balances and consumption.
+      properties:
+        plan:
+          type: string
+          description: Effective plan tier for this caller.
+          examples:
+            - starter
+            - pro
+            - agency
+        subscription:
+          $ref: '#/components/schemas/CapabilitySubscriptionUsage'
+        payg_credits:
+          type: integer
+          description: Pay-as-you-go credits available.
+        starter_credits:
+          type: integer
+          description: Starter-tier conversion credits available.
+        free_previews:
+          $ref: '#/components/schemas/CapabilityPreviewUsage'
+      additionalProperties: true
+    CapabilityPlayground:
+      type: object
+      title: CapabilityPlayground
+      description: >-
+        Account-level Playground support. Neither field guarantees a preview for
+        any specific conversion; `POST /api/playground/sessions` is the only
+        authority.
+      properties:
+        supported:
+          type: boolean
+          description: Whether the product supports Playground previews for this account.
+        available_after_conversion:
+          type: boolean
+          description: >-
+            Whether a successful conversion is expected to be previewable. Still
+            subject to per-job artifact size, expiry, and session limits.
+      additionalProperties: true
+    CapabilityOutputs:
+      type: object
+      title: CapabilityOutputs
+      description: What the next conversion is expected to produce.
+      properties:
+        status:
+          $ref: '#/components/schemas/CapabilityAvailability'
+        preview:
+          $ref: '#/components/schemas/CapabilityAvailability'
+        playground:
+          $ref: '#/components/schemas/CapabilityPlayground'
+        download:
+          allOf:
+            - $ref: '#/components/schemas/CapabilityAvailability'
+          description: >-
+            Whether the **next** conversion would yield a downloadable theme. This
+            is a forward-looking statement about a future submission, not the
+            unlock state of any existing conversion.
+      additionalProperties: true
+    CapabilityInputs:
+      type: object
+      title: CapabilityInputs
+      description: Submission routes available to this caller.
+      properties:
+        multipart_zip:
+          allOf:
+            - $ref: '#/components/schemas/CapabilityAvailability'
+          description: Direct multipart upload via `POST /api/convert`.
+        from_storage:
+          allOf:
+            - $ref: '#/components/schemas/CapabilityAvailability'
+          description: Signed-upload flow via `POST /api/convert/from-storage`.
+      additionalProperties: true
+    CapabilityExports:
+      type: object
+      title: CapabilityExports
+      description: >-
+        Export formats available to this caller. API-key callers currently get
+        WordPress theme only; `elementor` and `gutenberg` report
+        `export_not_supported` and reflect dashboard feature access rather than
+        developer availability.
+      properties:
+        wordpress_theme:
+          $ref: '#/components/schemas/CapabilityAvailability'
+        elementor:
+          $ref: '#/components/schemas/CapabilityAvailability'
+        gutenberg:
+          $ref: '#/components/schemas/CapabilityAvailability'
+      additionalProperties: true
+    DeveloperCapabilities:
+      type: object
+      title: DeveloperCapabilities
+      description: >-
+        Normalized, additive capability contract describing what the
+        authenticated caller can do next. Added without changing any pre-existing
+        quota field, so older clients are unaffected.
+
+
+        Scope: this describes **account-level, pre-conversion** entitlement. It
+        does not describe the unlock state of an existing conversion, request-time
+        throttles or concurrency caps, or whether one specific theme will boot in
+        Playground.
+
+
+        Note that `recommended_action` and `reasons` are top-level members of this
+        object; they are not nested under a `guidance` wrapper.
+      properties:
+        developer_access:
+          type: object
+          description: >-
+            Programmatic access state. On a successful response both fields are
+            `true`, since authentication has already succeeded by definition;
+            access problems surface as error responses instead.
+          properties:
+            enabled:
+              type: boolean
+            authenticated:
+              type: boolean
+          additionalProperties: true
+        conversion:
+          $ref: '#/components/schemas/CapabilityConversion'
+        usage:
+          $ref: '#/components/schemas/CapabilityUsage'
+        outputs:
+          $ref: '#/components/schemas/CapabilityOutputs'
+        inputs:
+          $ref: '#/components/schemas/CapabilityInputs'
+        exports:
+          $ref: '#/components/schemas/CapabilityExports'
+        recommended_action:
+          type: string
+          description: >-
+            Single suggested next step, intended for agents and CLIs that need to
+            pick one action without reimplementing entitlement logic. Server-side
+            values are constrained to this set, falling back to `none`.
+          enum:
+            - convert_full
+            - convert_preview
+            - buy_payg_or_wait_renewal
+            - upgrade_or_buy_payg
+            - verify_email
+            - retry_later
+            - contact_support
+            - none
+        reasons:
+          type: array
+          description: >-
+            All conditions that apply to the current verdict, deduplicated and
+            sorted, with the primary reason first when it is recognized.
+
+
+            Deliberately **not** a closed enum so the backend can add reasons
+            without breaking generated clients. Ignore unrecognized values rather
+            than failing. Currently known values: `free_preview_available`,
+            `free_previews_exhausted`, `free_preview_keys_disabled`,
+            `subscription_quota_available`, `subscription_quota_exhausted`,
+            `payg_credit_available`, `starter_credit_available`,
+            `download_requires_upgrade`, `playground_unavailable`,
+            `export_not_supported`, `email_not_verified`.
+          items:
+            type: string
+          examples:
+            - [download_requires_upgrade, free_preview_available]
+      additionalProperties: true
+    QuotaResponse:
+      type: object
+      title: QuotaResponse
+      description: >-
+        Usage counters plus the additive `capabilities` object.
+
+
+        The flat fields are the original contract and are retained for
+        compatibility; most are optional and some are omitted from API-key
+        responses for privacy (subscription identifiers, purchase history, and
+        internal rollout flags). New integrations should read `capabilities`.
+      properties:
+        capabilities:
+          $ref: '#/components/schemas/DeveloperCapabilities'
+        effectivePlan:
+          type: string
+          description: Plan tier applied to this caller.
+          examples:
+            - starter
+            - pro
+            - agency
+        current:
+          type: integer
+          description: Conversions used in the current period.
+        max:
+          type: integer
+          description: Conversions included in the current period.
+        remaining:
+          type: integer
+        exceeded:
+          type: boolean
+          description: Whether the period allowance is used up.
+        softCapReached:
+          type: boolean
+          description: Advisory fair-use signal on unlimited plans.
+        isAgency:
+          type: boolean
+        conversion_credits:
+          type: integer
+          description: Starter-tier credits available.
+        payg_credits:
+          type: integer
+          description: Pay-as-you-go credits available.
+        unused_delta_entitlements:
+          type: integer
+          description: Paid upgrade entitlements not yet consumed.
+        paid_starter:
+          type: boolean
+        has_pro_features:
+          type: boolean
+          description: Whether Pro-tier features are unlocked for this account.
+        api_conversion_mode:
+          type: string
+          enum: [full, preview_only]
+          description: >-
+            **Legacy, plan-level** conversion mode, derived from plan and credit
+            balance alone.
+
+
+            This is not the same as `capabilities.conversion.mode`, which is the
+            authoritative *effective* mode for the next submission because it also
+            accounts for the authentication type and feature flags. The two can
+            disagree: a plan-level `preview_only` account authenticating with a
+            session token, or with the free-preview feature disabled, resolves to
+            an effective mode of `full`.
+
+
+            Prefer `capabilities.conversion.mode`. This field is retained for
+            existing clients.
+        project_pause_active:
+          type: boolean
+        personal_plan:
+          type: [string, 'null']
+        dev_preview_count:
+          type: integer
+          description: Free developer previews used.
+        dev_preview_limit:
+          type: integer
+          description: Lifetime free developer preview allowance.
+        dev_preview_remaining:
+          type: integer
+        month:
+          type: string
+          description: Period the counters apply to.
+          examples:
+            - '2026-08'
+      additionalProperties: true
+
+  examples:
+    FullConversionSubmission:
+      summary: Full conversion accepted
+      description: >-
+        A paid account submitted an archive. The conversion will produce a
+        downloadable theme. Note that `download_available` is absent rather than
+        `true` — that is current production behavior.
+      value:
+        jobId: 11111111-1111-4111-8111-111111111111
+        status: queued
+        progress: 0
+        message: Conversion started successfully
+        conversion_mode: full
+        preview_only: false
+        idempotent_replay: false
+    PreviewOnlyConversionSubmission:
+      summary: Preview-only conversion accepted
+      description: >-
+        A free developer preview was consumed. The result will be previewable in
+        Playground but never downloadable.
+      value:
+        jobId: 22222222-2222-4222-8222-222222222222
+        status: queued
+        progress: 0
+        message: Conversion started successfully
+        conversion_mode: preview_only
+        preview_only: true
+        download_available: false
+        free_dev_preview:
+          number: 1
+          limit: 3
+          remaining: 2
+        idempotent_replay: false
+    FreePreviewsExhausted:
+      summary: Free developer previews exhausted
+      description: >-
+        The lifetime free preview allowance is used up, so no further conversion
+        can start until the account upgrades or buys credits.
+      value:
+        error:
+          code: upgrade_required
+          message: >-
+            You've used all 3 free developer previews. Upgrade to Pro or Agency,
+            or buy PAYG credits, to run full downloadable conversions.
+          plan_needed: pro
+          reason: dev_preview_limit
+          buy_credits_url: https://wpconvert.ai/billing
+    CompletedIdempotentReplay:
+      summary: Replay of a completed submission
+      description: >-
+        The same `Idempotency-Key` and request were sent again after the original
+        submission had already been accepted. The stored response is replayed with
+        `200` and the `Idempotent-Replay: true` header.
+      value:
+        jobId: 11111111-1111-4111-8111-111111111111
+        project_id: 11111111-1111-4111-8111-111111111111
+        status: queued
+        progress: 0
+        message: Conversion started successfully
+        conversion_mode: full
+        preview_only: false
+        idempotent_replay: true
+    InFlightIdempotentReplay:
+      summary: Replay while the original is still processing
+      description: >-
+        Returned with `202`. The synthetic `processing` status appears here
+        because the idempotency layer had no recorded status; it is not a
+        persisted conversion status. Poll the status endpoint with `jobId` for the
+        real state.
+      value:
+        jobId: 11111111-1111-4111-8111-111111111111
+        project_id: 11111111-1111-4111-8111-111111111111
+        status: processing
+        idempotent_replay: true
+    IdempotencyPayloadMismatch:
+      summary: Key reused with a different request
+      description: >-
+        The key was already used for a different archive or different submission
+        fields. Use a new key; reusing this one will keep failing.
+      value:
+        error:
+          code: idempotency_payload_mismatch
+          message: >-
+            This idempotency key was already used with a different conversion
+            request.
+    ProcessingStatus:
+      summary: Conversion in progress
+      description: >-
+        A mid-pipeline stage. Treat any non-terminal status as "still working"
+        rather than branching on the specific stage.
+      value:
+        jobId: 11111111-1111-4111-8111-111111111111
+        project_id: 11111111-1111-4111-8111-111111111111
+        status: generating
+        progress: 60
+        download_url: null
+        preview_url: null
+        preview_available: false
+        conversion_mode: full
+        preview_only: false
+        download_available: false
+        error: null
+        project_name: Example site
+        project_name_slug: example-site
+        metadata: null
+        metadata_summary:
+          theme_size: null
+          pages_created: null
+          export_type: null
+        has_download_access: true
+        created_at: '2026-08-10T18:04:11.000Z'
+        updated_at: '2026-08-10T18:07:52.000Z'
+        user_plan: pro
+    CompletedDownloadableStatus:
+      summary: Completed, downloadable
+      description: >-
+        A finished full conversion. `download_url` is populated here because the
+        caller is entitled, but prefer `GET /api/download/{projectId}` to mint a
+        fresh link when you are ready to fetch the bytes.
+      value:
+        jobId: 11111111-1111-4111-8111-111111111111
+        project_id: 11111111-1111-4111-8111-111111111111
+        status: done
+        progress: 100
+        download_url: https://storage.example.com/signed/example-site-theme.zip?token=EXAMPLE
+        preview_url: null
+        preview_available: true
+        conversion_mode: full
+        preview_only: false
+        download_available: true
+        error: null
+        project_name: Example site
+        project_name_slug: example-site
+        download_filename: example-site-theme.zip
+        metadata:
+          sections_detected: 24
+          export_type: theme
+        metadata_summary:
+          theme_size: 4194304
+          wordpress_files: 63
+          template_files: 9
+          pages_created: 7
+          export_type: theme
+          user_plan: pro
+        has_download_access: true
+        expires_at: null
+        created_at: '2026-08-10T18:04:11.000Z'
+        updated_at: '2026-08-10T18:12:03.000Z'
+        user_plan: pro
+    CompletedPreviewOnlyStatus:
+      summary: Completed, preview-only
+      description: >-
+        A finished free developer preview. `download_available` is `false` and
+        `download_url` is `null`; this artifact cannot be downloaded and an
+        upgrade will not unlock it.
+      value:
+        jobId: 22222222-2222-4222-8222-222222222222
+        project_id: 22222222-2222-4222-8222-222222222222
+        status: done
+        progress: 100
+        download_url: null
+        preview_url: null
+        preview_available: true
+        conversion_mode: preview_only
+        preview_only: true
+        download_available: false
+        error: null
+        project_name: Example site
+        project_name_slug: example-site
+        metadata_summary:
+          theme_size: 2097152
+          pages_created: 5
+          export_type: theme
+          user_plan: starter
+        has_download_access: false
+        created_at: '2026-08-10T19:20:00.000Z'
+        updated_at: '2026-08-10T19:26:41.000Z'
+        user_plan: starter
+    FailedStatus:
+      summary: Conversion failed
+      description: >-
+        Terminal failure. `error` may begin with a `WPC_` engine code that is
+        stable enough to branch on for common causes.
+      value:
+        jobId: 33333333-3333-4333-8333-333333333333
+        project_id: 33333333-3333-4333-8333-333333333333
+        status: failed
+        progress: 35
+        download_url: null
+        preview_available: false
+        conversion_mode: full
+        preview_only: false
+        download_available: false
+        error: 'WPC_EXTRACT_FAILED: archive could not be extracted'
+        project_name: Example site
+        has_download_access: false
+        created_at: '2026-08-10T20:00:00.000Z'
+        updated_at: '2026-08-10T20:02:18.000Z'
+        user_plan: pro
+    AgencyQuota:
+      summary: Agency account, full mode
+      description: >-
+        An unlimited plan. The next conversion can start, consumes nothing, and
+        will be downloadable. Elementor and Gutenberg report
+        `export_not_supported` because API-key conversions are theme-only.
+      value:
+        effectivePlan: agency
+        current: 42
+        max: 1000
+        remaining: 958
+        exceeded: false
+        softCapReached: false
+        isAgency: true
+        conversion_credits: 0
+        payg_credits: 0
+        unused_delta_entitlements: 0
+        paid_starter: false
+        has_pro_features: true
+        api_conversion_mode: full
+        project_pause_active: false
+        personal_plan: agency
+        dev_preview_count: 0
+        dev_preview_limit: 3
+        dev_preview_remaining: 3
+        month: '2026-08'
+        capabilities:
+          developer_access:
+            enabled: true
+            authenticated: true
+          conversion:
+            can_start: true
+            mode: full
+            consumes: none
+            reason: subscription_quota_available
+          usage:
+            plan: agency
+            subscription:
+              limit: 1000
+              used: 42
+              remaining: 958
+            payg_credits: 0
+            starter_credits: 0
+            free_previews:
+              limit: 3
+              used: 0
+              remaining: 3
+          outputs:
+            status:
+              available: true
+            preview:
+              available: true
+            playground:
+              supported: true
+              available_after_conversion: true
+            download:
+              available: true
+              reason: null
+          inputs:
+            multipart_zip:
+              available: true
+            from_storage:
+              available: true
+          exports:
+            wordpress_theme:
+              available: true
+              reason: null
+            elementor:
+              available: false
+              reason: export_not_supported
+            gutenberg:
+              available: false
+              reason: export_not_supported
+          recommended_action: convert_full
+          reasons:
+            - subscription_quota_available
+    StarterPreviewOnlyQuota:
+      summary: Starter account, preview-only mode
+      description: >-
+        A free developer preview is available, so a conversion can start, but the
+        result will not be downloadable. Note that
+        `capabilities.conversion.mode` is `preview_only` and
+        `outputs.download.available` is `false` even though a conversion is
+        permitted.
+      value:
+        effectivePlan: starter
+        current: 1
+        max: 1
+        remaining: 0
+        exceeded: true
+        softCapReached: false
+        isAgency: false
+        conversion_credits: 0
+        payg_credits: 0
+        unused_delta_entitlements: 0
+        paid_starter: false
+        has_pro_features: false
+        api_conversion_mode: preview_only
+        project_pause_active: false
+        personal_plan: starter
+        dev_preview_count: 1
+        dev_preview_limit: 3
+        dev_preview_remaining: 2
+        month: '2026-08'
+        capabilities:
+          developer_access:
+            enabled: true
+            authenticated: true
+          conversion:
+            can_start: true
+            mode: preview_only
+            consumes: free_preview
+            reason: free_preview_available
+          usage:
+            plan: starter
+            subscription:
+              limit: 1
+              used: 1
+              remaining: 0
+            payg_credits: 0
+            starter_credits: 0
+            free_previews:
+              limit: 3
+              used: 1
+              remaining: 2
+          outputs:
+            status:
+              available: true
+            preview:
+              available: true
+            playground:
+              supported: true
+              available_after_conversion: true
+            download:
+              available: false
+              reason: download_requires_upgrade
+          inputs:
+            multipart_zip:
+              available: true
+            from_storage:
+              available: true
+          exports:
+            wordpress_theme:
+              available: true
+              reason: null
+            elementor:
+              available: false
+              reason: export_not_supported
+            gutenberg:
+              available: false
+              reason: export_not_supported
+          recommended_action: convert_preview
+          reasons:
+            - free_preview_available
+            - download_requires_upgrade
+    PlaygroundSession:
+      summary: Preview session created
+      value:
+        session_id: 44444444-4444-4444-8444-444444444444
+        token: 0123456789abcdef0123456789abcdef
+        expires_at: '2026-08-10T20:15:00.000Z'
+        entitlement: entitled
+        blueprint_url: https://api.wpconvert.ai/api/playground/44444444-4444-4444-8444-444444444444/config
+        playground_url: https://playground.wordpress.net/?blueprint-url=https%3A%2F%2Fapi.wpconvert.ai%2Fapi%2Fplayground%2F44444444-4444-4444-8444-444444444444%2Fconfig
+        admin_preview: false
+    DownloadSuccess:
+      summary: Signed download URL issued
+      value:
+        project_id: 11111111-1111-4111-8111-111111111111
+        name: example-site-theme.zip
+        download_url: https://storage.example.com/signed/example-site-theme.zip?token=EXAMPLE
+        status: done
+        created_at: '2026-08-10T18:04:11.000Z'
+    PreviewOnlyDownloadDenied:
+      summary: Preview-only conversion cannot be downloaded
+      description: >-
+        Upgrading will not unlock this artifact. A new conversion must be run
+        under a paid entitlement to obtain a downloadable theme.
+      value:
+        error:
+          code: upgrade_required
+          message: >-
+            This was a free preview-only conversion. Upgrade to Pro/Agency or buy
+            PAYG credits, then re-run the conversion to download the theme.
+          plan_needed: pro
+          preview_only: true
+          buy_credits_url: https://wpconvert.ai/billing
+    SignedUploadWorkflow:
+      summary: Signed upload target for a large archive
+      description: >-
+        Step 1 of the large-archive flow. Next, `PUT` the archive to `signedUrl`
+        with `Content-Type: application/zip` and `x-upsert: true` (no API key on
+        that request), then `POST /api/convert/from-storage` with the same
+        `jobId`.
+      value:
+        jobId: 11111111-1111-4111-8111-111111111111
+        bucket: uploads
+        path: 99999999-9999-4999-8999-999999999999/11111111-1111-4111-8111-111111111111.zip
+        token: EXAMPLE_UPLOAD_TOKEN_NOT_A_REAL_SECRET
+        signedUrl: https://storage.example.com/object/upload/sign/uploads/example.zip?token=EXAMPLE
+        maxSizeMB: 100
+        plan: pro
