@@ -1,0 +1,1336 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Jet Tracker Partner API",
+    "version": "1.3.0",
+    "summary": "Business aviation intelligence for Brazil: official registry (RAB/ANAC) cross-referenced with the real owner, flights, market and cost.",
+    "description": "Same key and same plan rules as the Jet Tracker MCP server (https://jettracker.com.br/api/mcp). Looking at one aircraft is Starter, generating a list is Pro, being alerted (watches + webhook) is Enterprise. Plan names changed in October 2026 and the tier keys in responses did not: the key `pro` is the Starter plan and the key `business` is the Pro plan. Every number carries a source and an as_of date. A registry movement is not a sale. flightActivity.tracked=false means no tracking coverage, never 'does not fly'. Natural persons: names may appear (public registry data), a CPF never. Daily quotas per key: calls, single-aircraft lookups and records returned by lists; when exceeded the API answers 429 with resetAt (UTC). Guide: https://jettracker.com.br/desenvolvedores",
+    "termsOfService": "https://jettracker.com.br/termos",
+    "contact": {
+      "name": "Jet Tracker",
+      "url": "https://jettracker.com.br/desenvolvedores"
+    },
+    "x-jentic-source-url": "https://jettracker.com.br/openapi.json"
+  },
+  "servers": [
+    {
+      "url": "https://jettracker.com.br"
+    }
+  ],
+  "paths": {
+    "/api/v1/aircraft/{registration}": {
+      "get": {
+        "tags": [
+          "aircraft"
+        ],
+        "operationId": "getAircraftByRegistration",
+        "summary": "Full profile of a Brazilian-registered aircraft (Starter)",
+        "description": "RAB status, model, year, owner set (names + CNPJs + Receita Federal record with company partners), operator, owner state (base.uf), lien (gravame), flight activity (ADS-B/FR24), market presence and a published value reference by vintage. Counts 1 call and 1 lookup of the daily quota.",
+        "parameters": [
+          {
+            "name": "registration",
+            "in": "path",
+            "required": true,
+            "description": "Brazilian registration mark, with or without hyphen, any case (PR-TBL, prtbl).",
+            "schema": {
+              "type": "string",
+              "minLength": 5,
+              "maxLength": 7
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Aircraft profile (contract v1.3, additive)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AircraftProfile"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_registration",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "unauthorized (bad or missing key)"
+          },
+          "403": {
+            "description": "tier_required (plan below Starter)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Gated"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found (not in the active RAB)"
+          },
+          "429": {
+            "description": "rate_limited (per minute) or quota_exceeded (per day)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotaExceeded"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "api_disabled"
+          }
+        }
+      }
+    },
+    "/api/v1/owner/{cnpj}/aircraft": {
+      "get": {
+        "tags": [
+          "owner"
+        ],
+        "operationId": "getFleetByCnpj",
+        "summary": "Aircraft linked to a company CNPJ, matched by the 8-digit root (Pro)",
+        "description": "Each item says the role (owner or operator), status, segment, lien and co-owners. Empty list is a valid answer. Counts 1 call plus the number of items returned (records) of the daily quota; the list is cut at the remaining daily records (quotaTruncated=true).",
+        "parameters": [
+          {
+            "name": "cnpj",
+            "in": "path",
+            "required": true,
+            "description": "CNPJ with 14 digits (with or without punctuation) or the 8-digit root. CPF is rejected.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "segment",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "executive",
+                "geral",
+                "comercial",
+                "militar"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Fleet of the company root",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OwnerFleet"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_cnpj or invalid_segment"
+          },
+          "401": {
+            "description": "unauthorized"
+          },
+          "403": {
+            "description": "tier_required (plan below Pro)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Gated"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "rate_limited or quota_exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotaExceeded"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/company/search": {
+      "get": {
+        "tags": [
+          "company"
+        ],
+        "operationId": "searchCompany",
+        "summary": "Candidate CNPJs for a company name and/or email domain (Starter)",
+        "description": "Same source as the MCP tool jt_company_search: one candidate per matching CNPJ root, with confidence and matchReason. Requires q and/or domain. A generic email domain (gmail.com and similar) is ignored and noted. Counts 1 call plus the candidates and group members returned (records) of the daily quota; the list is cut at the remaining daily records (quotaTruncated=true). Coverage is companies linked to aircraft, so an empty list is a valid answer, not an error.",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "description": "Company name (razão social or nome fantasia), or a CNPJ (14 digits) or CNPJ root (8 digits), with or without punctuation. Required when domain is omitted.",
+            "schema": {
+              "type": "string",
+              "maxLength": 120
+            }
+          },
+          {
+            "name": "domain",
+            "in": "query",
+            "required": false,
+            "description": "Email domain (e.g. acme.com.br). Required when q is omitted.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "uf",
+            "in": "query",
+            "required": false,
+            "description": "Brazilian state (2 letters) to narrow candidates.",
+            "schema": {
+              "type": "string",
+              "minLength": 2,
+              "maxLength": 2
+            }
+          },
+          {
+            "name": "city",
+            "in": "query",
+            "required": false,
+            "description": "Owner city at the Receita Federal, free text.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Max candidates returned. Default 5.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 10
+            }
+          },
+          {
+            "name": "include_group",
+            "in": "query",
+            "required": false,
+            "description": "Include the economic group (shared partners) of the top candidate. Default true; pass false or 0 to omit.",
+            "schema": {
+              "type": "boolean",
+              "default": true
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Candidate companies (empty candidates[] is a valid answer)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "query": {
+                      "type": "object"
+                    },
+                    "total": {
+                      "type": "integer"
+                    },
+                    "candidates": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "cnpjRoot": {
+                            "type": "string"
+                          },
+                          "razaoSocial": {
+                            "type": "string"
+                          },
+                          "nomeFantasia": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "uf": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "municipio": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "confidence": {
+                            "type": "string"
+                          },
+                          "matchReason": {
+                            "type": "string"
+                          },
+                          "hasAircraft": {
+                            "type": "boolean"
+                          },
+                          "group": {
+                            "type": [
+                              "object",
+                              "null"
+                            ]
+                          }
+                        }
+                      }
+                    },
+                    "quotaTruncated": {
+                      "type": "boolean"
+                    },
+                    "notes": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "_meta": {
+                      "type": "object"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "missing_query, invalid_query, invalid_uf or invalid_domain",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "unauthorized"
+          },
+          "403": {
+            "description": "tier_required (plan below Starter)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Gated"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "rate_limited or quota_exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotaExceeded"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/watches": {
+      "get": {
+        "tags": [
+          "watches"
+        ],
+        "operationId": "listWatches",
+        "summary": "Registrations watched by this account (Enterprise, account key)",
+        "responses": {
+          "200": {
+            "description": "Watch list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "registrations": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "count": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "account_key_required (system key) or tier_required"
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "watches"
+        ],
+        "operationId": "replaceWatches",
+        "summary": "Replace the whole watch list (idempotent, max 500)",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "registrations"
+                ],
+                "properties": {
+                  "registrations": {
+                    "type": "array",
+                    "maxItems": 500,
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "New list; invalid registrations are returned in invalid[]",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "count": {
+                      "type": "integer"
+                    },
+                    "registrations": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "invalid": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_body or too_many"
+          },
+          "403": {
+            "description": "account_key_required or tier_required"
+          }
+        }
+      }
+    },
+    "/api/mcp": {
+      "post": {
+        "tags": [
+          "mcp"
+        ],
+        "operationId": "mcp",
+        "summary": "MCP server (Streamable HTTP, stateless): all Jet Tracker tools (see /desenvolvedores), same key",
+        "description": "JSON-RPC 2.0 over HTTP. Send initialize, tools/list and tools/call with header Accept: application/json, text/event-stream. Prefer an MCP client (Claude Desktop, Claude Code, Cursor, ChatGPT, n8n) over calling this by hand. Guide: https://jettracker.com.br/desenvolvedores",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "jsonrpc": {
+                    "type": "string",
+                    "const": "2.0"
+                  },
+                  "id": {},
+                  "method": {
+                    "type": "string"
+                  },
+                  "params": {
+                    "type": "object"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "JSON-RPC response (application/json or text/event-stream)"
+          },
+          "401": {
+            "description": "unauthorized"
+          },
+          "429": {
+            "description": "rate_limited"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "Partner key jtpk_... generated in the Jet Tracker account (Starter, Pro or Enterprise plans). Keep it in a server environment variable."
+      }
+    },
+    "schemas": {
+      "Error": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "string"
+          }
+        }
+      },
+      "Gated": {
+        "type": "object",
+        "description": "Plan limit, not a technical failure. Explain to the user and point to upgradeUrl.",
+        "properties": {
+          "error": {
+            "type": "string",
+            "const": "tier_required"
+          },
+          "gated": {
+            "type": "boolean"
+          },
+          "required": {
+            "type": "string"
+          },
+          "current": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "upgradeUrl": {
+            "type": "string"
+          }
+        }
+      },
+      "QuotaExceeded": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "string",
+            "const": "quota_exceeded"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "calls",
+              "lookups",
+              "records"
+            ]
+          },
+          "used": {
+            "type": "integer"
+          },
+          "limit": {
+            "type": "integer"
+          },
+          "tier": {
+            "type": "string"
+          },
+          "resetAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "upgradeUrl": {
+            "type": "string"
+          }
+        }
+      },
+      "Rfb": {
+        "type": "object",
+        "nullable": true,
+        "description": "Receita Federal record (cached). Partner documents only when the partner is a company.",
+        "properties": {
+          "cnpj": {
+            "type": "string"
+          },
+          "razaoSocial": {
+            "type": "string"
+          },
+          "nomeFantasia": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "situacaoCadastral": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "cnae": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "cnaeDesc": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "porte": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "naturezaJuridica": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "capitalSocial": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "municipio": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "uf": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "abertura": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "email": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "phone": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "qsa": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "nome": {
+                  "type": "string"
+                },
+                "qualificacao": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "tipo": {
+                  "type": "string",
+                  "enum": [
+                    "pf",
+                    "pj"
+                  ]
+                },
+                "cnpj": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              }
+            }
+          },
+          "source": {
+            "type": "string"
+          },
+          "asOf": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "AircraftProfile": {
+        "type": "object",
+        "properties": {
+          "registration": {
+            "type": "string",
+            "example": "PR-TBL"
+          },
+          "status": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "operational",
+              "reserve",
+              "suspended",
+              "cancelled",
+              "unknown",
+              null
+            ]
+          },
+          "statusAnacRaw": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "rbac": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "rbac_91 private, rbac_91k shared, rbac_135 air taxi, rbac_121 airline, rbac_137 agricultural"
+          },
+          "sharedOwnership": {
+            "type": "boolean"
+          },
+          "serialNumber": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "yearManufactured": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "model": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "manufacturer": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "category": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "icaoType": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "photoUrl": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "catalogMatched": {
+                "type": "boolean"
+              }
+            }
+          },
+          "photo": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "properties": {
+              "url": {
+                "type": "string"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "tail",
+                  "model"
+                ]
+              },
+              "credit": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            }
+          },
+          "owner": {
+            "type": "object",
+            "description": "names is the full SET in ANAC alphabetical order: never elect the first as 'the owner'.",
+            "properties": {
+              "names": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "cnpjs": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "uf": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "type": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "enum": [
+                  "pj",
+                  "pf",
+                  null
+                ]
+              },
+              "fleetCount": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "rfb": {
+                "$ref": "#/components/schemas/Rfb"
+              }
+            }
+          },
+          "operator": {
+            "type": "object",
+            "properties": {
+              "names": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "cnpjs": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "uf": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "rfb": {
+                "$ref": "#/components/schemas/Rfb"
+              }
+            }
+          },
+          "base": {
+            "type": "object",
+            "description": "The RAB does not publish an aircraft base. uf is the registered state of the owner (the first owner in ANAC alphabetical order), kept under base for contract stability, so a leased or financed aircraft shows the state of the lessor or bank; city and icao are not populated. Use owner.rfb.municipio for the owner city and operator.uf for the operator state.",
+            "properties": {
+              "uf": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "city": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "icao": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "note": {
+                "type": "string"
+              }
+            }
+          },
+          "riskFlags": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "owner_inactive",
+                "serial_placeholder",
+                "contact_invalid",
+                "cva_expired",
+                "owner_record_missing"
+              ]
+            },
+            "description": "v1.3: hygiene and risk signals. serialNumber is null when the RAB serial was a filler (serialRaw keeps it); contact fields are null when obviously fake."
+          },
+          "serialRaw": {
+            "type": "string",
+            "description": "Only present when the RAB serial was a placeholder (see riskFlags)."
+          },
+          "airworthiness": {
+            "type": "object",
+            "description": "v1.3: CVA/CA validity from the RAB. cvaStatus is derived from the date (expired, expiring within expiringDays, valid, unknown).",
+            "properties": {
+              "cvaValidUntil": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "caValidUntil": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "cvaStatus": {
+                "type": "string",
+                "enum": [
+                  "expired",
+                  "expiring",
+                  "valid",
+                  "unknown"
+                ]
+              },
+              "cvaDaysLeft": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "expiringDays": {
+                "type": "integer"
+              },
+              "source": {
+                "type": "string"
+              }
+            }
+          },
+          "gravame": {
+            "type": "object",
+            "description": "Registered lien",
+            "properties": {
+              "has": {
+                "type": "boolean"
+              },
+              "text": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            }
+          },
+          "registeredSince": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "flightActivity": {
+            "type": "object",
+            "description": "tracked=false means no tracking coverage, never 'does not fly'.",
+            "properties": {
+              "tracked": {
+                "type": "boolean"
+              },
+              "flights90d": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "flights365d": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "hours90d": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "hours365d": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "hubIcao": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "daysSinceLastFlight": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "totalFlightsTracked": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "lastFlight": {
+                "type": [
+                  "object",
+                  "null"
+                ],
+                "description": "v1.3: to is the reported or inferred destination; arrivalConfidence in landed, last_seen, reported, inferred, unknown; arrivalInferredKm when inferred."
+              },
+              "coverage": {
+                "type": "object",
+                "description": "v1.3: status never_seen | active (tracked flight in 90 days) | lost (seen before, not tracked for 90+ days); firstSeen, lastSeen, trackedFlights."
+              },
+              "source": {
+                "type": "string"
+              },
+              "asOf": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            }
+          },
+          "market": {
+            "type": "object",
+            "properties": {
+              "forSale": {
+                "type": "boolean"
+              },
+              "activeCount": {
+                "type": "integer"
+              },
+              "latest": {
+                "type": [
+                  "object",
+                  "null"
+                ]
+              }
+            }
+          },
+          "valuationReference": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "properties": {
+              "midUsd": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "lowUsd": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "highUsd": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "refYear": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "description": "null when the tail has no manufacture year: the range is then the whole model (confidence=model_range)."
+              },
+              "confidence": {
+                "type": "string",
+                "enum": [
+                  "vintage",
+                  "model_range"
+                ]
+              },
+              "note": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "source": {
+                "type": "string"
+              },
+              "asOf": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            }
+          },
+          "links": {
+            "type": "object",
+            "properties": {
+              "aircraft": {
+                "type": "string"
+              },
+              "model": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            }
+          },
+          "source": {
+            "type": "object",
+            "properties": {
+              "registry": {
+                "type": "string"
+              },
+              "rabSyncedAt": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "fetchedAt": {
+                "type": "string"
+              },
+              "apiVersion": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "OwnerFleet": {
+        "type": "object",
+        "properties": {
+          "ownerCnpjRoot": {
+            "type": "string"
+          },
+          "matchedCnpjs": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "total": {
+            "type": "integer"
+          },
+          "truncated": {
+            "type": "boolean"
+          },
+          "quotaTruncated": {
+            "type": "boolean"
+          },
+          "bySegment": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer"
+            }
+          },
+          "aircraft": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "registration": {
+                  "type": "string"
+                },
+                "role": {
+                  "type": "string",
+                  "enum": [
+                    "owner",
+                    "operator"
+                  ]
+                },
+                "model": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "manufacturer": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "icaoType": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "catalogMatched": {
+                  "type": "boolean"
+                },
+                "year": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                },
+                "serialNumber": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "status": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "statusAnacRaw": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "rbac": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "segment": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "sharedWith": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "baseUf": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "gravame": {
+                  "type": "boolean"
+                },
+                "links": {
+                  "type": "object",
+                  "properties": {
+                    "aircraft": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "source": {
+            "type": "object",
+            "properties": {
+              "registry": {
+                "type": "string"
+              },
+              "rabSyncedAt": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "fetchedAt": {
+                "type": "string"
+              },
+              "apiVersion": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "security": [
+    {
+      "bearerAuth": []
+    }
+  ],
+  "tags": [
+    {
+      "name": "aircraft",
+      "description": "Brazilian aircraft by registration mark"
+    },
+    {
+      "name": "owner",
+      "description": "Fleet by company (CNPJ)"
+    },
+    {
+      "name": "watches",
+      "description": "Registrations watched by the account (webhook)"
+    },
+    {
+      "name": "company",
+      "description": "Candidate CNPJs for a company name or email domain"
+    },
+    {
+      "name": "mcp",
+      "description": "Model Context Protocol endpoint (JSON-RPC 2.0)"
+    }
+  ]
+}
