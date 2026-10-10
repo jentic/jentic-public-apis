@@ -1,0 +1,5088 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Sonar API",
+    "description": "App Store Optimization data for AI agents, MCP tools, and automation. Keyword research, rank tracking, ASO scoring, reviews, and revenue estimates for the iOS App Store and Google Play.\n\nVersioning & deprecation policy: the API is URL-versioned (`/api/v1`). Breaking changes only ever ship under a new version path — existing `/api/v1` shapes are additive-only. If an endpoint is ever deprecated it keeps working for at least 6 months, signals the timeline with `Deprecation` and `Sunset` response headers, and is announced at https://trysonar.app/changelog.",
+    "version": "1.0.0",
+    "termsOfService": "https://trysonar.app/terms",
+    "contact": {
+      "url": "https://trysonar.app/support"
+    },
+    "license": {
+      "name": "Proprietary",
+      "url": "https://trysonar.app/terms"
+    }
+  },
+  "servers": [
+    {
+      "url": "https://api.trysonar.app",
+      "description": "Production"
+    },
+    {
+      "url": "https://trysonar.app",
+      "description": "Production (legacy, proxied)"
+    }
+  ],
+  "externalDocs": {
+    "description": "API reference",
+    "url": "https://trysonar.app/docs/api"
+  },
+  "security": [
+    {
+      "bearerAuth": []
+    }
+  ],
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "aso_xxx",
+        "description": "API key with the `aso_` prefix. Get one at /developers (50 free credits on signup). OAuth access tokens from the hosted MCP flow (RFC 9728 discovery at /.well-known/oauth-protected-resource/mcp; Clerk authorization server) are also accepted as the bearer. A few stateless endpoints also work with NO auth at all (anonymous free tier, per-IP daily limits): /apps/search, /apps/lookup, /apps/aso-score, /apps/extract-keywords, /keywords/suggestions, /charts/top (shared 30 req/day) and /keywords/metrics (5 keywords/day)."
+      }
+    },
+    "parameters": {
+      "Store": {
+        "name": "store",
+        "in": "query",
+        "required": true,
+        "description": "App store",
+        "schema": {
+          "type": "string",
+          "enum": [
+            "ios",
+            "android"
+          ]
+        },
+        "example": "ios"
+      },
+      "Country": {
+        "name": "country",
+        "in": "query",
+        "required": false,
+        "description": "ISO 3166-1 alpha-2 country code. Store reads accept every App Store storefront (175) and Google Play market (145); a code that isn't a storefront returns 400 with `error.reason: \"unsupported_market\"`.",
+        "schema": {
+          "type": "string",
+          "default": "us",
+          "pattern": "^[a-z]{2}$"
+        },
+        "example": "us"
+      },
+      "StorefrontCountry": {
+        "name": "country",
+        "in": "query",
+        "required": false,
+        "description": "ISO 3166-1 alpha-2 country code. Every Google Play market and every App Store storefront except 58 small ones that have no numeric storefront id (Apple would silently answer with the US store, so they return 400 with `error.reason: \"unsupported_market\"`; app lookup, search and reviews still work there).",
+        "schema": {
+          "type": "string",
+          "default": "us",
+          "pattern": "^[a-z]{2}$"
+        },
+        "example": "us"
+      },
+      "ResearchCountry": {
+        "name": "country",
+        "in": "query",
+        "required": false,
+        "description": "ISO 3166-1 alpha-2 country code — one of Sonar's 72 keyword-research markets (keyword data is persisted per country). Other codes return 400 with `error.reason: \"unsupported_market\"` and the list of supported codes.",
+        "schema": {
+          "type": "string",
+          "default": "us",
+          "pattern": "^[a-z]{2}$"
+        },
+        "example": "us"
+      },
+      "TimeBudget": {
+        "name": "X-Sonar-Time-Budget-Ms",
+        "in": "header",
+        "required": false,
+        "description": "Optional: total milliseconds the caller will wait for the response. The server stops starting store work before it ends and answers with what it has — cached, `stale`, or `pending` keywords (queued on the scrape fleet, not billed); charts serve the newest stored snapshot. Can only shorten the server default (API_REQUEST_DEADLINE_MS, 40s on the API box); values under 3000 are treated as 3000. The MCP tools send it.",
+        "schema": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "example": 27000
+      },
+      "Cursor": {
+        "name": "cursor",
+        "in": "query",
+        "required": false,
+        "description": "Pagination cursor from a previous response's next_cursor",
+        "schema": {
+          "type": "string"
+        }
+      },
+      "Limit": {
+        "name": "limit",
+        "in": "query",
+        "required": false,
+        "description": "Page size (1–200)",
+        "schema": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 200
+        }
+      },
+      "Days": {
+        "name": "days",
+        "in": "query",
+        "required": false,
+        "description": "History window in days (1–365)",
+        "schema": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 365,
+          "default": 30
+        }
+      }
+    },
+    "schemas": {
+      "Error": {
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "type": "object",
+            "required": [
+              "code",
+              "message"
+            ],
+            "description": "Every error carries `code` + `message`. The remaining fields are optional and additive — branch on `reason` when present, else on `code`.",
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string",
+                "description": "Stable sub-code. daily_limit (402/429: included daily quota used up, resets 00:00 UTC), no_credits (402: credit balance below the call's cost), anonymous_daily_limit (429: keyless per-IP allowance used up), batch_too_large (429: keyless call asks for more keywords than the daily allowance — the only case where a smaller batch helps), store_rate_limited (429: store throttling or scraper queue saturated, transient), concurrency_limit (429: per-caller in-flight cap, ~8 concurrent scrapes), store_unavailable (503: store failed or timed out), refresh_in_progress (503: a chart is still being fetched), plan_required (403, see required_plan), scope_required (403, see required_scope), payment_past_due (403: writes paused after the 3-day past-due grace), no_workspace (403: OAuth user owns no Sonar workspace), unsupported_market (400: country not served by this endpoint for that store).",
+                "enum": [
+                  "daily_limit",
+                  "no_credits",
+                  "anonymous_daily_limit",
+                  "batch_too_large",
+                  "store_rate_limited",
+                  "concurrency_limit",
+                  "store_unavailable",
+                  "refresh_in_progress",
+                  "plan_required",
+                  "scope_required",
+                  "payment_past_due",
+                  "no_workspace",
+                  "unsupported_market"
+                ]
+              },
+              "retry_after_seconds": {
+                "type": "integer",
+                "description": "On retryable 429/503 errors: seconds to wait before retrying (mirrors the Retry-After header, which some proxies drop)."
+              },
+              "reset_at": {
+                "type": "string",
+                "format": "date-time",
+                "description": "When an exhausted daily allowance resets (always the next 00:00 UTC)"
+              },
+              "limit": {
+                "type": "integer",
+                "description": "The exhausted daily allowance, in limit_unit per day"
+              },
+              "limit_unit": {
+                "type": "string",
+                "enum": [
+                  "requests",
+                  "keywords"
+                ]
+              },
+              "required_plan": {
+                "type": "string",
+                "enum": [
+                  "indie",
+                  "agency"
+                ],
+                "description": "Plan that unlocks the endpoint"
+              },
+              "required_scope": {
+                "type": "string",
+                "description": "API-key scope the call needs (e.g. write)"
+              },
+              "credits_balance": {
+                "type": "number",
+                "description": "Current API credit balance"
+              },
+              "credits_cost": {
+                "type": "number",
+                "description": "Credits this call costs"
+              }
+            }
+          }
+        }
+      },
+      "StaleMeta": {
+        "type": "object",
+        "description": "Envelope `meta`, present only when the store was throttling and the endpoint answered from Sonar's stored copy instead of failing (apps/lookup, apps/search, apps/reviews, keywords/suggestions). Live answers carry no `meta`. A stored copy is billed like any 200.",
+        "required": [
+          "stale",
+          "stale_as_of",
+          "partial",
+          "retry_after_seconds",
+          "note"
+        ],
+        "properties": {
+          "stale": {
+            "type": "boolean",
+            "enum": [
+              true
+            ]
+          },
+          "stale_as_of": {
+            "type": "string",
+            "nullable": true,
+            "description": "When the stored copy was captured: ISO 8601 timestamp or YYYY-MM-DD date; null when unknown."
+          },
+          "partial": {
+            "type": "boolean",
+            "description": "The copy holds less than a live call would: fewer results or fields (stored search results stop at the top 10, name/developer/icon only), or a different order (stored suggestions are ranked by popularity)."
+          },
+          "stale_country": {
+            "type": "string",
+            "nullable": true,
+            "description": "App lookup only: the storefront the stored copy came from, when it differs from the request."
+          },
+          "retry_after_seconds": {
+            "type": "integer",
+            "description": "When live data is expected again."
+          },
+          "note": {
+            "type": "string",
+            "description": "One sentence explaining what was served — safe to show to a user."
+          }
+        }
+      },
+      "App": {
+        "type": "object",
+        "properties": {
+          "storeId": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "developer": {
+            "type": "string"
+          },
+          "rating": {
+            "type": "number",
+            "nullable": true,
+            "description": "Official storefront rating; null when unavailable."
+          },
+          "reviews": {
+            "type": "integer",
+            "nullable": true,
+            "description": "Official rating count, not written review count; null when unavailable."
+          },
+          "category": {
+            "type": "string"
+          },
+          "iconUrl": {
+            "type": "string",
+            "format": "uri"
+          }
+        }
+      },
+      "Keyword": {
+        "type": "object",
+        "description": "One keyword row from /keywords/metrics or /keywords/search. Freshness: `stale` is false only when `measured_at` and `popularity_measured_at` (when present) are both under 7 days old. Rows measured 7–30 days ago are served with `stale: true` and re-measured in the background; older ones are re-measured during the request. iOS Apple popularity older than 7 days is re-fetched from Apple during the request; if Apple doesn't answer in time the stored value is served with its original `popularity_measured_at` and `stale: true`. Android popularity checked against Play autocomplete and older than 7 days is served with `stale: true` and re-checked in the background. When the store cannot be reached, a stored measurement of any age is served instead of an error, always with `stale: true`.",
+        "properties": {
+          "keyword": {
+            "type": "string"
+          },
+          "store": {
+            "type": "string",
+            "enum": [
+              "ios",
+              "android"
+            ]
+          },
+          "country": {
+            "type": "string",
+            "description": "Two-letter storefront code"
+          },
+          "popularity": {
+            "type": "number",
+            "nullable": true,
+            "description": "0–100 popularity score. Null when unknown and on pending/error rows."
+          },
+          "popularity_proxy": {
+            "type": "number",
+            "nullable": true,
+            "description": "Sonar's in-house estimate, present only when Apple censors an iOS keyword's real Search Popularity to its floor (5). Disambiguates keywords inside the censored band (rendered as '5 (58)'). Null otherwise."
+          },
+          "popularity_source": {
+            "type": "string",
+            "enum": [
+              "apple",
+              "proxy"
+            ],
+            "nullable": true,
+            "description": "Provenance of `popularity`: 'apple' = real Apple Search Popularity reported by Apple Search Ads (not an estimate), 'proxy' = Sonar's in-house estimate. Null when unknown or when popularity is null."
+          },
+          "difficulty": {
+            "type": "number",
+            "description": "0–100 proprietary difficulty score"
+          },
+          "est_downloads_at_1": {
+            "type": "number",
+            "nullable": true,
+            "description": "Estimated downloads/day for the app ranking #1 on this keyword (rough order of magnitude from the Apple-calibrated popularity curve, 2 significant figures). iOS only — null on Android or when popularity is unknown."
+          },
+          "difficulty_breakdown": {
+            "type": "object",
+            "nullable": true,
+            "description": "Explainable difficulty ingredients. `beatable: true` = a top-3 slot looks winnable (an app holds it with ≥10x less strength than the SERP median, or the term is under-targeted in titles with a weak top-3 app). Null for rows cached before the field existed or SERPs with <3 results.",
+            "properties": {
+              "titleMatches": {
+                "type": "integer",
+                "description": "Top-10 apps whose title contains the keyword"
+              },
+              "appsAnalyzed": {
+                "type": "integer"
+              },
+              "top3Strength": {
+                "type": "array",
+                "items": {
+                  "type": "number"
+                },
+                "description": "Ratings count (iOS) / installs (Android) of the top 3 apps, in rank order"
+              },
+              "medianStrength": {
+                "type": "number"
+              },
+              "weakSpotRank": {
+                "type": "integer",
+                "nullable": true
+              },
+              "beatable": {
+                "type": "boolean"
+              }
+            }
+          },
+          "results_count": {
+            "type": "integer",
+            "description": "Number of apps the store returned for the term (0 on pending/error rows)."
+          },
+          "measured_at": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true,
+            "description": "When difficulty, difficulty_breakdown and results_count were measured (ISO 8601, UTC); the compute time for a keyword computed during the request. Null on pending/error rows."
+          },
+          "popularity_measured_at": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true,
+            "description": "When the returned `popularity` value was measured (ISO 8601, UTC) — can be older than `measured_at`. Apple Search Popularity: when Sonar last fetched it from Apple. Sonar's estimates: same as `measured_at`. Android values checked against Play autocomplete: the start of the UTC day they were checked (a lower bound, never later than the real time). Null when `popularity` is null."
+          },
+          "stale": {
+            "type": "boolean",
+            "description": "False only when `measured_at` and `popularity_measured_at` (when present) are both under 7 days old; true otherwise, including stored measurements served because the store could not be reached. Stale rows are real data and are billed like cache hits. To enforce a maximum age, compare both timestamps."
+          },
+          "error": {
+            "description": "Present only on rows that carry no data. /keywords/metrics: an object `{ code, message, retry_after_seconds? }` (`code` is `pending`, `rate_limited`, `unavailable` or `internal_error`). /keywords/search: the string `pending` or `scrape_failed`, with `retry_after_seconds` alongside on pending rows.",
+            "oneOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "pending",
+                  "scrape_failed"
+                ]
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "code": {
+                    "type": "string"
+                  },
+                  "message": {
+                    "type": "string"
+                  },
+                  "retry_after_seconds": {
+                    "type": "integer"
+                  }
+                }
+              }
+            ]
+          },
+          "retry_after_seconds": {
+            "type": "integer",
+            "description": "/keywords/search pending rows only: seconds to wait before re-requesting the term."
+          }
+        }
+      }
+    },
+    "responses": {
+      "Unauthorized": {
+        "description": "Missing or invalid API key",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "Forbidden": {
+        "description": "Plan or scope insufficient (workspace endpoints need the Indie plan; writes also need a write-scope key)",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "NotFound": {
+        "description": "Resource not found or not tracked by your organization",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "RateLimited": {
+        "description": "Rate limited — see `error.reason`: daily_limit (Indie plan: 1,000 requests/day, resets 00:00 UTC; see `reset_at`), anonymous_daily_limit / batch_too_large (keyless free tier), store_rate_limited or concurrency_limit (transient, honor `retry_after_seconds`)",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "BadRequest": {
+        "description": "Missing or invalid request parameters",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "InternalError": {
+        "description": "Unexpected server error",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      }
+    }
+  },
+  "paths": {
+    "/api/v1/apps/lookup": {
+      "get": {
+        "tags": [
+          "Apps"
+        ],
+        "summary": "Look up an app by store ID",
+        "parameters": [
+          {
+            "name": "store",
+            "in": "query",
+            "required": true,
+            "description": "App store",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "ios",
+                "android"
+              ]
+            },
+            "example": "ios"
+          },
+          {
+            "name": "id",
+            "in": "query",
+            "required": true,
+            "description": "App store ID (numeric for iOS, package for Android)",
+            "schema": {
+              "type": "string"
+            },
+            "example": "310633997"
+          },
+          {
+            "name": "country",
+            "in": "query",
+            "required": false,
+            "description": "ISO 3166-1 alpha-2 country code. Store reads accept every App Store storefront (175) and Google Play market (145); a code that isn't a storefront returns 400 with `error.reason: \"unsupported_market\"`.",
+            "schema": {
+              "type": "string",
+              "default": "us",
+              "pattern": "^[a-z]{2}$"
+            },
+            "example": "us"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "App metadata. When the store is throttling, Sonar's stored copy of the app with `meta.stale` (a throttle is never reported as 404).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/App"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/StaleMeta"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "operationId": "getAppsLookup",
+        "description": "Look up an app by store ID",
+        "security": [
+          {},
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/apps/search": {
+      "get": {
+        "tags": [
+          "Apps"
+        ],
+        "summary": "Search apps in a store",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": true,
+            "description": "Search query",
+            "schema": {
+              "type": "string"
+            },
+            "example": "meditation"
+          },
+          {
+            "name": "store",
+            "in": "query",
+            "required": true,
+            "description": "App store",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "ios",
+                "android"
+              ]
+            },
+            "example": "ios"
+          },
+          {
+            "name": "country",
+            "in": "query",
+            "required": false,
+            "description": "ISO 3166-1 alpha-2 country code. Store reads accept every App Store storefront (175) and Google Play market (145); a code that isn't a storefront returns 400 with `error.reason: \"unsupported_market\"`.",
+            "schema": {
+              "type": "string",
+              "default": "us",
+              "pattern": "^[a-z]{2}$"
+            },
+            "example": "us"
+          },
+          {
+            "name": "num",
+            "in": "query",
+            "description": "Max results (1–50)",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 50,
+              "default": 10
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Search results in store order. When the store is throttling, the newest stored top 10 for this exact term and storefront with `meta.stale` + `meta.partial` (entries carry rank, store, storeId, name, developer, iconUrl only).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/App"
+                      }
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/StaleMeta"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "operationId": "getAppsSearch",
+        "description": "Search apps in a store",
+        "security": [
+          {},
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/apps/aso-score": {
+      "get": {
+        "tags": [
+          "Apps"
+        ],
+        "summary": "Calculate an ASO optimization score (0–100)",
+        "parameters": [
+          {
+            "name": "store",
+            "in": "query",
+            "required": true,
+            "description": "App store",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "ios",
+                "android"
+              ]
+            },
+            "example": "ios"
+          },
+          {
+            "name": "id",
+            "in": "query",
+            "required": true,
+            "description": "App store ID (numeric for iOS, package for Android)",
+            "schema": {
+              "type": "string"
+            },
+            "example": "310633997"
+          },
+          {
+            "name": "country",
+            "in": "query",
+            "required": false,
+            "description": "ISO 3166-1 alpha-2 country code. Store reads accept every App Store storefront (175) and Google Play market (145); a code that isn't a storefront returns 400 with `error.reason: \"unsupported_market\"`.",
+            "schema": {
+              "type": "string",
+              "default": "us",
+              "pattern": "^[a-z]{2}$"
+            },
+            "example": "us"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "ASO score breakdown",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "description": "Result payload — full field reference at https://trysonar.app/docs/api",
+                      "additionalProperties": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "operationId": "getAppsAsoScore",
+        "description": "Calculate an ASO optimization score (0–100)",
+        "security": [
+          {},
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/apps/extract-keywords": {
+      "get": {
+        "tags": [
+          "Apps"
+        ],
+        "summary": "Extract keywords from an app's metadata",
+        "parameters": [
+          {
+            "name": "store",
+            "in": "query",
+            "required": true,
+            "description": "App store",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "ios",
+                "android"
+              ]
+            },
+            "example": "ios"
+          },
+          {
+            "name": "id",
+            "in": "query",
+            "required": true,
+            "description": "App store ID (numeric for iOS, package for Android)",
+            "schema": {
+              "type": "string"
+            },
+            "example": "310633997"
+          },
+          {
+            "name": "country",
+            "in": "query",
+            "required": false,
+            "description": "ISO 3166-1 alpha-2 country code. Store reads accept every App Store storefront (175) and Google Play market (145); a code that isn't a storefront returns 400 with `error.reason: \"unsupported_market\"`.",
+            "schema": {
+              "type": "string",
+              "default": "us",
+              "pattern": "^[a-z]{2}$"
+            },
+            "example": "us"
+          },
+          {
+            "name": "max",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 50,
+              "default": 20
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Extracted keywords",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "description": "Result payload — full field reference at https://trysonar.app/docs/api",
+                      "additionalProperties": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "operationId": "getAppsExtractKeywords",
+        "description": "Extract keywords from an app's metadata",
+        "security": [
+          {},
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/apps/reviews": {
+      "get": {
+        "tags": [
+          "Apps"
+        ],
+        "summary": "Fetch app reviews",
+        "description": "Android defaults to merged market-language, English, Spanish, French, and Arabic feeds, deduplicated and sorted before limiting. Coverage is bounded, not exhaustive. Use lang for another specific feed.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Store"
+          },
+          {
+            "name": "lang",
+            "in": "query",
+            "description": "Android only: two-letter language code to fetch a single feed instead of the default merged feeds.",
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-zA-Z]{2}$"
+            }
+          },
+          {
+            "name": "id",
+            "in": "query",
+            "required": true,
+            "description": "App store ID (numeric for iOS, package for Android)",
+            "schema": {
+              "type": "string"
+            },
+            "example": "310633997"
+          },
+          {
+            "$ref": "#/components/parameters/Country"
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "recent",
+                "helpful"
+              ],
+              "default": "recent"
+            }
+          },
+          {
+            "name": "min_rating",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 5
+            }
+          },
+          {
+            "name": "max_rating",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 5
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "App reviews. When the store is throttling, Sonar's stored reviews for the storefront with `meta.stale` (rating filters and limit still apply; not for single-`lang` Android requests).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "userName": {
+                            "type": "string"
+                          },
+                          "score": {
+                            "type": "integer"
+                          },
+                          "title": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "text": {
+                            "type": "string"
+                          },
+                          "date": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "version": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "url": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "thumbsUp": {
+                            "type": "integer",
+                            "nullable": true
+                          }
+                        }
+                      }
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/StaleMeta"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "operationId": "getAppsReviews"
+      }
+    },
+    "/api/v1/apps/revenue": {
+      "get": {
+        "tags": [
+          "Apps"
+        ],
+        "summary": "Estimate monthly revenue for an app (single or bulk)",
+        "description": "Pass `id` for a single app or `ids` (comma-separated, up to 25) for bulk lookup. Bulk counts as one request. Each estimate includes a `confidence` grade (high/medium/low) and `confidence_factors` explaining it. Apps Sonar synced on the same storefront within the last day are estimated from the stored listing. When the store can't answer, an estimate from an older stored listing is returned flagged `stale: true` (bulk: per item; single: `meta.stale` + `meta.stale_as_of`); with nothing stored, a bulk item carries `error.code` `rate_limited` or `unavailable` with `retry_after_seconds` (not billed), and the request is 429/503 only when every id failed.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Store"
+          },
+          {
+            "name": "id",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "ids",
+            "in": "query",
+            "description": "Comma-separated store IDs (max 25)",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/Country"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Monthly revenue estimate(s). Bulk items may carry `stale: true` or a per-id `error` (`not_found`, `rate_limited`, `unavailable`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "description": "Result payload — full field reference at https://trysonar.app/docs/api",
+                      "additionalProperties": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "429": {
+            "description": "rate_limited — Sonar's store lanes are busy and nothing is stored for the app (single id), or every bulk id was shed; honor Retry-After.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "description": "unavailable — the store throttled or failed and nothing is stored for the app (single id), or every bulk id failed; honor Retry-After.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "operationId": "getAppsRevenue"
+      }
+    },
+    "/api/v1/keywords/search": {
+      "get": {
+        "tags": [
+          "Keywords"
+        ],
+        "summary": "Keyword research with difficulty + popularity",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/Store"
+          },
+          {
+            "$ref": "#/components/parameters/ResearchCountry"
+          },
+          {
+            "$ref": "#/components/parameters/TimeBudget"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Keyword data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Keyword"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Every row is `pending`: nothing could be computed inside the request, so each term was queued on the scrape fleet (`error: \"pending\"` + `retry_after_seconds` per row). Not billed, and doesn't count against the daily quota — re-request after the hint. When only some rows are pending the status is 200.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "description": "Result payload — full field reference at https://trysonar.app/docs/api",
+                      "additionalProperties": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "description": "unavailable (`reason: store_unavailable`) — the store couldn't be reached and nothing is stored for the requested terms; honor Retry-After.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "operationId": "getKeywordsSearch",
+        "description": "Keyword research with difficulty + popularity"
+      }
+    },
+    "/api/v1/keywords/suggestions": {
+      "get": {
+        "tags": [
+          "Keywords"
+        ],
+        "summary": "Autocomplete-driven keyword suggestions",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": true,
+            "description": "Seed keyword to expand",
+            "schema": {
+              "type": "string"
+            },
+            "example": "meditation"
+          },
+          {
+            "name": "store",
+            "in": "query",
+            "required": true,
+            "description": "App store",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "ios",
+                "android"
+              ]
+            },
+            "example": "ios"
+          },
+          {
+            "name": "country",
+            "in": "query",
+            "required": false,
+            "description": "ISO 3166-1 alpha-2 country code. Every Google Play market and every App Store storefront except 58 small ones that have no numeric storefront id (Apple would silently answer with the US store, so they return 400 with `error.reason: \"unsupported_market\"`; app lookup, search and reviews still work there).",
+            "schema": {
+              "type": "string",
+              "default": "us",
+              "pattern": "^[a-z]{2}$"
+            },
+            "example": "us"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Autocomplete suggestions. When the store is throttling, stored terms starting with the seed (3+ characters) that Sonar has seen in autocomplete within 90 days, ranked by popularity, with `meta.stale` + `meta.partial`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "term": {
+                            "type": "string"
+                          },
+                          "priority": {
+                            "type": "integer"
+                          }
+                        }
+                      }
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/StaleMeta"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "operationId": "getKeywordsSuggestions",
+        "description": "Autocomplete-driven keyword suggestions",
+        "security": [
+          {},
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/charts/top": {
+      "get": {
+        "tags": [
+          "Charts"
+        ],
+        "summary": "Top free/paid/grossing chart with day-over-day movement",
+        "description": "Market-wide store chart (no tracked apps needed). 1 credit. The first request for a (store, country, chart, category) combo on a given day fetches it live and snapshots it; later requests that day are served from the snapshot. `summary`, `movers` and `droppedApps` always describe the whole top 200 — `limit` truncates `entries` only. A combo requested for the first time has no previous snapshot, so `previousMeasuredAt` is null and every `delta` is null. A live fetch is awaited only until the request deadline (API_REQUEST_DEADLINE_MS, or `X-Sonar-Time-Budget-Ms` minus 2s); past it the newest stored snapshot (≤7 days old) is served with `stale: true` and its `measuredAt` date while the fetch finishes in the background, so the next request is fresh. With nothing stored the endpoint returns 503 `refresh_in_progress` (Retry-After 20).",
+        "parameters": [
+          {
+            "name": "store",
+            "in": "query",
+            "required": false,
+            "description": "App store",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "ios",
+                "android"
+              ],
+              "default": "ios"
+            },
+            "example": "ios"
+          },
+          {
+            "name": "country",
+            "in": "query",
+            "required": false,
+            "description": "ISO 3166-1 alpha-2 country code. Every Google Play market and every App Store storefront except 58 small ones that have no numeric storefront id (Apple would silently answer with the US store, so they return 400 with `error.reason: \"unsupported_market\"`; app lookup, search and reviews still work there).",
+            "schema": {
+              "type": "string",
+              "default": "us",
+              "pattern": "^[a-z]{2}$"
+            },
+            "example": "us"
+          },
+          {
+            "name": "X-Sonar-Time-Budget-Ms",
+            "in": "header",
+            "required": false,
+            "description": "Optional: total milliseconds the caller will wait for the response. The server stops starting store work before it ends and answers with what it has — cached, `stale`, or `pending` keywords (queued on the scrape fleet, not billed); charts serve the newest stored snapshot. Can only shorten the server default (API_REQUEST_DEADLINE_MS, 40s on the API box); values under 3000 are treated as 3000. The MCP tools send it.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "example": 27000
+          },
+          {
+            "name": "chart",
+            "in": "query",
+            "required": false,
+            "description": "Chart type",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "free",
+                "paid",
+                "grossing"
+              ],
+              "default": "free"
+            }
+          },
+          {
+            "name": "category",
+            "in": "query",
+            "required": false,
+            "description": "Normalized category key (e.g. HEALTH_AND_FITNESS on iOS, GAME on Android), or `overall` for the store-wide chart",
+            "schema": {
+              "type": "string",
+              "default": "overall"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Chart entries to return",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200,
+              "default": 50
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Chart entries with movement, summary, movers and dropped apps",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "store": {
+                          "type": "string"
+                        },
+                        "country": {
+                          "type": "string"
+                        },
+                        "chart": {
+                          "type": "string"
+                        },
+                        "category": {
+                          "type": "string"
+                        },
+                        "measuredAt": {
+                          "type": "string",
+                          "format": "date"
+                        },
+                        "previousMeasuredAt": {
+                          "type": "string",
+                          "format": "date",
+                          "nullable": true,
+                          "description": "Date movement is computed against"
+                        },
+                        "stale": {
+                          "type": "boolean",
+                          "description": "True when an older snapshot (≤7 days) was served instead of today's — the live fetch failed or didn't finish before the request deadline. `measuredAt` is the served snapshot's date."
+                        },
+                        "summary": {
+                          "type": "object",
+                          "properties": {
+                            "total": {
+                              "type": "integer"
+                            },
+                            "newToday": {
+                              "type": "integer"
+                            },
+                            "dropped": {
+                              "type": "integer"
+                            }
+                          }
+                        },
+                        "entries": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "rank": {
+                                "type": "integer"
+                              },
+                              "storeId": {
+                                "type": "string"
+                              },
+                              "numericId": {
+                                "type": "integer",
+                                "nullable": true,
+                                "description": "iOS only — numeric Apple id (storeId is the bundle id)"
+                              },
+                              "name": {
+                                "type": "string"
+                              },
+                              "iconUrl": {
+                                "type": "string",
+                                "nullable": true
+                              },
+                              "developer": {
+                                "type": "string",
+                                "nullable": true
+                              },
+                              "rating": {
+                                "type": "number",
+                                "nullable": true
+                              },
+                              "delta": {
+                                "type": "integer",
+                                "nullable": true,
+                                "description": "previousRank - rank (positive = moved up); null when new or no previous snapshot"
+                              },
+                              "isNew": {
+                                "type": "boolean"
+                              }
+                            }
+                          }
+                        },
+                        "movers": {
+                          "type": "array",
+                          "description": "Up to 10 biggest movers (|delta| >= 3) across the whole chart",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "storeId": {
+                                "type": "string"
+                              },
+                              "name": {
+                                "type": "string"
+                              },
+                              "iconUrl": {
+                                "type": "string",
+                                "nullable": true
+                              },
+                              "rank": {
+                                "type": "integer"
+                              },
+                              "delta": {
+                                "type": "integer"
+                              }
+                            }
+                          }
+                        },
+                        "droppedApps": {
+                          "type": "array",
+                          "description": "Apps in the previous snapshot but not in this one",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "storeId": {
+                                "type": "string"
+                              },
+                              "name": {
+                                "type": "string"
+                              },
+                              "iconUrl": {
+                                "type": "string",
+                                "nullable": true
+                              },
+                              "previousRank": {
+                                "type": "integer"
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "description": "No snapshot ≤7 days old is stored and today's can't be served yet. `reason: refresh_in_progress` (code unavailable, Retry-After 20): the first fetch for this combo is still running in the background — retry and it's a cache hit. `reason: store_unavailable` (Retry-After 30): the store fetch failed. Both are refunded.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "operationId": "getChartsTop",
+        "security": [
+          {},
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/keywords/metrics": {
+      "get": {
+        "tags": [
+          "Keywords"
+        ],
+        "summary": "Difficulty + popularity for a specific keyword (or bulk)",
+        "description": "Pass `q` for a single keyword or `qs` (comma-separated, max 25) for bulk. 1 credit per keyword. Use this when you already have a keyword list — `/keywords/search` is the heavier endpoint that also fans out into related terms.",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Single keyword (use this OR qs)",
+            "example": "meditation timer"
+          },
+          {
+            "name": "qs",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Comma-separated bulk keywords, up to 25"
+          },
+          {
+            "name": "store",
+            "in": "query",
+            "required": true,
+            "description": "App store",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "ios",
+                "android"
+              ]
+            },
+            "example": "ios"
+          },
+          {
+            "name": "country",
+            "in": "query",
+            "required": false,
+            "description": "ISO 3166-1 alpha-2 country code — one of Sonar's 72 keyword-research markets (keyword data is persisted per country). Other codes return 400 with `error.reason: \"unsupported_market\"` and the list of supported codes.",
+            "schema": {
+              "type": "string",
+              "default": "us",
+              "pattern": "^[a-z]{2}$"
+            },
+            "example": "us"
+          },
+          {
+            "name": "X-Sonar-Time-Budget-Ms",
+            "in": "header",
+            "required": false,
+            "description": "Optional: total milliseconds the caller will wait for the response. The server stops starting store work before it ends and answers with what it has — cached, `stale`, or `pending` keywords (queued on the scrape fleet, not billed); charts serve the newest stored snapshot. Can only shorten the server default (API_REQUEST_DEADLINE_MS, 40s on the API box); values under 3000 are treated as 3000. The MCP tools send it.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "example": 27000
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Single keyword data (when `q`) or array of keyword data (when `qs`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "data": {
+                          "$ref": "#/components/schemas/Keyword"
+                        }
+                      }
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "data": {
+                          "type": "array",
+                          "items": {
+                            "$ref": "#/components/schemas/Keyword"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "pending — nothing could be computed inside the request (store allowance spent, throttling, per-caller cap, or the time budget/deadline ran out), so every term was queued on the scrape fleet. Single `q`: the keyword object with `error.code: \"pending\"` + `error.retry_after_seconds`; bulk: every item pending. Not billed and doesn't count against the daily quota — re-request after the hint (a cache hit).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "description": "Result payload — full field reference at https://trysonar.app/docs/api",
+                      "additionalProperties": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Missing or invalid params (incl. `reason: unsupported_market` for a country outside the 72 keyword-research markets)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "429": {
+            "description": "rate_limited (`reason: store_rate_limited`, or `concurrency_limit` when the per-caller cap refused every term) — every requested term was shed (scraper queue congested or too many concurrent lookups for this caller); honor Retry-After. When only SOME bulk terms are shed the response is a 200 whose affected items carry `error.code: \"rate_limited\"` plus `error.retry_after_seconds` (the same hint as the Retry-After header, which is nonstandard on a 200 and may be stripped by proxies — prefer the body field) — completed terms are returned and cached, and no unserved term is billed. Keep bulk requests sequential (per-caller budget ~8 concurrently resolving keywords).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "description": "unavailable (`reason: store_unavailable`) — the store data source is temporarily throttling; check Retry-After and retry. Bulk (`qs`) requests report this per-item inside the 200 array instead",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "operationId": "getKeywordsMetrics",
+        "security": [
+          {},
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/apps": {
+      "get": {
+        "tags": [
+          "Workspace"
+        ],
+        "summary": "List your tracked apps with latest snapshots",
+        "description": "Requires the Indie plan. Cursor paginated (default 100).",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Cursor"
+          },
+          {
+            "$ref": "#/components/parameters/Limit"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Tracked apps (paginated)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "description": "Result payload — full field reference at https://trysonar.app/docs/api",
+                      "additionalProperties": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "operationId": "getApps"
+      }
+    },
+    "/api/v1/apps/{id}": {
+      "get": {
+        "tags": [
+          "Workspace"
+        ],
+        "summary": "App metadata + up to 90 days of snapshots",
+        "description": "Requires the Indie plan.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Sonar app UUID",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "App detail with snapshot history",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "description": "Result payload — full field reference at https://trysonar.app/docs/api",
+                      "additionalProperties": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "operationId": "getAppsById"
+      },
+      "delete": {
+        "tags": [
+          "Write"
+        ],
+        "summary": "Untrack an app",
+        "description": "Removes the org's tracking link and org-scoped data (tracked keywords, discovered keywords, competitor edges), detaches it from any owned product, and deletes that product if left empty. Shared rows survive for other orgs. Requires the Indie plan and a write-scope API key.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Sonar app UUID",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "{ id, deleted }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "description": "Result payload — full field reference at https://trysonar.app/docs/api",
+                      "additionalProperties": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "operationId": "deleteAppsById"
+      }
+    },
+    "/api/v1/apps/{id}/keywords": {
+      "get": {
+        "tags": [
+          "Workspace"
+        ],
+        "summary": "Keywords tracked for an app",
+        "description": "Latest difficulty/popularity per keyword. Requires the Indie plan. Cursor paginated (default 50).",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Sonar app UUID",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/Cursor"
+          },
+          {
+            "$ref": "#/components/parameters/Limit"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Tracked keywords (paginated)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "description": "Result payload — full field reference at https://trysonar.app/docs/api",
+                      "additionalProperties": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "operationId": "getAppsByIdKeywords"
+      },
+      "post": {
+        "tags": [
+          "Write"
+        ],
+        "summary": "Track keywords for an app (bulk, idempotent)",
+        "description": "Requires the Indie plan and a write-scope API key. Re-posting the same terms reports them as already_tracked.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Sonar app UUID",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "keywords"
+                ],
+                "properties": {
+                  "keywords": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 120
+                    },
+                    "minItems": 1,
+                    "maxItems": 200
+                  },
+                  "country": {
+                    "type": "string",
+                    "pattern": "^[a-z]{2}$",
+                    "description": "Optional — defaults to the linked product's country"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Per-keyword outcomes: { added, already_tracked, failed, results }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "description": "Result payload — full field reference at https://trysonar.app/docs/api",
+                      "additionalProperties": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "operationId": "postAppsByIdKeywords"
+      },
+      "delete": {
+        "tags": [
+          "Write"
+        ],
+        "summary": "Bulk-untrack keywords for an app",
+        "description": "Requires an explicit selector (a bare delete is a 400). Pass all=true to untrack every keyword for the app, or ids=<id1,id2,…> (the id field from GET, not keyword_id; max 1000) for a subset. Only per-org tracking rows are removed. Requires the Indie plan and a write-scope API key.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Sonar app UUID",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "all",
+            "in": "query",
+            "description": "Set to true to untrack every keyword for this app",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "ids",
+            "in": "query",
+            "description": "Comma-separated tracked-keyword ids to untrack (max 1000). Mutually exclusive with all",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "{ deleted, requested }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "description": "Result payload — full field reference at https://trysonar.app/docs/api",
+                      "additionalProperties": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Missing/ambiguous selector or too many ids",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "operationId": "deleteAppsByIdKeywords"
+      }
+    },
+    "/api/v1/apps/{id}/rankings": {
+      "get": {
+        "tags": [
+          "Workspace"
+        ],
+        "summary": "Rank history for an app's tracked keywords",
+        "description": "Daily positions per keyword over the window. Requires the Indie plan. Cursor paginated over keywords (default 50).",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Sonar app UUID",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/Days"
+          },
+          {
+            "name": "keyword_id",
+            "in": "query",
+            "description": "Restrict to one keyword",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/Cursor"
+          },
+          {
+            "$ref": "#/components/parameters/Limit"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Rank history per keyword (paginated)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "description": "Result payload — full field reference at https://trysonar.app/docs/api",
+                      "additionalProperties": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "operationId": "getAppsByIdRankings"
+      }
+    },
+    "/api/v1/apps/{id}/changes": {
+      "get": {
+        "tags": [
+          "Workspace"
+        ],
+        "summary": "Change history for a tracked app",
+        "description": "Detected releases, metadata edits, screenshots, price, and category changes, plus iOS product page header swaps (`header`, data.action added/changed/removed) and newly listed In-App Events (`in_app_event`), newest first. Requires the Indie plan.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Sonar app UUID",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "type",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "release",
+                "metadata",
+                "screenshots",
+                "price",
+                "category",
+                "header",
+                "in_app_event"
+              ]
+            }
+          },
+          {
+            "$ref": "#/components/parameters/Limit"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Detected changes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "description": "Result payload — full field reference at https://trysonar.app/docs/api",
+                      "additionalProperties": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "operationId": "getAppsByIdChanges"
+      }
+    },
+    "/api/v1/keywords/{id}/rankings": {
+      "get": {
+        "tags": [
+          "Workspace"
+        ],
+        "summary": "SERP history for a tracked keyword",
+        "description": "Which apps ranked in the top results on each measured day. Requires the Indie plan.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Sonar keyword UUID",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/Days"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "SERP entries, newest first",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "description": "Result payload — full field reference at https://trysonar.app/docs/api",
+                      "additionalProperties": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "operationId": "getKeywordsByIdRankings"
+      }
+    },
+    "/api/v1/competitors/{id}/keywords": {
+      "get": {
+        "tags": [
+          "Workspace"
+        ],
+        "summary": "Keywords a competitor ranks for (+ gap analysis)",
+        "description": "Last 7 days of SERP data. Pass app_id for gap analysis against your own app. Requires the Indie plan. Cursor paginated (default 50).",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Competitor's Sonar app UUID",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "app_id",
+            "in": "query",
+            "description": "Your own app's Sonar UUID for gap analysis",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/Cursor"
+          },
+          {
+            "$ref": "#/components/parameters/Limit"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Competitor keywords (paginated)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "description": "Result payload — full field reference at https://trysonar.app/docs/api",
+                      "additionalProperties": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "operationId": "getCompetitorsByIdKeywords"
+      }
+    },
+    "/api/v1/apps/{id}/competitor-landscape": {
+      "get": {
+        "tags": [
+          "Workspace"
+        ],
+        "summary": "Competitive landscape for one of your own apps",
+        "description": "The live competitive keyword picture vs every tracked competitor: gap/winnable/threat/lead stats, the top gap (25), threat (10), and lead (10) rows with metrics, and the latest AI insight (or null). Empty landscape (zeroed stats, insight null) when no competitors are tracked. Requires the Indie plan.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Your own app's Sonar UUID",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Landscape: { app_id, stats: { competitors, keywords_compared, gaps, winnable, threats, leads }, gaps[], threats[], leads[], competitors[], insight, insight_cooldown: { in_cooldown, next_available_at } }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "description": "Result payload — full field reference at https://trysonar.app/docs/api",
+                      "additionalProperties": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "operationId": "getAppsByIdCompetitorLandscape"
+      },
+      "post": {
+        "tags": [
+          "Write"
+        ],
+        "summary": "Generate an AI competitive insight (7-day cooldown)",
+        "description": "Runs an AI analysis over the landscape: clusters keyword gaps into named opportunity themes with per-keyword metrics, writes threat narratives for climbing competitors, and diffs against the previous analysis. At most one analysis per app per 7 days — 429 with code `cooldown` and the next available time while in cooldown. 403 `trial_locked` on trial plans (AI-cost feature, paid plans only; GET stays available), 422 `no_competitors` / `too_little_data` (fewer than 5 compared keywords), 502 `ai_failed`. Requires a paid (non-trial) Indie plan and a write-scope API key.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Your own app's Sonar UUID",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {}
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "{ app_id, insight } — same insight shape as the GET endpoint",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "description": "Result payload — full field reference at https://trysonar.app/docs/api",
+                      "additionalProperties": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "422": {
+            "description": "no_competitors (track a competitor first) or too_little_data (fewer than 5 compared keywords)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "cooldown — an analysis was generated within the last 7 days; the message carries the next available time",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "502": {
+            "description": "ai_failed — the AI analysis failed, retry shortly",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "operationId": "postAppsByIdCompetitorLandscape"
+      }
+    },
+    "/api/v1/apps/{id}/discovered-keywords": {
+      "get": {
+        "tags": [
+          "Workspace"
+        ],
+        "summary": "Discovered keywords for an app (what to track next)",
+        "description": "Keywords Sonar's discovery engine surfaced for the app but that aren't tracked yet — ranked finds (bucket `ranked`), competitor gaps (`gap`), and idea suggestions (`idea`) — each with latest metrics, AI relevance (0-100), and an opportunity score (0-100). Sorted by opportunity, best first; `total` is the filtered count before `limit`. Track the winners via POST /api/v1/apps/{id}/keywords. Requires the Indie plan.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Sonar app UUID or store id of a tracked app",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "country",
+            "in": "query",
+            "description": "Filter to one market (ISO country code)",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "source",
+            "in": "query",
+            "description": "Filter by discovery source",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "autocomplete",
+                "metadata",
+                "serp_scan",
+                "competitor",
+                "apple_ads",
+                "ai"
+              ]
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "description": "Row status filter; default `new` (still-actionable)",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "new",
+                "tracked",
+                "hidden",
+                "all"
+              ]
+            }
+          },
+          {
+            "name": "bucket",
+            "in": "query",
+            "description": "Classification filter",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "ranked",
+                "gap",
+                "idea"
+              ]
+            }
+          },
+          {
+            "name": "min_relevance",
+            "in": "query",
+            "description": "Only rows with AI relevance ≥ this value (0-100)",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "min_opportunity",
+            "in": "query",
+            "description": "Only rows with opportunity ≥ this value (0-100)",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Max rows (1-500, default 200)",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "{ app_id, total, keywords: [{ id, keyword_id, keyword, store, country, rank, source, status, bucket, popularity, popularity_proxy, popularity_source, difficulty, ai_relevance, opportunity, discovered_at, ranks_checked_at }] }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "description": "Result payload — full field reference at https://trysonar.app/docs/api",
+                      "additionalProperties": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "operationId": "getAppsByIdDiscoveredKeywords"
+      }
+    },
+    "/api/v1/apps/{id}/review-insights": {
+      "get": {
+        "tags": [
+          "Workspace"
+        ],
+        "summary": "Latest AI review insight for a tracked app",
+        "description": "The latest AI review analysis for a tracked app (your own or a competitor), per country: praise/complaint themes with verbatim quotes and trend movement (new/persisting/growing/improving/resolved), overall sentiment, feature requests, and the regeneration cooldown. `insight` is null when none has been generated. Requires the Indie plan.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Sonar app UUID or store id of a tracked app",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "country",
+            "in": "query",
+            "description": "Reviews market (ISO country code, default us)",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "{ app_id, country, insight: { generated_at, reviews_analyzed, avg_score, window_start, window_end, model, overview, sentiment, praises[], complaints[], feature_requests[], changes_since_last } | null, cooldown: { in_cooldown, next_available_at } }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "description": "Result payload — full field reference at https://trysonar.app/docs/api",
+                      "additionalProperties": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "operationId": "getAppsByIdReviewInsights"
+      },
+      "post": {
+        "tags": [
+          "Write"
+        ],
+        "summary": "Generate an AI review insight (90-day cooldown)",
+        "description": "Analyzes the app's recent reviews into a fresh insight. At most one analysis per app+country every 90 days — 429 `cooldown` with the next available time. 403 `trial_locked` on trial plans (AI-cost feature, paid plans only; GET stays available), 422 `too_few_reviews` (fewer than 5 recent reviews), 502 `ai_failed`. Requires the Indie plan (paid, non-trial) and a write-scope API key.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Sonar app UUID or store id of a tracked app",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "country",
+            "in": "query",
+            "description": "Reviews market (ISO country code, default us)",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {}
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Same shape as the GET endpoint (insight + cooldown)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "description": "Result payload — full field reference at https://trysonar.app/docs/api",
+                      "additionalProperties": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "description": "trial_locked — generation is reserved for paid (non-trial) plans",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "422": {
+            "description": "too_few_reviews — fewer than 5 recent reviews to analyze",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "cooldown — an insight was generated within the last 90 days; the message carries the next available time",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "502": {
+            "description": "ai_failed — the AI analysis failed, retry shortly",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "operationId": "postAppsByIdReviewInsights"
+      }
+    },
+    "/api/v1/apps/{id}/overview": {
+      "get": {
+        "tags": [
+          "Workspace"
+        ],
+        "summary": "Computed dashboard scoreboard for one of your own apps",
+        "description": "The dashboard's computed numbers in one call: visibility index + share of voice (7-day deltas + daily spark), ranked/top-10 keyword counts with movement, best rank, top improvements/drops, the rank-distribution trend, and the actionable opportunity list (near_page_one / top_three_push / easy_target). Same code as the dashboard — no need to recompute from raw rank history. Requires the Indie plan.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Sonar app UUID or store id of one of your own tracked apps",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "days",
+            "in": "query",
+            "description": "Rank-history window in days (7-90, default 30)",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "{ app_id, app_name, store, days, keywords: { tracked, ranked, ranked_delta_7d, top_10, best_rank }, competitors, visibility: { score, delta_7d, share_of_voice, share_delta_7d, branded_excluded, spark[] }, movement: { improved_7d, dropped_7d, top_improvements[], top_drops[] }, rank_distribution[], opportunities[] }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "description": "Result payload — full field reference at https://trysonar.app/docs/api",
+                      "additionalProperties": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "operationId": "getAppsByIdOverview"
+      }
+    },
+    "/api/v1/portfolio": {
+      "get": {
+        "tags": [
+          "Workspace"
+        ],
+        "summary": "Portfolio rollup across all your apps (Agency plan)",
+        "description": "The whole portfolio's health in one call: per-app KPIs (visibility + matched-cohort 7-day delta, ranked/top-10 counts, net rank movement, rating), org-wide totals, biggest keyword movers both directions, a needs-attention triage list (visibility_drop / rating_drop / not_ranked signals), and the best discovered-keyword opportunities across apps. Same numbers as the /portfolio page. Requires an Agency plan — 403 on other plans.",
+        "responses": {
+          "200": {
+            "description": "{ kpis, apps[], movers_up[], movers_down[], attention[], opportunities[] }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "description": "Result payload — full field reference at https://trysonar.app/docs/api",
+                      "additionalProperties": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "description": "forbidden — the portfolio rollup requires an Agency plan",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "operationId": "getPortfolio"
+      }
+    },
+    "/api/v1/apps/{id}/sales": {
+      "get": {
+        "tags": [
+          "Workspace"
+        ],
+        "summary": "App Store Connect sales for one of your iOS apps (Agency plan)",
+        "description": "Daily first-time downloads, redownloads, in-app purchase units and approximate USD proceeds (static FX table, hence `proceeds_usd_approx`), window totals, and a per-country breakdown for one of your own iOS apps — same numbers as the Performance page. Needs an App Store Connect connection. Every response carries `status` (ready | not_connected | not_ios | app_not_in_account | pending | key_lacks_analytics) and a human-readable `message` when not ready, instead of an empty series; days Apple hasn't reported have `reported: false` and null metrics. Requires the Agency plan — 403 on other plans.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Sonar app UUID or store id (bundle id) of one of your own tracked iOS apps",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "start",
+            "in": "query",
+            "description": "First day of the window, YYYY-MM-DD (inclusive). Defaults to `days` back from `end`.",
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
+          },
+          {
+            "name": "end",
+            "in": "query",
+            "description": "Last day of the window, YYYY-MM-DD (inclusive). Defaults to yesterday (UTC).",
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
+          },
+          {
+            "name": "days",
+            "in": "query",
+            "description": "Window length in days when `start` is omitted (1-366, default 30)",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 366,
+              "default": 30
+            }
+          },
+          {
+            "name": "store",
+            "in": "query",
+            "required": false,
+            "description": "Disambiguates a store id tracked in both stores",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "ios",
+                "android"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "{ app_id, app_name, store, status, connected, message, apple_app_id, last_synced_at, range: { start, end }, reported_days, totals: { downloads, redownloads, iap_units, proceeds_usd_approx } | null, days: [{ date, reported, downloads, redownloads, iap_units, proceeds_usd_approx }], countries: [{ country, downloads, redownloads, iap_units, proceeds_usd_approx }] }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "description": "Result payload — full field reference at https://trysonar.app/docs/api",
+                      "additionalProperties": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "description": "forbidden — App Store Connect data via the API requires the Agency plan",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "operationId": "getAppsByIdSales"
+      }
+    },
+    "/api/v1/apps/{id}/engagement": {
+      "get": {
+        "tags": [
+          "Workspace"
+        ],
+        "summary": "App Store Connect engagement for one of your iOS apps (Agency plan)",
+        "description": "App Analytics for one of your own iOS apps — same numbers as the Engagement page: impressions → product page views → downloads with conversion rates (page_view_rate, download_rate) and App Store search share, impressions by source, and installs, deletions and sessions by day. Impressions follow App Store Connect's definition and INCLUDE product page views, so totals reconcile with App Store Connect; downloads come from the Sales report. Needs an App Store Connect connection with an Admin-role key. Every response carries `status` (ready | not_connected | not_ios | app_not_in_account | pending | key_lacks_analytics) and a human-readable `message` when not ready, instead of an empty series; days Apple hasn't reported have `reported: false` and null metrics. Requires the Agency plan — 403 on other plans.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Sonar app UUID or store id (bundle id) of one of your own tracked iOS apps",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "start",
+            "in": "query",
+            "description": "First day of the window, YYYY-MM-DD (inclusive). Defaults to `days` back from `end`.",
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
+          },
+          {
+            "name": "end",
+            "in": "query",
+            "description": "Last day of the window, YYYY-MM-DD (inclusive). Defaults to yesterday (UTC).",
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
+          },
+          {
+            "name": "days",
+            "in": "query",
+            "description": "Window length in days when `start` is omitted (1-366, default 30)",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 366,
+              "default": 30
+            }
+          },
+          {
+            "name": "store",
+            "in": "query",
+            "required": false,
+            "description": "Disambiguates a store id tracked in both stores",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "ios",
+                "android"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "{ app_id, app_name, store, status, connected, message, apple_app_id, last_synced_at, range: { start, end }, reported_days, totals: { impressions, product_page_views, downloads, installs, deletions, sessions } | null, rates: { page_view_rate, download_rate, search_share } | null, sources: [{ source_type, impressions, product_page_views, share_of_impressions }], days: [{ date, reported, impressions, product_page_views, installs, deletions, sessions, downloads }] }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "description": "Result payload — full field reference at https://trysonar.app/docs/api",
+                      "additionalProperties": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "description": "forbidden — App Store Connect data via the API requires the Agency plan",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "operationId": "getAppsByIdEngagement"
+      }
+    },
+    "/api/v1/products": {
+      "get": {
+        "tags": [
+          "Workspace"
+        ],
+        "summary": "List products with linked apps + competitor counts",
+        "description": "Returns every product the org owns (whole, no pagination). Use it to discover product/app UUIDs. Requires the Indie plan.",
+        "responses": {
+          "200": {
+            "description": "Products, each with apps[] (id, store, store_id, name, icon_url) and competitor_count",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "description": "Result payload — full field reference at https://trysonar.app/docs/api",
+                      "additionalProperties": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "operationId": "getProducts"
+      },
+      "post": {
+        "tags": [
+          "Write"
+        ],
+        "summary": "Create a product and start tracking its app(s)",
+        "description": "A product is the cross-store unit (up to one iOS + one Android app). Requires the Indie plan and a write-scope API key.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "apps"
+                ],
+                "properties": {
+                  "apps": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 2,
+                    "items": {
+                      "type": "object",
+                      "required": [
+                        "store",
+                        "store_id"
+                      ],
+                      "properties": {
+                        "store": {
+                          "type": "string",
+                          "enum": [
+                            "ios",
+                            "android"
+                          ]
+                        },
+                        "store_id": {
+                          "type": "string"
+                        },
+                        "country": {
+                          "type": "string",
+                          "pattern": "^[a-z]{2}$"
+                        }
+                      }
+                    }
+                  },
+                  "name": {
+                    "type": "string",
+                    "maxLength": 120
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Product with linked apps — apps[].id are the Sonar app UUIDs",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "description": "Result payload — full field reference at https://trysonar.app/docs/api",
+                      "additionalProperties": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "operationId": "postProducts"
+      }
+    },
+    "/api/v1/products/{id}": {
+      "delete": {
+        "tags": [
+          "Write"
+        ],
+        "summary": "Delete a product and untrack its apps",
+        "description": "Deletes the product and untracks every linked app (cascading org-scoped data). Shared rows survive for other orgs. Requires the Indie plan and a write-scope API key.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Product UUID",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "{ id, deleted, untracked_apps }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "description": "Result payload — full field reference at https://trysonar.app/docs/api",
+                      "additionalProperties": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "operationId": "deleteProductsById"
+      }
+    },
+    "/api/v1/products/{id}/apps": {
+      "post": {
+        "tags": [
+          "Write"
+        ],
+        "summary": "Link the second-store version of a product",
+        "description": "Requires the Indie plan and a write-scope API key. Each product holds at most one app per store.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Product UUID",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "store",
+                  "store_id"
+                ],
+                "properties": {
+                  "store": {
+                    "type": "string",
+                    "enum": [
+                      "ios",
+                      "android"
+                    ]
+                  },
+                  "store_id": {
+                    "type": "string"
+                  },
+                  "country": {
+                    "type": "string",
+                    "pattern": "^[a-z]{2}$"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Linked app",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "description": "Result payload — full field reference at https://trysonar.app/docs/api",
+                      "additionalProperties": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "operationId": "postProductsByIdApps"
+      }
+    },
+    "/api/v1/products/{id}/competitors": {
+      "post": {
+        "tags": [
+          "Write"
+        ],
+        "summary": "Track a competitor app under a product",
+        "description": "The product must already have its own app in the same store. Requires the Indie plan and a write-scope API key.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Product UUID",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "store",
+                  "store_id"
+                ],
+                "properties": {
+                  "store": {
+                    "type": "string",
+                    "enum": [
+                      "ios",
+                      "android"
+                    ]
+                  },
+                  "store_id": {
+                    "type": "string"
+                  },
+                  "country": {
+                    "type": "string",
+                    "pattern": "^[a-z]{2}$"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Linked competitor app",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "description": "Result payload — full field reference at https://trysonar.app/docs/api",
+                      "additionalProperties": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "operationId": "postProductsByIdCompetitors"
+      }
+    },
+    "/api/v1/products/{id}/competitors/{competitorId}": {
+      "delete": {
+        "tags": [
+          "Write"
+        ],
+        "summary": "Remove a competitor from a product",
+        "description": "competitorId is the competitor's Sonar app UUID. Drops the competitor edge under the product's own app(s); the competitor app is untracked automatically if no other own app references it. Requires the Indie plan and a write-scope API key.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Product UUID",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "competitorId",
+            "in": "path",
+            "required": true,
+            "description": "Competitor's Sonar app UUID",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "{ product_id, competitor_app_id, deleted, edges_removed }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "description": "Result payload — full field reference at https://trysonar.app/docs/api",
+                      "additionalProperties": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "operationId": "deleteProductsByIdCompetitorsByCompetitorId"
+      }
+    },
+    "/api/v1/tracked-keywords/{id}": {
+      "patch": {
+        "tags": [
+          "Write"
+        ],
+        "summary": "Update the note and/or starred flag on a tracked keyword",
+        "description": "id is the tracked-keyword UUID (the id field from GET /apps/{id}/keywords, not keyword_id). At least one of note/starred must be present. Requires the Indie plan and a write-scope API key.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Tracked-keyword UUID",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "minProperties": 1,
+                "properties": {
+                  "note": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "maxLength": 1000,
+                    "description": "Note text; null or empty clears it"
+                  },
+                  "starred": {
+                    "type": "boolean",
+                    "description": "true marks the keyword as a favorite/target (sets starred_at), false unstars it"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated tracked keyword",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "description": "Result payload — full field reference at https://trysonar.app/docs/api",
+                      "additionalProperties": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "operationId": "patchTrackedKeywordsById"
+      },
+      "delete": {
+        "tags": [
+          "Write"
+        ],
+        "summary": "Untrack a keyword/app pair",
+        "description": "Removes a single tracked keyword. id is the tracked-keyword UUID (the id field from GET /apps/{id}/keywords, not keyword_id). Only the per-org tracking row is deleted; the shared keyword and its history remain. Requires the Indie plan and a write-scope API key.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Tracked-keyword UUID",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Deleted tracked keyword",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "description": "Result payload — full field reference at https://trysonar.app/docs/api",
+                      "additionalProperties": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "operationId": "deleteTrackedKeywordsById"
+      }
+    },
+    "/api/v1/competitors/{id}/scan": {
+      "post": {
+        "tags": [
+          "Write"
+        ],
+        "summary": "Run an AI keyword discovery scan on a competitor",
+        "description": "Generates the search terms the competitor's listing is optimized for (brand terms included), queues them for SERP verification, and verifies the first batch inline (~30s); the rest verify in the background, recording both apps' ranks. Requires the Indie plan and a write-scope API key.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Competitor's Sonar app UUID",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "own_app_id"
+                ],
+                "properties": {
+                  "own_app_id": {
+                    "type": "string",
+                    "format": "uuid",
+                    "description": "Your own app the scan compares against"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Scan counts: { generated, queued, verified_now } — remaining candidates verify in the background; poll the competitor keywords endpoint for results",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "description": "Result payload — full field reference at https://trysonar.app/docs/api",
+                      "additionalProperties": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "operationId": "postCompetitorsByIdScan"
+      }
+    },
+    "/api/v1/alerts": {
+      "get": {
+        "tags": [
+          "Workspace"
+        ],
+        "summary": "List alert rules (subscriptions)",
+        "description": "Each rule is org-wide (scope_app_id null) or scoped to one app, with the configured and effective threshold. Requires the Indie plan.",
+        "responses": {
+          "200": {
+            "description": "Alert rules: { id, type, scope_app_id, threshold, effective_threshold, enabled, created_at }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "description": "Result payload — full field reference at https://trysonar.app/docs/api",
+                      "additionalProperties": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "operationId": "getAlerts"
+      },
+      "post": {
+        "tags": [
+          "Write"
+        ],
+        "summary": "Create or update an alert rule",
+        "description": "Upserts on (type, scope_app_id). Omit threshold for the per-type default; omit scope_app_id for an org-wide rule. Requires the Indie plan and a write-scope API key.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "type"
+                ],
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "rank_drop",
+                      "rank_gain",
+                      "entered_top10",
+                      "left_top10",
+                      "new_ranking",
+                      "rating_drop",
+                      "review_spike",
+                      "competitor_change",
+                      "top_chart"
+                    ]
+                  },
+                  "scope_app_id": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "App UUID to scope to; null/omitted = all tracked apps"
+                  },
+                  "threshold": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ],
+                    "minimum": 0,
+                    "description": "null/omitted = per-type default. For top_chart: the rank cutoff (1-200, default 200)"
+                  },
+                  "countries": {
+                    "type": [
+                      "array",
+                      "null"
+                    ],
+                    "items": {
+                      "type": "string",
+                      "minLength": 2,
+                      "maxLength": 2
+                    },
+                    "maxItems": 10,
+                    "description": "top_chart only: storefronts to watch (ISO 3166-1 alpha-2). Omit to keep the stored list; null/[] = the countries the org tracks keywords in"
+                  },
+                  "enabled": {
+                    "type": "boolean",
+                    "default": true
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The created/updated alert rule",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "description": "Result payload — full field reference at https://trysonar.app/docs/api",
+                      "additionalProperties": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Unknown type, scope_app_id not tracked, or invalid countries",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "operationId": "postAlerts"
+      }
+    },
+    "/api/v1/alerts/events": {
+      "get": {
+        "tags": [
+          "Workspace"
+        ],
+        "summary": "Detected alert events feed",
+        "description": "The org's detected alert events, newest first — the same feed as the in-app Recent alerts panel and the email digest. Events only exist for alert types with enabled rules; detection runs once daily. Poll with `since` (your last poll time) to react to changes programmatically. Requires the Indie plan.",
+        "parameters": [
+          {
+            "name": "type",
+            "in": "query",
+            "description": "Filter to one alert type",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "rank_drop",
+                "rank_gain",
+                "entered_top10",
+                "left_top10",
+                "new_ranking",
+                "rating_drop",
+                "review_spike",
+                "competitor_change",
+                "top_chart"
+              ]
+            }
+          },
+          {
+            "name": "app_id",
+            "in": "query",
+            "description": "Filter to one tracked app (Sonar UUID or store id)",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "since",
+            "in": "query",
+            "description": "Only events created at/after this ISO 8601 timestamp",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Max events (1-200, default 50)",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Alert events: { id, type, app_id, keyword_id, measured_at, payload (type-specific), emailed_at, created_at }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "description": "Result payload — full field reference at https://trysonar.app/docs/api",
+                      "additionalProperties": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "operationId": "getAlertsEvents"
+      }
+    },
+    "/api/v1/alerts/{id}": {
+      "delete": {
+        "tags": [
+          "Write"
+        ],
+        "summary": "Delete an alert rule (unsubscribe)",
+        "description": "id is the rule id from GET /api/v1/alerts. Requires the Indie plan and a write-scope API key.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Alert rule UUID",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "{ id, deleted }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "description": "Result payload — full field reference at https://trysonar.app/docs/api",
+                      "additionalProperties": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "operationId": "deleteAlertsById"
+      }
+    },
+    "/api/v1/screenshots/devices": {
+      "get": {
+        "tags": [
+          "Screenshots"
+        ],
+        "summary": "Supported device sizes + canvas dimensions",
+        "description": "The pixel coordinate space of every layout. Pick a device before creating a set. Requires the Indie plan.",
+        "responses": {
+          "200": {
+            "description": "[{ id, label, store, category, canvas_width, canvas_height, default_frame_width }]",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "description": "Result payload — full field reference at https://trysonar.app/docs/api",
+                      "additionalProperties": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "operationId": "getScreenshotsDevices"
+      }
+    },
+    "/api/v1/screenshots/sets": {
+      "get": {
+        "tags": [
+          "Screenshots"
+        ],
+        "summary": "List a product's screenshot sets (metadata)",
+        "parameters": [
+          {
+            "name": "product_id",
+            "in": "query",
+            "required": true,
+            "description": "Product the sets belong to",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "[{ id, name, store, device_size, source_locale, locales, created_at, updated_at, studio_url }]",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "description": "Result payload — full field reference at https://trysonar.app/docs/api",
+                      "additionalProperties": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "operationId": "getScreenshotsSets",
+        "description": "List a product's screenshot sets (metadata)"
+      },
+      "post": {
+        "tags": [
+          "Write"
+        ],
+        "summary": "Create a screenshot set",
+        "description": "Create a set from explicit layouts, a built-in template, or blank. Every set response carries a studio_url — humans can review/edit the same set in the dashboard. Requires the Indie plan and a write-scope API key.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "product_id",
+                  "store",
+                  "device_size"
+                ],
+                "properties": {
+                  "product_id": {
+                    "type": "string"
+                  },
+                  "store": {
+                    "type": "string",
+                    "enum": [
+                      "ios",
+                      "android"
+                    ]
+                  },
+                  "device_size": {
+                    "type": "string",
+                    "description": "Device id from GET /screenshots/devices"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "template_id": {
+                    "type": "string",
+                    "description": "Seed from a built-in template (mutually exclusive with screens)"
+                  },
+                  "screens": {
+                    "type": "array",
+                    "description": "1-10 layout documents, in order",
+                    "items": {
+                      "type": "object"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The full set incl. screens[] with ids",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "description": "Result payload — full field reference at https://trysonar.app/docs/api",
+                      "additionalProperties": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "validation_error — field-level layout validation messages",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "operationId": "postScreenshotsSets"
+      }
+    },
+    "/api/v1/screenshots/sets/{id}": {
+      "get": {
+        "tags": [
+          "Screenshots"
+        ],
+        "summary": "Full screenshot set (layouts + per-locale translations)",
+        "description": "Every screen's layout plus per-screen translations keyed by locale. Responses contain inline image data URLs and can be large.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The full set",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "description": "Result payload — full field reference at https://trysonar.app/docs/api",
+                      "additionalProperties": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "operationId": "getScreenshotsSetsById"
+      },
+      "patch": {
+        "tags": [
+          "Write"
+        ],
+        "summary": "Rename / replace locales / reorder screens",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "locales": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "Replaces the extra-locale list; removed locales lose their translations"
+                  },
+                  "screen_order": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "Full permutation of the set's screen ids, new order"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The updated set in full",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "description": "Result payload — full field reference at https://trysonar.app/docs/api",
+                      "additionalProperties": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "operationId": "patchScreenshotsSetsById",
+        "description": "Rename / replace locales / reorder screens"
+      },
+      "delete": {
+        "tags": [
+          "Write"
+        ],
+        "summary": "Delete a set (screens + translations included)",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "{ deleted: true }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "description": "Result payload — full field reference at https://trysonar.app/docs/api",
+                      "additionalProperties": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "operationId": "deleteScreenshotsSetsById",
+        "description": "Delete a set (screens + translations included)"
+      }
+    },
+    "/api/v1/screenshots/sets/{id}/export": {
+      "get": {
+        "tags": [
+          "Screenshots"
+        ],
+        "summary": "Server-rendered store-ready PNG export",
+        "description": "Renders through the same engine as the Screenshot Studio editor — no browser needed. Default response is application/zip with 01.png…NN.png at native device resolution in store upload order. Call once per locale. Read scope.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "locale",
+            "in": "query",
+            "description": "Render that locale's overrides (default: source locale)",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "screen",
+            "in": "query",
+            "description": "A screen id — returns that single slice as image/png",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "meta",
+            "in": "query",
+            "description": "meta=1 returns lightweight JSON (source_locale, locales, screen ids) instead of rendering",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "application/zip (default), image/png (screen=), or JSON (meta=1)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "description": "Result payload — full field reference at https://trysonar.app/docs/api",
+                      "additionalProperties": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "operationId": "getScreenshotsSetsByIdExport"
+      }
+    },
+    "/api/v1/screenshots/sets/{id}/screens": {
+      "post": {
+        "tags": [
+          "Write"
+        ],
+        "summary": "Append a screen to a set",
+        "description": "Body: { layout: { … } }, or empty for a blank slice. Requires the Indie plan and a write-scope API key.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "layout": {
+                    "type": "object"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "{ id, position, layout }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "description": "Result payload — full field reference at https://trysonar.app/docs/api",
+                      "additionalProperties": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "validation_error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "operationId": "postScreenshotsSetsByIdScreens"
+      }
+    },
+    "/api/v1/screenshots/screens/{id}": {
+      "put": {
+        "tags": [
+          "Write"
+        ],
+        "summary": "Replace one screen's layout",
+        "description": "Whole-document replace, no merging. Body: { layout: { … } }. Requires the Indie plan and a write-scope API key.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "layout"
+                ],
+                "properties": {
+                  "layout": {
+                    "type": "object"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The stored screen",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "description": "Result payload — full field reference at https://trysonar.app/docs/api",
+                      "additionalProperties": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "validation_error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "operationId": "putScreenshotsScreensById"
+      },
+      "delete": {
+        "tags": [
+          "Write"
+        ],
+        "summary": "Delete a screen (a set keeps at least one)",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "{ deleted: true }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "description": "Result payload — full field reference at https://trysonar.app/docs/api",
+                      "additionalProperties": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Deleting the set's last screen",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "operationId": "deleteScreenshotsScreensById",
+        "description": "Delete a screen (a set keeps at least one)"
+      }
+    },
+    "/api/v1/screenshots/sets/{id}/translations/{locale}": {
+      "put": {
+        "tags": [
+          "Write"
+        ],
+        "summary": "Replace one locale's translation overrides",
+        "description": "Overrides are sparse (keyed by layer id) and replace the screen's stored overrides for that locale wholesale; geometry/styling always come from the source layout. The locale is auto-enabled on the set. Requires the Indie plan and a write-scope API key.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "locale",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "entries"
+                ],
+                "properties": {
+                  "entries": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "required": [
+                        "screenshot_id",
+                        "overrides"
+                      ],
+                      "properties": {
+                        "screenshot_id": {
+                          "type": "string"
+                        },
+                        "overrides": {
+                          "type": "object"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The locale's stored overrides",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "description": "Result payload — full field reference at https://trysonar.app/docs/api",
+                      "additionalProperties": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "validation_error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "operationId": "putScreenshotsSetsByIdTranslationsByLocale"
+      }
+    }
+  },
+  "tags": [
+    {
+      "name": "Apps",
+      "description": "App lookup, search, scoring, and reviews"
+    },
+    {
+      "name": "Keywords",
+      "description": "Keyword research, difficulty, and suggestions"
+    },
+    {
+      "name": "Charts",
+      "description": "Store top charts with day-over-day movement"
+    },
+    {
+      "name": "Workspace",
+      "description": "Your tracked apps, keywords, rankings, and competitors (Indie plan)"
+    },
+    {
+      "name": "Write",
+      "description": "Mutate your workspace — create products, track keywords/competitors, notes, scans (Indie plan + write-scope key)"
+    },
+    {
+      "name": "Screenshots",
+      "description": "Screenshot Studio — agents author app-store screenshot sets as layout JSON, humans fine-tune the same sets in the dashboard (feature-flag gated; mutations under the Write tag)"
+    }
+  ]
+}
