@@ -1,0 +1,3015 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "mumo REST API",
+    "version": "1.0.0",
+    "termsOfService": "https://mumo.chat/legal/terms",
+    "contact": {
+      "name": "mumo support",
+      "email": "support@mumo.chat",
+      "url": "https://mumo.chat/docs/api"
+    },
+    "description": "Run structured multi-model deliberations on demand. Send a prompt; get back a session containing every model's response and the cross-model claim map.\n\n**Async by default.** `POST /api/deliberation` and `POST /api/sessions/{id}/rounds` return a `202 Accepted` ack once the round row commits — they do not wait for model execution. Poll `GET /api/sessions/{id}/progress` until the round is terminal, then read the full artifact stack from `GET /api/sessions/{id}`.\n\n**You drive the rounds.** There is no preset round count and no autonomous moderator. Read each round's `claim_map`, then steer the next round with typed snippets (KEEP / EXPLORE / CHALLENGE / CORE / SHIFT) on `POST /api/sessions/{id}/rounds`.\n\n**Billing.** Every billable model call debits a dollar-denominated credit wallet. A write operation is admitted when the effective balance is above zero AND covers the requested round's minimum — each model's reserved output room plus input, plus the post-round reactions and takeaway (web search is not part of the minimum: a round the balance covers without search is admitted and runs without web search). Otherwise it is rejected pre-flight with `403 credit_exhausted`; a refusal at a positive balance names the minimum (`required_usd`) and the cheaper rosters that fit (`affordable_alternatives`). All user-visible USD amounts are markup-included except `total_cost_usd` / `cost_usd`, which are ledger cost (markup-exclusive).\n\nProse reference: https://mumo.chat/docs/api — agent-runtime (MCP) reference: https://mumo.chat/docs/mcp"
+  },
+  "servers": [
+    {
+      "url": "https://mumo.chat"
+    }
+  ],
+  "security": [
+    {
+      "bearerAuth": []
+    },
+    {
+      "apiKeyHeader": []
+    }
+  ],
+  "tags": [
+    {
+      "name": "Deliberations",
+      "description": "Create sessions and append rounds — the write surface."
+    },
+    {
+      "name": "Sessions",
+      "description": "Read session state, rounds, progress, and public share links."
+    },
+    {
+      "name": "Account",
+      "description": "Models available to the caller, wallet balance, and platform defaults."
+    },
+    {
+      "name": "System",
+      "description": "Unauthenticated service health."
+    }
+  ],
+  "paths": {
+    "/api/deliberation": {
+      "post": {
+        "operationId": "createDeliberation",
+        "summary": "Create a deliberation",
+        "description": "Creates a remote-mode session and commits round 0, then returns a `202` ack in under 500ms. Model execution runs in the background — poll `progress_url` until the round is terminal, then read the artifacts from `GET /api/sessions/{id}`.\n\nOmit `models` and the platform curates a panel of up to your plan's seat cap (frontier / mid / cheap, one per provider family, from the active registry models your plan can run). Pass 2–3 explicit model IDs to choose the panel yourself; call `GET /api/models` to enumerate valid IDs and see which your plan includes.\n\nTwo fields are explicitly REJECTED rather than ignored: `moderator_model` (autonomous AI moderation was retired in 2026-05) and `recap_session` (round 0 alone cannot produce a session synthesis). Sending either returns `400 invalid_request`. Unrecognized keys are ignored.",
+        "tags": [
+          "Deliberations"
+        ],
+        "parameters": [
+          {
+            "name": "wait",
+            "in": "query",
+            "required": false,
+            "deprecated": true,
+            "description": "Compatibility shim (REST only, deprecated). `wait=true` blocks until the round reaches terminal state or 180s elapses, preserving the pre-2026-04 synchronous response shape. Responses carry `Deprecation`, `Sunset`, and `Link` headers. Once the sunset is enforced the endpoint returns 410 `wait_sunset` instead. Prefer the async default plus polling `progress_url`.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "true"
+              ]
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Stable string making retries safe. Scope is (account, endpoint, key), so the same key may be used on both create and append without colliding. Omit it and the server generates a UUID and echoes it in the ack's `idempotency_key` — persist that value if you want retry safety across transport failures. Same key + same semantic body replays the cached response; same key + different semantic body returns 409 `idempotency_conflict`. TTL is a 24h rolling window.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Client-Request-Id",
+            "in": "header",
+            "required": false,
+            "description": "Opaque caller-supplied correlation id, echoed back on the ack as `client_request_id`.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateDeliberationRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "`?wait=true` only: the blocking window elapsed (or this invocation deferred to a concurrent executor) before the round settled. The body is the standard ack plus `wait_timeout: true`; poll `progress_url` for terminal state.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/Ack"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "wait_timeout": {
+                          "type": "boolean"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "`?wait=true` only: the round reached terminal state inside the blocking window. Returns the full session object.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Session"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Round 0 committed. Model execution continues in the background.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Ack"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`malformed_json` (body was not parseable JSON), `invalid_request` (schema validation failed; body carries `issues`), `unknown_models` (body carries `unknown_models` + `models_requested`; checked before the plan and credit checks), or `insufficient_active_models` (curated panel could not reach 2 picks; body carries `collapsed_buckets`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`unauthorized` — missing, invalid, expired, or revoked API key. This endpoint is API-key only; browser cookie sessions are rejected here.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`credit_exhausted` — the balance is zero or negative, or is positive but below the requested round's minimum (body carries `effective_balance_usd`, `free_usd`, `subscription_usd`, `refill_usd`, `per_model_minimum_usd`, `next_reset_at`, `models_requested`; a positive-balance refusal adds `required_usd` and `affordable_alternatives` — populated here, on create, with the cheaper rosters from your request that fit), `forbidden_model` (a requested model is not included in your plan; body carries `reason`, `denied_models`, `upgrade_url`, `human_action_required: true`), `panel_seat_limit` (the request seats more models than your plan allows; body carries `seat_limit`, `requested_seats`, `upgrade_url`, `human_action_required: false`), `terms_acceptance_required`, `region_unavailable` (body carries `scope`), or `account_suspended` (the key owner's account is suspended; not retryable).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`idempotency_conflict` — same Idempotency-Key with a different semantic body; the body carries `original_request_fingerprint` for a caller-side diff. Or `session_busy` — the original request with this key is still in flight.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "`wait_sunset` — `?wait=true` is no longer supported on this deployment. Create the round, then poll `GET /api/sessions/{id}/progress`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "`input_too_long` — the request's new text (`prompt` plus `reference`, counted in tokens as characters ÷ 4) is longer than your plan allows; body carries `typed_tokens`, `cap`, `upgrade_url`, `human_action_required: false`. Not retryable as-is: shorten it to at most `cap`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "`rate_limited` — MCP-origin free-tier session-creation rate limit. Body carries `retry_after_seconds`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`internal_error` — transient. Retry with the same Idempotency-Key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/sessions": {
+      "get": {
+        "operationId": "listSessions",
+        "summary": "List sessions",
+        "description": "Returns a lightweight, paginated list of your sessions — no response bodies, snippets, or claim maps. Use `GET /api/sessions/{id}` for full content.",
+        "tags": [
+          "Sessions"
+        ],
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Page size. Clamped to 1–200.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200,
+              "default": 7
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "description": "Pagination offset. Clamped to a minimum of 0.",
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0
+            }
+          },
+          {
+            "name": "mode",
+            "in": "query",
+            "required": false,
+            "description": "Filter by session mode. `remote` for every session created through this API; historical sessions may report `autonomous`.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "remote",
+                "autonomous"
+              ]
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "description": "Filter by session status.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "ready",
+                "streaming"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Paginated session list.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionListResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`unauthorized` — missing, invalid, expired, or revoked credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`terms_acceptance_required` — updated terms must be accepted first. Or `region_unavailable` (body carries `scope`), or `account_suspended` (the key owner's account is suspended; not retryable).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`internal_error` — the list query failed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/sessions/{id}": {
+      "get": {
+        "operationId": "getSession",
+        "summary": "Get a session",
+        "description": "Fetches the full state of a session — every round, model response, model-emitted snippet, claim map, opted-in round takeaway, and the editorial summary when present. The response is computed fresh on every call.",
+        "tags": [
+          "Sessions"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Session UUID.",
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The full session object.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Session"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`invalid_params` — the path parameter failed validation. Body carries `issues`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`unauthorized` — missing, invalid, expired, or revoked credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`terms_acceptance_required` — updated terms must be accepted first. Or `region_unavailable` (body carries `scope`), or `account_suspended` (the key owner's account is suspended; not retryable).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`not_found` — the session does not exist or is not yours. The 'exists but not yours' case is deliberately collapsed into this code so a caller cannot probe for someone else's session.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/sessions/{id}/rounds": {
+      "post": {
+        "operationId": "appendRound",
+        "summary": "Append a round",
+        "description": "Adds a round to an existing session and returns a `202` ack; model execution runs in the background. The round reuses the session's participant panel — you cannot change models mid-session.\n\n`snippets` is optional but is the highest-signal thing a moderator does: verbatim quotes from a prior round's responses, each tagged KEEP (preserve this), EXPLORE (dig deeper), CHALLENGE (push back), CORE (build on it), or SHIFT (this reframes the question). `quoted_model` is the model ID that originated the quote.\n\nAn `Idempotency-Key` is strongly recommended here — round-append duplication corrupts deliberation history.\n\n`improvement_consent` and `dataset_consent` are session-level and are REJECTED on this endpoint (`400 invalid_request`) rather than silently changing consent mid-session.",
+        "tags": [
+          "Deliberations"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Session UUID.",
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "wait",
+            "in": "query",
+            "required": false,
+            "deprecated": true,
+            "description": "Compatibility shim (REST only, deprecated). `wait=true` blocks until the round reaches terminal state or 180s elapses, preserving the pre-2026-04 synchronous response shape. Responses carry `Deprecation`, `Sunset`, and `Link` headers. Once the sunset is enforced the endpoint returns 410 `wait_sunset` instead. Prefer the async default plus polling `progress_url`.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "true"
+              ]
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Stable string making retries safe. Scope is (account, endpoint, key), so the same key may be used on both create and append without colliding. Omit it and the server generates a UUID and echoes it in the ack's `idempotency_key` — persist that value if you want retry safety across transport failures. Same key + same semantic body replays the cached response; same key + different semantic body returns 409 `idempotency_conflict`. TTL is a 24h rolling window.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Client-Request-Id",
+            "in": "header",
+            "required": false,
+            "description": "Opaque caller-supplied correlation id, echoed back on the ack as `client_request_id`.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AppendRoundRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Either the `?wait=true` timeout/deferred ack (`wait_timeout: true`), the `?wait=true` terminal session object, or an idempotent replay of a previously cached ack. A replay whose round entered the refund lifecycle is reshaped: `status: \"processing_refund\"` with `refund_status`, `failure_code`, and `retry_after_ms` while the refund is pending, or `status: \"failed\"` with `refund_status: \"credited\"` once it lands.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/Session"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ReplayAck"
+                    },
+                    {
+                      "allOf": [
+                        {
+                          "$ref": "#/components/schemas/Ack"
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "wait_timeout": {
+                              "type": "boolean"
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Round committed; model execution continues in the background. Also returned when an `Idempotency-Key` replays a prior append — normally the cached ack verbatim, but reshaped to `ReplayAck` if that round has since entered the refund lifecycle.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/Ack"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ReplayAck"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`malformed_json`, `invalid_request` (schema validation failed — including sending `improvement_consent` or `dataset_consent`; body carries `issues`), `invalid_params`, or `unknown_models` (the session references model IDs no longer in the registry; body carries `unknown_models`; checked before the plan and credit checks).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`unauthorized` — missing, invalid, expired, or revoked credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`credit_exhausted` — the balance is zero or negative, or is positive but below the minimum for a round over the session's active models (body carries the bucket breakdown and `next_reset_at`; a positive-balance refusal adds `required_usd` and `affordable_alternatives`, which is always empty here — an append cannot change the session's roster), `forbidden_model` (a model in the session's panel is not included in your plan; body carries `reason`, `denied_models`, `upgrade_url`, `human_action_required: true`), `panel_seat_limit` (the session's panel seats more models than your plan allows; body carries `seat_limit`, `requested_seats`, `upgrade_url`, `human_action_required: false` — an append cannot change the roster, so start a new deliberation with at most `seat_limit` models), `terms_acceptance_required`, `region_unavailable` (body carries `scope`), or `account_suspended` (the key owner's account is suspended; not retryable).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`not_found` — the session does not exist or is not yours.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`session_busy` — a round is currently in flight; retry after a short delay with the SAME Idempotency-Key. Or `idempotency_conflict` — same key, different body; the response carries `original_request_fingerprint`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "`wait_sunset` — `?wait=true` is no longer supported on this deployment.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "`input_too_long` — the request's new text (`prompt` plus the `snippets`' `quote`, `comment` and `quoted_model`, counted in tokens as characters ÷ 4) is longer than your plan allows; body carries `typed_tokens`, `cap`, `upgrade_url`, `human_action_required: false`. Not retryable as-is: shorten it to at most `cap`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "`rate_limited` — too many appends too quickly on this session; body carries `retry_after_seconds`. Or `daily_limit_reached` — round budget exhausted for the period; body carries `resets_at`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`internal_error` — transient. Retry with the same Idempotency-Key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "operationId": "listRounds",
+        "summary": "List raw rounds",
+        "description": "Returns this session's rounds as a bare JSON array in the platform's INTERNAL round shape — this is the one v1 route that does not pass through the API serializer, so its field names are the internal ones and its shape is less stable than `GET /api/sessions/{id}`.\n\nPrefer `GET /api/sessions/{id}`, whose `rounds[]` entries are the serialized, contract-stable shape. Reactor annotations are stripped from this route for API-key callers.",
+        "tags": [
+          "Sessions"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Session UUID.",
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Raw round rows, ordered by index.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/RawRound"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`invalid_params` — the path parameter failed validation.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`unauthorized` — missing, invalid, expired, or revoked credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`terms_acceptance_required` — updated terms must be accepted first. Or `region_unavailable` (body carries `scope`), or `account_suspended` (the key owner's account is suspended; not retryable).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`not_found` — the session does not exist or is not yours.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/sessions/{id}/share": {
+      "post": {
+        "operationId": "shareSession",
+        "summary": "Share a session publicly",
+        "description": "Publishes the session at a public reader-deck URL that anyone with the link can view. No request body.\n\nIdempotent — re-calling returns the same slug and URLs. The public page is a point-in-time snapshot; a share call made after new rounds were appended refreshes it at the same URL. A share never demotes an already-elevated artifact.\n\nThe first share of a long session generates any missing round takeaways before freezing the snapshot (~15–30s worst case), so a `500 share_failed` whose message says summaries are still generating is transient — retry after a moment.\n\n`markdown_url` is the full-transcript machine-readable twin (per-round claim maps included — the review/audit surface); `brief_url` is the synthesis-only triage tier (~1–2k tokens, predictable cost).",
+        "tags": [
+          "Sessions"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Session UUID.",
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The share link and its markdown twins.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ShareResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`invalid_params` — the path parameter failed validation.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`unauthorized` — no authenticated user on the request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`registration_required` — anonymous callers cannot share. Or `terms_acceptance_required`, `region_unavailable` (body carries `scope`), or `account_suspended` (the key owner's account is suspended; not retryable).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`not_found` — the session does not exist or is not yours.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`share_failed` — the share pipeline failed. Treat as retryable; the summaries-still-generating case resolves on retry.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/sessions/{id}/progress": {
+      "get": {
+        "operationId": "getRoundProgress",
+        "summary": "Poll round progress",
+        "description": "Lightweight poll for round and per-model state without fetching the full session body. No joins on response text, snippets, or claim maps.\n\n**Terminal check:** `moderation_status` is `complete` or `failed`, **or** `execution_status` is `complete` or `failed`. Rounds created from the mumo web UI never write `moderation_status` (it stays `null`), so a moderation-only check polls forever on those. Either terminal value is an end state — stop polling and fetch content from `GET /api/sessions/{id}`.\n\n**ETag support:** every response carries a weak ETag. Send it back via `If-None-Match` to short-circuit no-change polls with `304 Not Modified`. The validator covers every body-derived signal plus, while any model is non-terminal, a 5-second wall-clock bucket so `since_last_chunk_ms` and `expired_at_read` cannot go stale past one bucket boundary. Terminal-only payloads keep a stable state-based ETag, so cache hits on completed rounds are long-lived. Responses are `cache-control: no-store` — do not share-cache, but your own `If-None-Match` re-poll still works.",
+        "tags": [
+          "Sessions"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Session UUID.",
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "If-None-Match",
+            "in": "header",
+            "required": false,
+            "description": "The `ETag` from a previous poll. An exact match returns 304 with no body.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Current round and per-model progress.",
+            "headers": {
+              "ETag": {
+                "description": "Weak validator for the next `If-None-Match` poll.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Cache-Control": {
+                "description": "Always `no-store`.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProgressResponse"
+                }
+              }
+            }
+          },
+          "304": {
+            "description": "Nothing changed since the supplied `If-None-Match`. No body.",
+            "headers": {
+              "ETag": {
+                "description": "Unchanged validator.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Cache-Control": {
+                "description": "Always `no-store`.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`invalid_params` — the path parameter failed validation.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`unauthorized` — missing, invalid, expired, or revoked credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`terms_acceptance_required` — updated terms must be accepted first. Or `region_unavailable` (body carries `scope`), or `account_suspended` (the key owner's account is suspended; not retryable).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`not_found` — the session does not exist or is not yours.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`internal_error` — the rounds or model-responses read failed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/models": {
+      "get": {
+        "operationId": "listModels",
+        "summary": "List available models",
+        "description": "Lists the models visible to the caller, with pricing and a per-model availability verdict.\n\nAuthentication is optional on this route, and the response lists the FULL catalog either way — the model list is public. A malformed or revoked bearer token is a `401` rather than a silent fallback.\n\n`available` is the 'can I actually use this right now, through this API?' answer. It is `true` only for a caller holding an `mmo_live_*` key, on a model their plan includes, with credit remaining — the three things `/api/deliberation` checks before it will run anything (a model outside the plan reports `membership_required`). Any other caller (no bearer, or a browser/anonymous session token) gets `available: false` with `api_key_required` on every model, because those callers are rejected by the execution endpoints regardless of tier. The catalog is still listed in full either way, so it stays discoverable before you hold a key.\n\nPer-million pricing reflects raw provider cost (platform COGS), not markup-inclusive user-paid amounts. For 'what will this cost me?', read the settled per-round cost after completion.",
+        "tags": [
+          "Account"
+        ],
+        "security": [
+          {},
+          {
+            "bearerAuth": []
+          },
+          {
+            "apiKeyHeader": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Models visible to the caller.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Model"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`unauthorized` — a bearer token was supplied but is invalid, expired, or revoked. Omitting the header entirely is not an error; it returns the tier-0 public list.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/credit": {
+      "get": {
+        "operationId": "getCredit",
+        "summary": "Get wallet balance",
+        "description": "The canonical wallet resource: bucket breakdown, reset timing, rollover cap, subscription status, auto-refill state, and the FIFO debit order.\n\n`effective_balance_usd` is the pre-flight number — zero or negative is `credit_exhausted` for every request. Above zero is necessary but not sufficient: each write also checks that the balance covers that request's round minimum, which depends on the models requested, so a low positive balance can still be refused with `credit_exhausted` (the refusal carries `required_usd`). It is markup-included: it reflects what you have left to spend, not raw model-cost headroom.\n\nBalance is deliberately NOT embedded on `GET /api/sessions/{id}` — that endpoint is high-volume during polling, and wallet state on a read-heavy path creates cache-coherency problems. Use this endpoint when you need a fresh balance outside the write-op flow.\n\nAnonymous callers receive the same shape with all balances at 0; their usage is gated by a guest-round budget elsewhere, not the wallet.",
+        "tags": [
+          "Account"
+        ],
+        "responses": {
+          "200": {
+            "description": "The caller's full credit state.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreditWallet"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`unauthorized` — missing, invalid, expired, or revoked credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`region_unavailable` (body carries `scope`), or `account_suspended` (the key owner's account is suspended; not retryable).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/defaults": {
+      "get": {
+        "operationId": "getDefaults",
+        "summary": "Get platform defaults",
+        "description": "Discover the platform's default model picks and the caller's round-budget status. Wallet state is NOT here — use `GET /api/credit`.",
+        "tags": [
+          "Account"
+        ],
+        "responses": {
+          "200": {
+            "description": "Platform defaults and round-budget status.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Defaults"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`unauthorized` — missing, invalid, expired, or revoked credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`region_unavailable` (body carries `scope`), or `account_suspended` (the key owner's account is suspended; not retryable).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/health": {
+      "get": {
+        "operationId": "getHealth",
+        "summary": "Health check",
+        "description": "Unauthenticated liveness probe. Returns the API version the deployment serves. No credentials required, and none are read if supplied.",
+        "tags": [
+          "System"
+        ],
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "The service is up.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Health"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "Platform API key, sent as `Authorization: Bearer mmo_live_…`.\n\nKeys are minted at https://mumo.chat/settings/api-keys and always begin with the `mmo_live_` prefix. Each key is hashed at rest — copy the secret when it is created, because it is never shown again. Calls without a valid key return `401 unauthorized`."
+      },
+      "apiKeyHeader": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-Mumo-Api-Key",
+        "description": "The same platform API key as `bearerAuth`, sent bare (`X-Mumo-Api-Key: mmo_live_…`, no `Bearer` prefix) for MCP gateways and proxies that reserve the `Authorization` header for their own use.\n\nSend one or the other. If both arrive, a platform key in `Authorization` takes precedence; otherwise the key in `X-Mumo-Api-Key` does, so a gateway-injected `Authorization` token cannot shadow it. Any non-key value in `X-Mumo-Api-Key` is ignored. Identical key, lookup, and 401 behavior — this is a second carrier, not a second credential."
+      }
+    },
+    "schemas": {
+      "Error": {
+        "type": "object",
+        "description": "The envelope every non-2xx response returns. `error` is a stable machine code, `message` is human-readable prose, and `retryable` says whether repeating the identical request could succeed.\n\nSome codes add typed extras alongside these three keys, which is why `additionalProperties` is true: `invalid_request` / `invalid_params` add `issues` (the Zod flatten shape — `fieldErrors` keyed by field name plus `formErrors`); `unknown_models` adds `unknown_models` (and `models_requested` on `POST /api/deliberation`); `insufficient_active_models` adds `collapsed_buckets`; `credit_exhausted` adds `effective_balance_usd`, `free_usd`, `subscription_usd`, `refill_usd`, `per_model_minimum_usd`, and `next_reset_at`, and — only when a POSITIVE balance was refused because it cannot cover the requested round's minimum — `required_usd` (number: the minimum needed to start, including any credit already held by in-flight rounds; a floor, not the expected cost; web search is not part of it) and `affordable_alternatives` (array, possibly empty — populated only on a create refusal (`POST /api/deliberation`) and always empty on an append refusal — of `{ kind, models, dropped? }` rosters that fit the balance now: `kind` is `\"drop_most_expensive\"` — the panel minus its most expensive model, named in `dropped`, offered for 3-model panels — or `\"cheapest_solo\"` — the single cheapest model, which `POST /api/deliberation`'s 2–3 model bound cannot run; `models` are model ids); `forbidden_model` (a requested model is not included in the caller's plan) adds `reason` (string — `\"membership_required\"` for an API caller; the shared refusal vocabulary also has `\"guest_model_unavailable\"` and `\"account_tier_required\"`, so treat any value as \"not on this plan\"), `denied_models` (the refused model ids), `upgrade_url` (where the account's owner changes plan), and `human_action_required: true` (only a plan change by the account's human admits the request); `panel_seat_limit` (the round seats more models than the caller's plan allows) adds `seat_limit` (integer: the most models the plan seats), `requested_seats` (integer), `upgrade_url`, and `human_action_required: false` (the caller can fix it by sending at most `seat_limit` models); `input_too_long` (HTTP 413: the request's new text is longer than the caller's plan allows) adds `typed_tokens` and `cap` (integers, tokens counted as characters ÷ 4), `upgrade_url`, and `human_action_required: false` (the caller can fix it by shortening the text to at most `cap`); all three are `retryable: false`; `terms_acceptance_required` adds a `terms_acceptance_required` object with `doc_types_pending`, `current_versions`, `deadline`, `summary_urls`, and `acceptance_url`; `idempotency_conflict` adds `original_request_fingerprint`; `rate_limited` adds `retry_after_seconds`; `daily_limit_reached` adds `resets_at`; `region_unavailable` adds `scope` (`\"country\"` or `\"region\"`). Treat unknown extra keys as forward-compatible additions.",
+        "required": [
+          "error",
+          "message",
+          "retryable"
+        ],
+        "additionalProperties": true,
+        "properties": {
+          "error": {
+            "type": "string",
+            "description": "Stable machine-readable code. Branch on this, never on `message`.",
+            "examples": [
+              "session_busy"
+            ]
+          },
+          "message": {
+            "type": "string",
+            "description": "Human-readable prose. Not safe to pattern-match.",
+            "examples": [
+              "Session has a round in progress — poll and retry with same Idempotency-Key"
+            ]
+          },
+          "retryable": {
+            "type": "boolean",
+            "description": "Whether repeating the identical request could succeed. True for 5xx and most 429s; false for validation, auth, and balance failures.",
+            "examples": [
+              true
+            ]
+          }
+        },
+        "example": {
+          "error": "session_busy",
+          "message": "Session has a round in progress — poll and retry with same Idempotency-Key",
+          "retryable": true
+        }
+      },
+      "CreateDeliberationRequest": {
+        "type": "object",
+        "description": "Wire (pre-parse) shape for `POST /api/deliberation`. Unrecognized keys are ignored, but `moderator_model` and `recap_session` are explicitly rejected with `400 invalid_request`.",
+        "required": [
+          "prompt"
+        ],
+        "additionalProperties": true,
+        "properties": {
+          "prompt": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The question or topic. Trimmed; must be non-empty.",
+            "examples": [
+              "Should we use Postgres or MongoDB for an event store?"
+            ]
+          },
+          "reference": {
+            "type": "string",
+            "description": "Optional spec, doc, or design injected as shared context beneath the prompt."
+          },
+          "models": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "minItems": 2,
+            "maxItems": 3,
+            "description": "Explicit panel of 2–3 model IDs. Omit to let the platform curate one. Call `GET /api/models` to enumerate valid IDs.",
+            "examples": [
+              [
+                "claude-opus-4-6",
+                "gpt-5.4",
+                "grok-4-20-reasoning"
+              ]
+            ]
+          },
+          "rounds": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 14,
+            "description": "Accepted and fingerprinted. Remote-mode sessions are caller-driven — round 0 is committed here and every further round comes from `POST /api/sessions/{id}/rounds`.",
+            "examples": [
+              1
+            ]
+          },
+          "moderator_name": {
+            "type": "string",
+            "maxLength": 100,
+            "description": "Display name for the steering identity. Surfaces in the published transcript."
+          },
+          "application": {
+            "type": "string",
+            "maxLength": 100,
+            "description": "Display name of your client. Surfaces in the session info panel."
+          },
+          "improvement_consent": {
+            "type": "boolean",
+            "description": "Whether session data may be used for platform improvement. Session-level; omit to use the account's effective default. A session-level `false` narrows and excludes the session; `true` never widens beyond the account's own Platform Improvement choice."
+          },
+          "dataset_consent": {
+            "type": "boolean",
+            "description": "Whether session data may be included in Dataset Contribution — the second consent election, chosen per account. Session-level and narrowing-only, exactly like `improvement_consent`: omit to use the account's choice; `false` excludes the session; `true` never widens beyond the account's own choice, and an account that has not yet made the choice stays excluded (`reason: not_yet_chosen`)."
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "remote"
+            ],
+            "description": "Session mode. `remote` (caller-driven) is the only accepted value; the autonomous AI-moderated mode was retired in 2026-05."
+          },
+          "register": {
+            "type": "string",
+            "enum": [
+              "conversational",
+              "agent"
+            ],
+            "deprecated": true,
+            "description": "Deprecated and ignored for execution — the platform runs a single prompt environment for all sessions. Still accepted, and still part of the idempotency fingerprint, so existing callers' retries stay stable. Omit it in new integrations."
+          },
+          "web_search": {
+            "type": "boolean",
+            "default": true,
+            "description": "Set `false` to skip web search entirely (no search gate, no source pack). Default `true` — the platform decides per-prompt whether to search. Only round 0 searches on this surface. Disable for prompts grounded purely in supplied reference material."
+          },
+          "takeaway": {
+            "type": "boolean",
+            "default": false,
+            "description": "Opt round 0 in to a per-round Takeaway artifact (`rounds[].round_takeaway`) — a structured summary generated when the round completes. Bills at cost (0 bps markup)."
+          }
+        },
+        "example": {
+          "prompt": "Should we use Postgres or MongoDB for an event store?",
+          "rounds": 1
+        }
+      },
+      "AppendRoundRequest": {
+        "type": "object",
+        "description": "Wire (pre-parse) shape for `POST /api/sessions/{id}/rounds`. Unrecognized keys are ignored, but `improvement_consent` and `dataset_consent` are explicitly rejected — they are session-level and only accepted at create time.",
+        "required": [
+          "prompt"
+        ],
+        "additionalProperties": true,
+        "properties": {
+          "prompt": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Steering prompt for this round. Trimmed; must be non-empty.",
+            "examples": [
+              "Focus on the pricing mechanism, not positioning."
+            ]
+          },
+          "moderator_name": {
+            "type": "string",
+            "maxLength": 100,
+            "description": "Updates the session's steering identity. Useful when a human takes over from an agent mid-session."
+          },
+          "snippets": {
+            "type": "array",
+            "description": "Typed verbatim quotes from prior rounds that steer the panel's attention. Optional but high-signal.",
+            "items": {
+              "$ref": "#/components/schemas/SnippetInput"
+            }
+          },
+          "takeaway": {
+            "type": "boolean",
+            "default": false,
+            "description": "Generate a `round_takeaway` artifact for this round once it completes."
+          }
+        },
+        "example": {
+          "prompt": "Focus on the pricing mechanism, not positioning.",
+          "snippets": [
+            {
+              "type": "CHALLENGE",
+              "quote": "Per-seat pricing assumes teams of >10.",
+              "quoted_model": "gpt-5.4",
+              "comment": "Most enterprise pilots start at 3–5."
+            },
+            {
+              "type": "KEEP",
+              "quote": "Usage-based pricing aligns incentives.",
+              "quoted_model": "claude-opus-4-6"
+            }
+          ],
+          "takeaway": false
+        }
+      },
+      "SnippetInput": {
+        "type": "object",
+        "description": "One moderator-curated steering snippet. The quote must be verbatim from a prior round's response.",
+        "required": [
+          "type",
+          "quote",
+          "quoted_model"
+        ],
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "KEEP",
+              "EXPLORE",
+              "CHALLENGE",
+              "CORE",
+              "SHIFT"
+            ],
+            "description": "KEEP — this point is strong, preserve it. EXPLORE — dig deeper here. CHALLENGE — push back on this claim. CORE — load-bearing, build on it. SHIFT — this reframes the question. Always uppercase at the API boundary."
+          },
+          "quote": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Verbatim text from a prior round's response."
+          },
+          "quoted_model": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The model ID that originated the quote."
+          },
+          "comment": {
+            "type": "string",
+            "description": "Optional moderator commentary attached to the quote."
+          }
+        }
+      },
+      "Ack": {
+        "type": "object",
+        "description": "Returned by both write operations. The ack confirms the round row committed and tells you where to poll — it does not contain results. If the ack reached you, the round committed; if it did not, replaying your idempotency key resolves the uncertainty.",
+        "required": [
+          "session_id",
+          "round_id",
+          "round_index",
+          "status",
+          "idempotency_key",
+          "client_request_id",
+          "poll_after_ms",
+          "progress_url",
+          "progress_version"
+        ],
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "description": "Session UUID."
+          },
+          "round_id": {
+            "type": "string",
+            "description": "UUID of the round just committed."
+          },
+          "round_index": {
+            "type": "integer",
+            "description": "Zero-based index of the committed round."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "processing"
+            ]
+          },
+          "idempotency_key": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The key used — echoed from your header, or the server-generated UUID when you omitted it. Persist it for retry safety."
+          },
+          "client_request_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Echoed from `X-Client-Request-Id` when supplied."
+          },
+          "poll_after_ms": {
+            "type": "integer",
+            "description": "Suggested delay before the first poll of `progress_url`."
+          },
+          "progress_url": {
+            "type": "string",
+            "description": "Path to poll for terminal state, relative to the server URL."
+          },
+          "progress_version": {
+            "type": "integer",
+            "description": "Monotonic counter on the round row. Diff it across polls to short-circuit no-op reads."
+          },
+          "disclosure": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Present only when the resolved platform-improvement consent decision carries a disclosure string."
+          }
+        },
+        "example": {
+          "session_id": "abc-123",
+          "round_id": "round-456",
+          "round_index": 0,
+          "status": "processing",
+          "idempotency_key": "auto-gen-uuid-if-omitted",
+          "client_request_id": null,
+          "poll_after_ms": 5000,
+          "progress_url": "/api/sessions/abc-123/progress",
+          "progress_version": 0
+        }
+      },
+      "ReplayAck": {
+        "type": "object",
+        "description": "An idempotent replay whose round entered the refund lifecycle. Carries every `Ack` field, with `status` reshaped and refund detail added. `processing_refund` means a refund is pending and `retry_after_ms` points at the 60s SLO deadline; `failed` with `refund_status: \"credited\"` is terminal and the round will not produce results. A replay whose round is HEALTHY returns the cached ack unchanged and is described by `Ack`, not this schema.",
+        "required": [
+          "session_id",
+          "round_id",
+          "round_index",
+          "status",
+          "refund_status"
+        ],
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "description": "Session UUID."
+          },
+          "round_id": {
+            "type": "string",
+            "description": "UUID of the replayed round."
+          },
+          "round_index": {
+            "type": "integer",
+            "description": "Zero-based index of the round."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "processing_refund",
+              "failed"
+            ],
+            "description": "`processing_refund` while a refund is pending, `failed` once it has credited. A healthy replay keeps `processing` and matches `Ack` instead."
+          },
+          "refund_status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "credited"
+            ],
+            "description": "Always present on this shape — it is what distinguishes a reshaped replay from a plain ack."
+          },
+          "failure_code": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why the round failed, when the refund lifecycle was entered."
+          },
+          "retry_after_ms": {
+            "type": "integer",
+            "description": "Milliseconds until the 60s refund SLO deadline. Present only while `refund_status` is `pending`; clamped at 0."
+          }
+        },
+        "additionalProperties": true
+      },
+      "Session": {
+        "type": "object",
+        "description": "The full session object. Two state machines surface here: session-level `status` (the rollup to switch on in polling loops) and per-round `completion_state` (the canonical 'is this round usable yet?' check). A session can be `processing` while its latest round is already `complete`.",
+        "required": [
+          "id",
+          "status",
+          "mode",
+          "source",
+          "moderator_name",
+          "application",
+          "initial_prompt",
+          "active_models",
+          "moderator_model",
+          "model_metadata",
+          "created_at",
+          "estimated_ready_at",
+          "total_usage",
+          "total_cost_usd",
+          "improvement_consent",
+          "dataset_consent",
+          "rounds",
+          "summary",
+          "summary_stale",
+          "session_synthesis",
+          "confidence_disclaimer",
+          "share_url",
+          "share_status"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Session UUID."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "streaming",
+              "processing",
+              "ready",
+              "failed"
+            ],
+            "description": "streaming — at least one model in the most recent round is responding. processing — all responses landed, post-processing (snippet extraction, claim map, optional Takeaway) is in flight. ready — fully complete; safe to append or read final artifacts. failed — terminal error."
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "remote",
+              "autonomous"
+            ],
+            "description": "`remote` for every session created through this API. Historical sessions may report `autonomous`; that mode was retired in 2026-05."
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "web",
+              "api",
+              "mcp",
+              "x"
+            ],
+            "description": "How the session was created. Sessions predating this field default to `web`."
+          },
+          "moderator_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Steering identity display name."
+          },
+          "application": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Client application display name."
+          },
+          "initial_prompt": {
+            "type": "string",
+            "description": "The session's opening prompt, as authored (aliases are not resolved here)."
+          },
+          "active_models": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Model IDs participating in this session."
+          },
+          "moderator_model": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Null for all new sessions. Historical sessions may carry a value."
+          },
+          "model_metadata": {
+            "type": "object",
+            "description": "Per-model display metadata, keyed by model ID.",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ModelMetadata"
+            }
+          },
+          "created_at": {
+            "type": "string",
+            "description": "ISO 8601 creation timestamp."
+          },
+          "estimated_ready_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Rough ISO 8601 estimate, present only while `status` is `streaming` or `processing`. Null otherwise."
+          },
+          "total_usage": {
+            "$ref": "#/components/schemas/TokenUsage"
+          },
+          "total_cost_usd": {
+            "type": "number",
+            "description": "Ledger cost (USD) for the entire session across every billable bucket — deliberation, moderator, round Takeaway, snippet extraction, editorial, search. Markup-EXCLUSIVE, so distinct from wallet debits. `0` for sessions with no ledger rows yet."
+          },
+          "improvement_consent": {
+            "$ref": "#/components/schemas/ImprovementConsent"
+          },
+          "dataset_consent": {
+            "$ref": "#/components/schemas/DatasetConsent"
+          },
+          "rounds": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Round"
+            },
+            "description": "Round objects in index order. Closing rounds are excluded."
+          },
+          "summary": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/SessionSummary"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Session-level editorial. Only populated for completed multi-round legacy sessions; null otherwise. Legacy or malformed stored blobs pass through unmodified, so treat the shape defensively."
+          },
+          "summary_stale": {
+            "type": "boolean",
+            "description": "True when rounds have been appended since `summary` was generated."
+          },
+          "session_synthesis": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": true,
+            "description": "Session-level synthesis artifact. Generation is FROZEN platform-wide, so this is always `null` for new sessions; the field survives only so legacy sessions synthesized before the freeze still read back."
+          },
+          "confidence_disclaimer": {
+            "type": "string",
+            "description": "Verbatim advisory string. Self-reported confidence scores are only meaningful relative to the same model's other claims and are NOT calibrated across models — surface this alongside any score you display."
+          },
+          "share_url": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Public reader-deck URL (`https://mumo.chat/p/{slug}`) when an active share exists, else null. Read parity for `POST /api/sessions/{id}/share` — re-find an existing link without re-sharing."
+          },
+          "share_status": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "shared",
+              "published",
+              null
+            ],
+            "description": "`shared` (link-access only, not indexed), `published` (platform-listable), or null (never shared, or share removed)."
+          }
+        }
+      },
+      "ModelMetadata": {
+        "type": "object",
+        "required": [
+          "display_name",
+          "provider"
+        ],
+        "properties": {
+          "display_name": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "string",
+            "description": "Model family, e.g. `anthropic`, `openai`."
+          }
+        }
+      },
+      "ImprovementConsent": {
+        "type": "object",
+        "description": "The resolved platform-improvement decision for this session.",
+        "required": [
+          "enabled",
+          "reason",
+          "requested",
+          "disclosure"
+        ],
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "reason": {
+            "type": "string",
+            "description": "Why the decision resolved as it did. Sessions created before this field shipped report `default_include`.",
+            "examples": [
+              "free_tier_terms"
+            ]
+          },
+          "requested": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "What the caller explicitly asked for, or null when they omitted it."
+          },
+          "disclosure": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "DatasetConsent": {
+        "type": "object",
+        "description": "The Dataset Contribution decision stamped on this session at creation — the second consent election. Narrowing-only, like `ImprovementConsent`, minus `disclosure` (no per-session disclosure text exists for it). `enabled` is the CREATION-TIME stamp and is immutable: it records what the session was created under, not whether the session is eligible today — eligibility also requires the account's current Dataset Contribution switch to be on, so a session stamped `true` stops being eligible the moment the account opts out, while this field keeps reporting `true`.",
+        "required": [
+          "enabled",
+          "reason",
+          "requested"
+        ],
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "reason": {
+            "type": "string",
+            "description": "Why the decision resolved as it did: `account_default`, `explicit_include`, `explicit_exclude`, `not_yet_chosen` (the account has not made the forced choice — the session is excluded whatever was requested), `guest_excluded`, or `pre_election` for sessions created before the election existed.",
+            "examples": [
+              "account_default"
+            ]
+          },
+          "requested": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "What the caller explicitly asked for via `dataset_consent`, or null when they omitted it."
+          }
+        }
+      },
+      "TokenUsage": {
+        "type": "object",
+        "description": "Aggregated token counts. `tokens_cached` and `tokens_cache_write` are omitted entirely on per-response usage when the provider does not report them.",
+        "required": [
+          "tokens_in",
+          "tokens_out"
+        ],
+        "properties": {
+          "tokens_in": {
+            "type": "integer"
+          },
+          "tokens_out": {
+            "type": "integer"
+          },
+          "tokens_cached": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "Cached prompt-read tokens — a subset of `tokens_in` that already received the cache discount. Not reported by every provider."
+          },
+          "tokens_cache_write": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "Tokens spent writing new cache entries. Reported only where cache writes bill."
+          }
+        }
+      },
+      "Round": {
+        "type": "object",
+        "description": "One round of the deliberation, in the serialized (contract-stable) shape. `responses[]` is success-only; errored models are attributed in `failed_models[]` and still-working models in `in_progress_models[]`.",
+        "required": [
+          "id",
+          "index",
+          "prompt",
+          "completion_state",
+          "responses",
+          "failed_models",
+          "in_progress_models",
+          "claim_map",
+          "post_round_status",
+          "claim_map_url",
+          "round_takeaway",
+          "cost_usd"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Round UUID."
+          },
+          "index": {
+            "type": "integer",
+            "description": "Zero-based round index."
+          },
+          "prompt": {
+            "type": "string",
+            "description": "The prompt sent for this round, as authored."
+          },
+          "completion_state": {
+            "type": "string",
+            "enum": [
+              "complete",
+              "partial_failure",
+              "failed",
+              "in_progress"
+            ],
+            "description": "complete — every target model produced a final response. partial_failure — all target models are terminal, at least one final AND at least one errored; the round is usable but degraded. failed — all terminal, zero finals; no usable output. in_progress — at least one target model is still queued, streaming, or expected-but-absent; keep polling."
+          },
+          "responses": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ModelResponse"
+            }
+          },
+          "failed_models": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FailedModel"
+            }
+          },
+          "in_progress_models": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/InProgressModel"
+            },
+            "description": "Empty when every target model has reached a terminal state."
+          },
+          "claim_map": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ClaimMap"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Verbatim claims and each reactor's position. The highest-signal artifact for understanding agreement and disagreement. Null when no claims were extracted — `post_round_status` says why."
+          },
+          "post_round_status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "ready",
+              "no_claims",
+              "failed",
+              "skipped_balance"
+            ],
+            "description": "The state of the round's reactions step (reactions → claim map → takeaway), so a null `claim_map` is never ambiguous. pending — still being generated (or the responses are still running); keep polling. ready — `claim_map` has claims. no_claims — reactions finished with nothing to map (typical for a one-model round), or the round has no reactions step. failed — the claim map failed permanently. skipped_balance — The reactions and the takeaway (if requested) were skipped because the account's balance could not cover them; the account owner can generate them from the web app after adding credit. `claim_map` and `round_takeaway` stay null."
+          },
+          "claim_map_url": {
+            "type": "string",
+            "description": "Browser URL for this round's claim map (`https://mumo.chat/cm/{round_id}`). Auth-gated and owner-only: it requires signing in with the mumo account that owns the API key. Always present — agents should surface it to the human at the end of their summary."
+          },
+          "round_takeaway": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/RoundTakeaway"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The sole per-round summary artifact, for every source. Populated for rounds that opted in via `takeaway: true` once generation completes; null when not requested, still in flight, or stored in a pre-cutover shape."
+          },
+          "cost_usd": {
+            "type": "number",
+            "description": "Ledger cost (USD) attributed to this round — same source and markup-exclusive semantics as `total_cost_usd`. May be `0` or incomplete during an in-flight round because ledger rows settle as calls finish. `sum(rounds[].cost_usd) <= total_cost_usd`; session-scoped buckets roll up only into the session total."
+          }
+        }
+      },
+      "RawRound": {
+        "type": "object",
+        "description": "A round in the platform's INTERNAL shape, returned only by `GET /api/sessions/{id}/rounds`. The fields listed here are stable, but this route bypasses the API serializer, so treat the object as open and prefer `GET /api/sessions/{id}` for a contract-stable shape.",
+        "additionalProperties": true,
+        "required": [
+          "id",
+          "index",
+          "prompt",
+          "target_models",
+          "created_at"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Round UUID."
+          },
+          "index": {
+            "type": "integer"
+          },
+          "intent": {
+            "type": "string",
+            "description": "Round intent — `INDEPENDENT` (no peer context) or `OPEN` (peers auto-shared)."
+          },
+          "prompt": {
+            "type": "string"
+          },
+          "target_models": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "responses": {
+            "type": "object",
+            "additionalProperties": true,
+            "description": "Internal per-model response rows, keyed by model ID."
+          },
+          "moderation_status": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Legacy round lifecycle. Always null on web-created rounds."
+          }
+        }
+      },
+      "ModelResponse": {
+        "type": "object",
+        "description": "One model's successful answer for a round.",
+        "required": [
+          "model",
+          "text",
+          "usage",
+          "cost",
+          "snippets",
+          "claim_confidence",
+          "is_partial",
+          "finish_reason",
+          "output_cap"
+        ],
+        "properties": {
+          "model": {
+            "type": "string",
+            "description": "Model ID."
+          },
+          "text": {
+            "type": "string",
+            "description": "Raw prose, with session aliases resolved."
+          },
+          "usage": {
+            "$ref": "#/components/schemas/TokenUsage"
+          },
+          "cost": {
+            "type": "object",
+            "required": [
+              "usd"
+            ],
+            "properties": {
+              "usd": {
+                "type": [
+                  "number",
+                  "null"
+                ],
+                "description": "Estimated cost for this response. Null when the model is not priced in the registry — treat as unknown, not zero."
+              }
+            }
+          },
+          "snippets": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Snippet"
+            },
+            "description": "Model-emitted reactions to peers: typed buckets with verbatim quotes and optional commentary."
+          },
+          "claim_confidence": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ClaimConfidence"
+            },
+            "description": "Per-claim self-reported confidence extracted from the prose. Surface `confidence_disclaimer` alongside any score you display."
+          },
+          "is_partial": {
+            "type": "boolean",
+            "description": "True when the response is a successful-but-truncated stream — the model produced output and the call completed, but the provider signaled truncation via `finish_reason`. Treat the text as a partial answer."
+          },
+          "finish_reason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Provider-native stop reason, surfaced as-is rather than normalized (Anthropic: end_turn / max_tokens / stop_sequence; OpenAI: stop / length / content_filter; Gemini: STOP / MAX_TOKENS / SAFETY). Null when the stream did not complete naturally. The refusal values (`refusal`, `content_filter`, `SAFETY`, `PROHIBITED_CONTENT`, `BLOCKLIST`, `SPII`, `IMAGE_SAFETY`) mean the provider's safety system stopped the output partway; `is_partial` stays false. Do not retry or rephrase automatically — surface it to the user."
+          },
+          "output_cap": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/OutputCap"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Set when a platform cap bound this call's output length; null otherwise. Always present. Pairs with `is_partial` / `finish_reason`: a truncated response with a non-null `output_cap` was cut by the platform cap, not the model's own limit."
+          },
+          "attempt": {
+            "type": "integer",
+            "description": "Current-attempt ordinal — 0 for the original response, N>0 when a successful retry replaced it."
+          }
+        }
+      },
+      "OutputCap": {
+        "type": "object",
+        "description": "A platform cap that bound a model call's output length. `guest`: the guest output limit. `balance`: the caller's remaining credit bounded the output — top up or wait for the credit reset rather than retrying.",
+        "required": [
+          "tokens",
+          "reason"
+        ],
+        "properties": {
+          "tokens": {
+            "type": "integer",
+            "description": "The output-token ceiling the cap imposed on the call."
+          },
+          "reason": {
+            "type": "string",
+            "enum": [
+              "guest",
+              "balance"
+            ],
+            "description": "Which cap bound the call."
+          }
+        }
+      },
+      "Snippet": {
+        "type": "object",
+        "required": [
+          "type",
+          "quote",
+          "quoted_model",
+          "comment",
+          "comment_confidence"
+        ],
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "KEEP",
+              "EXPLORE",
+              "CHALLENGE",
+              "CORE",
+              "SHIFT"
+            ],
+            "description": "Always uppercase at the API boundary."
+          },
+          "quote": {
+            "type": "string",
+            "description": "Verbatim quote from a peer's response."
+          },
+          "quoted_model": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Model ID that authored the quote."
+          },
+          "comment": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The reacting model's commentary."
+          },
+          "comment_confidence": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "description": "Self-reported confidence (0–1) for `comment`. Null when absent."
+          }
+        }
+      },
+      "ClaimConfidence": {
+        "type": "object",
+        "required": [
+          "claim_text",
+          "confidence_score"
+        ],
+        "properties": {
+          "claim_text": {
+            "type": "string",
+            "description": "The verbatim substring the model tagged in its own prose."
+          },
+          "confidence_score": {
+            "type": "number",
+            "description": "Self-reported, 0–1. Only meaningful relative to that model's other claims; NOT calibrated across models."
+          }
+        }
+      },
+      "FailedModel": {
+        "type": "object",
+        "description": "Error attribution for one model that terminated without a usable response.",
+        "required": [
+          "model",
+          "error",
+          "message",
+          "error_code",
+          "output_cap"
+        ],
+        "properties": {
+          "model": {
+            "type": "string"
+          },
+          "error": {
+            "type": "string",
+            "description": "Free-text error description. Stable but NOT safe to pattern-match — branch on `error_code`."
+          },
+          "message": {
+            "type": "string",
+            "description": "Human-readable error message."
+          },
+          "error_code": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Canonical per-model failure code. Transient / retry-eligible: `rate_limit`, `provider_error`, `internal_deadline_reached`, `deadline_expired`, `stream_interrupted`, `stream_ended_without_final_marker`, `empty_completion`. Abandon or escalate: `pre_stream_provider_error`, `provider_auth_failure`, `pre_stream_failure`, `max_retries_exceeded`, `canceled`, `provider_refusal`, `credit_exhausted`. `provider_refusal`: the model provider's safety system declined the request; do not retry or rephrase automatically — surface it to the user. `credit_exhausted`: the remaining credit could not cover this model when it was about to run, so it was skipped (no provider call, no charge); re-running before the balance changes is refused again. A refusal dominates: a failed round with any `provider_refusal` or `credit_exhausted` is abandon, even alongside a transient code. Null on legacy rows."
+          },
+          "output_cap": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/OutputCap"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Set when a platform cap bound this call's output length (a call the cap left with no usable text lands here); null otherwise. Always present."
+          },
+          "attempt": {
+            "type": "integer",
+            "description": "Ordinal of the failed current attempt — echo it back as `expected_attempt` if you drive a retry."
+          },
+          "partial_text": {
+            "type": "string",
+            "description": "Bytes the failed stream emitted before terminating. Present only when the error row preserved them; sometimes usable as a partial answer."
+          },
+          "partial_text_length": {
+            "type": "integer",
+            "description": "Character count of `partial_text`, present when that field is."
+          }
+        }
+      },
+      "InProgressModel": {
+        "type": "object",
+        "description": "A target model still working on this round. Not a failure — render separately.",
+        "required": [
+          "model",
+          "state",
+          "deadline_at"
+        ],
+        "properties": {
+          "model": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "queued",
+              "streaming",
+              "absent"
+            ],
+            "description": "queued — the row exists but the provider call has not started. streaming — at least one delta observed, no terminal yet. absent — the row is expected but does not exist yet (rare; a backstop window or a race against pre-insert)."
+          },
+          "deadline_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "ISO 8601 timestamp at which the sweep cron writes a terminal error if the row has not transitioned. Null on legacy rows."
+          }
+        }
+      },
+      "ClaimMap": {
+        "type": "object",
+        "required": [
+          "claims"
+        ],
+        "properties": {
+          "claims": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Claim"
+            }
+          }
+        }
+      },
+      "Claim": {
+        "type": "object",
+        "description": "A verbatim claim other participants reacted to. A `position` can also be the moderator (`model: \"moderator\"`) when a later round's moderator snippet reacts to this round's content — which means a claim may exist with fewer than two MODEL positions.",
+        "required": [
+          "id",
+          "quote",
+          "originator",
+          "positions",
+          "reaction_count"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Stable claim id. Round takeaways cite claims by id, so this is how you resolve `claim_ids` against the map shipped in the same response."
+          },
+          "quote": {
+            "type": "string",
+            "description": "The verbatim claim text."
+          },
+          "originator": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Model ID that authored the claim."
+          },
+          "positions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ClaimPosition"
+            }
+          },
+          "reaction_count": {
+            "type": "integer"
+          }
+        }
+      },
+      "ClaimPosition": {
+        "type": "object",
+        "required": [
+          "model",
+          "type",
+          "comment"
+        ],
+        "properties": {
+          "model": {
+            "type": "string",
+            "description": "The reacting model's ID, or `moderator` for a moderator reaction."
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "KEEP",
+              "EXPLORE",
+              "CHALLENGE",
+              "CORE",
+              "SHIFT"
+            ]
+          },
+          "comment": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "RoundTakeaway": {
+        "type": "object",
+        "description": "Structured per-round summary, generated when the round opted in via `takeaway: true`.",
+        "required": [
+          "version",
+          "bottom_line",
+          "items"
+        ],
+        "properties": {
+          "version": {
+            "type": "string",
+            "enum": [
+              "2"
+            ]
+          },
+          "bottom_line": {
+            "type": "string"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TakeawayItem"
+            }
+          }
+        }
+      },
+      "TakeawayItem": {
+        "type": "object",
+        "required": [
+          "question",
+          "answer",
+          "consensus",
+          "claim_ids"
+        ],
+        "properties": {
+          "question": {
+            "type": "string"
+          },
+          "answer": {
+            "type": "string",
+            "description": "Leads with the direct answer."
+          },
+          "consensus": {
+            "type": "string",
+            "enum": [
+              "unanimous",
+              "majority",
+              "contested",
+              "unresolved"
+            ],
+            "description": "Server-derived and frozen at generation time — never recomputed from live policy. Subordinate metadata, not a verdict badge."
+          },
+          "claim_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Impact-ordered claim ids cited by `answer`, resolvable against the same round's `claim_map`. Empty when the answer cites none."
+          }
+        }
+      },
+      "SessionSummary": {
+        "type": "object",
+        "description": "Session-level editorial, only populated for completed multi-round legacy sessions.",
+        "required": [
+          "covers_rounds",
+          "title",
+          "description",
+          "editorial",
+          "generated_at"
+        ],
+        "properties": {
+          "covers_rounds": {
+            "type": "array",
+            "items": {
+              "type": "integer"
+            },
+            "minItems": 2,
+            "maxItems": 2,
+            "description": "Inclusive [first, last] round index range this summary covers."
+          },
+          "title": {
+            "type": "string"
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "editorial": {
+            "type": "object",
+            "required": [
+              "surface",
+              "agreed",
+              "split",
+              "open"
+            ],
+            "properties": {
+              "surface": {
+                "type": "string"
+              },
+              "agreed": {
+                "type": "string"
+              },
+              "split": {
+                "type": "string"
+              },
+              "open": {
+                "type": "string"
+              }
+            }
+          },
+          "anchor_quote": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/AttributedQuote"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "og_quote": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/AttributedQuote"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "generated_at": {
+            "type": "string",
+            "description": "ISO 8601 generation timestamp."
+          }
+        }
+      },
+      "AttributedQuote": {
+        "type": "object",
+        "required": [
+          "text",
+          "model"
+        ],
+        "properties": {
+          "text": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string",
+            "description": "Model ID that authored the quote."
+          }
+        }
+      },
+      "SessionListResponse": {
+        "type": "object",
+        "required": [
+          "items",
+          "total"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SessionListItem"
+            }
+          },
+          "total": {
+            "type": "integer",
+            "description": "Total matching sessions, ignoring pagination."
+          }
+        }
+      },
+      "SessionListItem": {
+        "type": "object",
+        "description": "Lightweight session summary — no rounds, responses, or artifacts.",
+        "required": [
+          "id",
+          "status",
+          "mode",
+          "initial_prompt",
+          "active_models",
+          "moderator_model",
+          "created_at",
+          "round_count"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "streaming",
+              "processing",
+              "ready",
+              "failed"
+            ]
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "remote",
+              "autonomous"
+            ]
+          },
+          "initial_prompt": {
+            "type": "string"
+          },
+          "active_models": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "moderator_model": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "round_count": {
+            "type": "integer"
+          }
+        }
+      },
+      "ShareResponse": {
+        "type": "object",
+        "required": [
+          "session_id",
+          "status",
+          "slug",
+          "share_url",
+          "markdown_url",
+          "brief_url"
+        ],
+        "properties": {
+          "session_id": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "shared",
+              "published"
+            ],
+            "description": "`shared` (link-access only, noindex and unlisted) or `published` (platform-listable). Stays `shared` unless the platform separately elevated the artifact — a share call never changes an elevated status."
+          },
+          "slug": {
+            "type": "string"
+          },
+          "share_url": {
+            "type": "string",
+            "description": "Public reader-deck page."
+          },
+          "markdown_url": {
+            "type": "string",
+            "description": "Full-transcript machine-readable twin, per-round claim maps included — the review/audit surface."
+          },
+          "brief_url": {
+            "type": "string",
+            "description": "Synthesis-only triage tier (~1–2k tokens, predictable cost) for comparing many sessions before pulling a full document."
+          }
+        },
+        "example": {
+          "session_id": "f5731fe5-27ce-4f82-b8ce-868e72ff8bb9",
+          "status": "shared",
+          "slug": "your-session-title-a1b2c3",
+          "share_url": "https://mumo.chat/p/your-session-title-a1b2c3",
+          "markdown_url": "https://mumo.chat/p/your-session-title-a1b2c3.md",
+          "brief_url": "https://mumo.chat/p/your-session-title-a1b2c3.brief.md"
+        }
+      },
+      "ProgressResponse": {
+        "type": "object",
+        "required": [
+          "session_id",
+          "is_ai_moderated",
+          "auto_moderation_completed_at",
+          "rounds"
+        ],
+        "properties": {
+          "session_id": {
+            "type": "string"
+          },
+          "is_ai_moderated": {
+            "type": "boolean",
+            "description": "False for every session created through this API."
+          },
+          "auto_moderation_completed_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "rounds": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProgressRound"
+            }
+          }
+        }
+      },
+      "ProgressRound": {
+        "type": "object",
+        "required": [
+          "id",
+          "index",
+          "moderation_status",
+          "execution_status",
+          "refund_status",
+          "failure_code",
+          "failure_event_at",
+          "refund_credited_at",
+          "refund_deadline_at",
+          "progress_version",
+          "models"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "index": {
+            "type": "integer"
+          },
+          "moderation_status": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "pending",
+              "in_progress",
+              "complete",
+              "failed",
+              null
+            ],
+            "description": "Legacy round lifecycle. Stamped and settled by API/MCP-created rounds; ALWAYS null on web-created rounds."
+          },
+          "execution_status": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "created",
+              "running",
+              "reclaimable",
+              "cancelling",
+              "complete",
+              "failed",
+              "cancelled",
+              null
+            ],
+            "description": "Go-forward round lifecycle, written terminal by every settle path including web-created rounds. For web rounds, terminal here means all model responses settled — round artifacts may still be generating for a short window afterward."
+          },
+          "refund_status": {
+            "type": "string",
+            "enum": [
+              "none",
+              "pending",
+              "credited",
+              "not_applicable"
+            ],
+            "description": "none — happy path, OR a failed round whose refund is still reserved behind the retry budget (so on a failed round this means 'not decided yet', not 'no refund owed'). pending — the failure fact is written and the ledger is about to credit. credited — refund is in. not_applicable — partial-success round; counted as delivered."
+          },
+          "failure_code": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Round-level failure cause. Canonical values: `model_provider_rate_limit`, `model_provider_outage`, `model_provider_oom`, `model_output_malformed`, `model_timeout`, `all_providers_failed`, `dependency_timeout`, `dependency_outage`, `dependency_malformed_response`, `stuck_reconciled`, `internal_error`, `test_forced_failure`. Distinct from the per-model `error_code` in `models[]`."
+          },
+          "failure_event_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "refund_credited_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "refund_deadline_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Computed server-side as `failure_event_at + 60s` while a refund is pending (matching the SLO); null otherwise."
+          },
+          "progress_version": {
+            "type": "integer",
+            "description": "Monotonic counter — diff it to short-circuit no-op polls."
+          },
+          "models": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProgressModel"
+            }
+          }
+        }
+      },
+      "ProgressModel": {
+        "type": "object",
+        "description": "Per-model state for one round. One entry per target model, including models with no row yet (`state: \"absent\"`).",
+        "required": [
+          "model",
+          "state",
+          "deadline_at",
+          "error_code",
+          "expired_at_read",
+          "provider",
+          "inference_provider",
+          "partial_text_length",
+          "last_chunk_at",
+          "since_last_chunk_ms"
+        ],
+        "properties": {
+          "model": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "final",
+              "error",
+              "streaming",
+              "queued",
+              "absent"
+            ]
+          },
+          "deadline_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "ISO 8601 timestamp at which the row will be swept to a terminal error if it has not transitioned. Null on legacy rows."
+          },
+          "error_code": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Per-model failure code when `state` is `error`; null otherwise. Same vocabulary as `failed_models[].error_code`, including `provider_refusal` (the model provider's safety system declined the request; do not retry or rephrase automatically) and `credit_exhausted` (skipped before any provider call: the remaining credit could not cover this model)."
+          },
+          "expired_at_read": {
+            "type": "boolean",
+            "description": "True when `state` is `queued` or `streaming` AND `deadline_at` is already past at read time. The sweep cron's ~60s cadence means a row can be expired that long before its terminal write lands; this exposes the derived state immediately. Always false on terminal states."
+          },
+          "provider": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Model family. Null when the registry lookup fails."
+          },
+          "inference_provider": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Inference endpoint family — distinct from `provider` when the model routes through a third-party inference host. Matches `provider` when no cross-provider route is active."
+          },
+          "partial_text_length": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "Character count of the accumulated text. Null for queued / absent rows; `0` for streaming rows that have not flushed yet — use null-vs-0 to distinguish 'not producing yet' from 'observed zero-length partial'. On terminal rows this is the final count."
+          },
+          "last_chunk_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "ISO 8601 timestamp of the most recent provider delta. Null on current rows, because no per-delta progress is recorded. Only older rows carry a value."
+          },
+          "since_last_chunk_ms": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "Read-time computed `now - last_chunk_at`. Present only while `state` is `streaming`; null otherwise."
+          }
+        }
+      },
+      "Model": {
+        "type": "object",
+        "required": [
+          "id",
+          "provider",
+          "display_name",
+          "available",
+          "min_user_tier",
+          "context_window",
+          "max_output_tokens",
+          "pricing",
+          "sort_order"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "examples": [
+              "claude-opus-4-6"
+            ]
+          },
+          "provider": {
+            "type": "string",
+            "examples": [
+              "anthropic"
+            ]
+          },
+          "display_name": {
+            "type": "string",
+            "examples": [
+              "Claude Opus 4.6"
+            ]
+          },
+          "available": {
+            "type": "boolean",
+            "description": "Whether the caller can use this model right now: an `mmo_live_*` key, a plan that includes the model, and credit remaining. `false` means a call using this model will fail."
+          },
+          "unavailable_reason": {
+            "type": "string",
+            "enum": [
+              "api_key_required",
+              "membership_required",
+              "credit_exhausted"
+            ],
+            "description": "Why `available` is false, ordered by what to fix first. `api_key_required` — the caller presented no `mmo_live_*` key, so the execution endpoints would reject them whatever the model. `membership_required` — the caller's plan does not include this model; a request naming it is refused with `403 forbidden_model` (more credit would not change that). `credit_exhausted` — the wallet is zero or negative. A positive balance reports the model available even when it cannot cover a particular panel: that minimum is checked per request, at write time. Absent when `available` is true."
+          },
+          "min_user_tier": {
+            "type": "integer",
+            "description": "Account tier: 0 = Everyday, 1 = Plus, 2 = Premium — every API caller is a registered account. Every tier is listed for every caller; `available` reports whether this caller can use it. Credit balance is the runtime constraint."
+          },
+          "context_window": {
+            "type": "integer"
+          },
+          "max_output_tokens": {
+            "type": "integer"
+          },
+          "pricing": {
+            "$ref": "#/components/schemas/ModelPricing"
+          },
+          "description": {
+            "type": "string",
+            "description": "Optional registry blurb. Omitted when the registry has none."
+          },
+          "reasoning": {
+            "type": "boolean",
+            "description": "Whether reasoning is effectively enabled for this model on its active inference route. Omitted when undetermined."
+          },
+          "sort_order": {
+            "type": "integer",
+            "description": "Registry display order."
+          }
+        },
+        "example": {
+          "id": "claude-opus-4-6",
+          "provider": "anthropic",
+          "display_name": "Claude Opus 4.6",
+          "available": true,
+          "min_user_tier": 1,
+          "context_window": 200000,
+          "max_output_tokens": 16384,
+          "pricing": {
+            "input_per_million": 15,
+            "output_per_million": 75,
+            "cached_input_per_million": 1.5,
+            "minimum_usd": 0.05,
+            "cache_write_per_million": 18.75
+          },
+          "sort_order": 10
+        }
+      },
+      "ModelPricing": {
+        "type": "object",
+        "description": "Raw provider cost (platform COGS), not markup-inclusive user-paid amounts. Informational — for 'will this work?' use `available`.",
+        "required": [
+          "input_per_million",
+          "output_per_million",
+          "cached_input_per_million",
+          "minimum_usd"
+        ],
+        "properties": {
+          "input_per_million": {
+            "type": "number"
+          },
+          "output_per_million": {
+            "type": "number"
+          },
+          "cached_input_per_million": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "description": "Null when the model has no cached-input rate."
+          },
+          "minimum_usd": {
+            "type": "number",
+            "description": "The model's registered floor cost, reported for reference. NOT an admission threshold — pre-flight prices a round from each model's reserved output room and token rates, not from this figure. Also appears in the `credit_exhausted` body as `per_model_minimum_usd`."
+          },
+          "cache_write_per_million": {
+            "type": "number",
+            "description": "Present only on models that bill prompt-cache writes (1.25x the input rate). Absent means cache writes are not billed for that model."
+          }
+        }
+      },
+      "CreditWallet": {
+        "type": "object",
+        "required": [
+          "effective_balance_usd",
+          "buckets",
+          "per_model_minimum_usd_default",
+          "debit_order"
+        ],
+        "properties": {
+          "effective_balance_usd": {
+            "type": "number",
+            "description": "Sum across all three buckets, markup-included. Zero or negative is `credit_exhausted`; above zero, each write additionally needs the balance to cover that request's round minimum."
+          },
+          "buckets": {
+            "type": "object",
+            "required": [
+              "free",
+              "subscription",
+              "refill"
+            ],
+            "properties": {
+              "free": {
+                "type": "object",
+                "description": "Monthly free-tier credit.",
+                "required": [
+                  "balance_usd",
+                  "monthly_grant_usd",
+                  "resets_at"
+                ],
+                "properties": {
+                  "balance_usd": {
+                    "type": "number"
+                  },
+                  "monthly_grant_usd": {
+                    "type": "number",
+                    "description": "The platform grant each cycle."
+                  },
+                  "resets_at": {
+                    "type": "string",
+                    "description": "Next UTC 1st-of-month boundary when the bucket refills."
+                  }
+                }
+              },
+              "subscription": {
+                "type": "object",
+                "description": "Paid-tier credit.",
+                "required": [
+                  "balance_usd",
+                  "rollover_cap_usd",
+                  "subscription_status"
+                ],
+                "properties": {
+                  "balance_usd": {
+                    "type": "number"
+                  },
+                  "rollover_cap_usd": {
+                    "type": "number",
+                    "description": "Max unused balance that carries into a new cycle."
+                  },
+                  "subscription_status": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "enum": [
+                      "active",
+                      "past_due",
+                      "cancelled",
+                      "expired",
+                      null
+                    ],
+                    "description": "Null means no subscription."
+                  }
+                }
+              },
+              "refill": {
+                "type": "object",
+                "description": "Auto-refill top-ups. The two threshold fields appear only when auto-refill is enabled.",
+                "required": [
+                  "balance_usd",
+                  "auto_refill_enabled"
+                ],
+                "properties": {
+                  "balance_usd": {
+                    "type": "number"
+                  },
+                  "auto_refill_enabled": {
+                    "type": "boolean"
+                  },
+                  "auto_refill_threshold_usd": {
+                    "type": "number",
+                    "description": "Trigger level. Absent when auto-refill is off."
+                  },
+                  "auto_refill_amount_usd": {
+                    "type": "number",
+                    "description": "Top-up size. Absent when auto-refill is off."
+                  }
+                }
+              }
+            }
+          },
+          "per_model_minimum_usd_default": {
+            "type": "number",
+            "description": "Platform fallback minimum used when a model's registry row has no explicit minimum. Reported for reference; it does not gate admission."
+          },
+          "debit_order": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "FIFO debit sequence. Settlement drains each bucket in this order."
+          }
+        },
+        "example": {
+          "effective_balance_usd": 1.42,
+          "buckets": {
+            "free": {
+              "balance_usd": 1.42,
+              "monthly_grant_usd": 1.5,
+              "resets_at": "2026-05-01T00:00:00Z"
+            },
+            "subscription": {
+              "balance_usd": 0,
+              "rollover_cap_usd": 30,
+              "subscription_status": null
+            },
+            "refill": {
+              "balance_usd": 0,
+              "auto_refill_enabled": false
+            }
+          },
+          "per_model_minimum_usd_default": 0.05,
+          "debit_order": [
+            "free",
+            "subscription",
+            "refill"
+          ]
+        }
+      },
+      "Defaults": {
+        "type": "object",
+        "required": [
+          "models",
+          "daily_budget"
+        ],
+        "properties": {
+          "models": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The default model IDs for the caller's account: up to three, and never more than the caller's plan seats in one round (so it may hold two). Every id is one the caller's plan can run."
+          },
+          "daily_budget": {
+            "type": "object",
+            "required": [
+              "limit",
+              "used",
+              "resets_at"
+            ],
+            "properties": {
+              "limit": {
+                "type": "integer"
+              },
+              "used": {
+                "type": "integer"
+              },
+              "resets_at": {
+                "type": "string",
+                "description": "ISO 8601 timestamp of the next local-midnight reset."
+              }
+            }
+          }
+        },
+        "example": {
+          "models": [
+            "…",
+            "…",
+            "…"
+          ],
+          "daily_budget": {
+            "limit": 200,
+            "used": 4,
+            "resets_at": "…"
+          }
+        }
+      },
+      "Health": {
+        "type": "object",
+        "required": [
+          "status",
+          "version"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "ok"
+            ]
+          },
+          "version": {
+            "type": "string",
+            "examples": [
+              "v1"
+            ]
+          },
+          "supabase": {
+            "type": "boolean",
+            "description": "Whether the deployment has its datastore URL configured."
+          }
+        },
+        "example": {
+          "status": "ok",
+          "version": "v1",
+          "supabase": true
+        }
+      }
+    }
+  }
+}
