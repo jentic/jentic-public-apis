@@ -1,0 +1,3247 @@
+openapi: 3.1.0
+info:
+  title: Prosp Discovery API
+  version: 0.4.0
+  license:
+    name: Proprietary
+    url: https://prosp.cc/
+  summary: B2B prospect discovery — run a discovery job, poll it, read the prospects.
+  description: |
+    Customer-facing REST API for the Prosp prospect-discovery platform. Run a discovery,
+    poll it to completion, then read and acknowledge the companies it found. The API
+    returns only customer-safe fields — internal scoring, provenance, and raw content are
+    never included in any response.
+
+    ## Canonical flow (REST)
+    1. `POST /api/v1/discoveries` — start a discovery, by saved ICP id or inline criteria
+       (costs credits; an `X-Idempotency-Key` header makes the call safe to retry).
+    2. `GET /api/v1/discoveries/{jobId}` — poll this until `status` is terminal
+       (`completed`/`failed`/`exhausted`); the `result` block appears once the run finishes.
+    3. `GET /api/v1/discoveries/{jobId}/prospects` — read the companies this run found
+       (or `GET /api/v1/prospects` for the de-duplicated inbox across all your discoveries).
+    4. `POST /api/v1/prospects/ack` — acknowledge delivery so a company isn't returned again.
+
+    The `/mcp/*` job endpoints (`/mcp/tools/execute`, `/mcp/jobs/{jobId}/status`, …) are a
+    fully supported alternative surface with equivalent semantics; the `/api/v1/*` resources
+    above are the recommended REST entry point for new integrations.
+
+    ## Auth
+    OAuth2 **client-credentials** (OpenID Connect). Exchange your `client_id` +
+    `client_secret` for a Bearer token at the token endpoint (see the security scheme
+    below for the exact URL), then send `Authorization: Bearer <token>` on every call.
+    Tokens carry the `mcp/execute` scope.
+
+    ## Errors
+    Every error shares one shape — `{ error, message, request_id }`. Quote `request_id`
+    in support tickets. Errors are always signalled by the HTTP status code; there are no
+    `200`-with-error responses.
+
+    ## Changelog
+    - **0.4.0** — The finished-discovery contract now matches what the gateway actually serves.
+      ADDED to `JobResult`: `terminal_reason`, `already_owned_count`, `candidates_screened` and
+      `evaluated_count` — all four were already being served on `GET /mcp/jobs/{jobId}/result` and
+      on the `result` of `GET /api/v1/discoveries/{jobId}`, and are the same values (from the same
+      reader) that `JobStatus` reports while the run is live. ADDED to `ProspectDetail`: the
+      envelope-root `domain`, served on every detail response. REMOVED from `JobResult`:
+      `total_cost_usd`, `total_rejections`, `auto_completed`, `fallback_occurred`, `duration_ms`
+      and `sources_used` — these are internal run-level fields the customer boundary has always
+      stripped, so no client can have received them; documenting them promised data the API does
+      not return. Not a breaking change in either direction: nothing that was served stopped being
+      served.
+    - **0.3.0** — Converged the per-discovery delivery count onto ONE canonical name across
+      surfaces: `JobStatus` now carries `total_prospects` (the same name and metric as
+      `JobResult.total_prospects`, read as a live snapshot). The former `JobStatus.prospectsFound`
+      is retained as a DEPRECATED alias (identical value) for a back-compat transition and will be
+      removed in a future major version. The pagination `total` on `ProspectList`/`ProspectSummaryList`
+      is a separate, explicitly-documented concept (a list/search result-set count) — not the
+      per-discovery delivery count. No breaking change: `prospectsFound` still ships.
+    - **0.2.0** — Added the `/api/v1/discoveries*` (merged status + result) and `/api/v1/icps`
+      resources, plus the discovery summary on `JobResult` (`completed_at`,
+      `total_prospects`; the `sources_used` / `duration_ms` / `total_cost_usd` members of that
+      summary were never served and were removed from the contract in 0.4.0).
+    - **0.1.0** — Initial release.
+  contact:
+    name: Prosp API support
+    url: https://prosp.cc/
+
+servers:
+  - url: https://api.prosp.cc
+    description: Production
+
+security:
+  - cognitoClientCredentials: [mcp/execute]
+
+tags:
+  - name: discoveries
+    description: Start and track discoveries — the recommended REST surface (`/api/v1/discoveries`).
+  - name: prospects
+    description: Read, search, and acknowledge the companies your discoveries found.
+  - name: icps
+    description: Saved Ideal-Customer-Profile criteria templates you can re-run by id.
+  - name: tenant
+    description: Self-serve onboarding for your CRM connection (`/api/v1/tenant/odoo-connection`).
+  - name: credits
+    description: Check your current credit balance and the per-discovery cost.
+  - name: discovery
+    description: Alternative `/mcp/*` job endpoints — equivalent to the `discoveries` surface.
+  - name: system
+    description: Service health.
+
+paths:
+  /health:
+    get:
+      tags: [system]
+      summary: Service health probe.
+      description: Reports whether the API and its backing services are healthy. No auth required. Read-only - only GET and HEAD are accepted; any other method returns 405 with an `Allow` header.
+      operationId: healthCheck
+      security: []
+      responses:
+        "200":
+          description: Service healthy.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    description: Overall health status.
+                    examples: [healthy]
+        "405":
+          description: Method not allowed (only GET and HEAD are accepted).
+          headers:
+            Allow:
+              schema: { type: string, examples: ["GET, HEAD"] }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "503":
+          description: Service temporarily unavailable (a backing dependency is unreachable).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /mcp/tools/execute:
+    post:
+      tags: [discovery]
+      operationId: startDiscovery
+      summary: Start a discovery job.
+      description: |
+        Debits 100 credits (the per-discovery cost) atomically and queues a discovery. The
+        `X-Idempotency-Key` header is **required**; replaying the same key returns the
+        original job with `deduplicated: true` and does not double-charge.
+
+        **Concurrency limit.** A tenant may run only a bounded number of discovery jobs at once.
+        While you are at that limit a new `execute` is rejected with **429** and
+        `error: concurrent_limit` — cancel or wait for a running job to finish, then retry. The
+        credits for a rejected request are **refunded**, so a 429 never costs you credits (your
+        balance nets to zero and no ledger entry is written for the rejected attempt).
+
+        **Saturation pre-check (net-new estimate).** Before charging, the service estimates how
+        many *new* companies this exact ICP would yield for you (companies you do not already own
+        from prior runs). When that estimate is ~0 and reliable — you have already discovered the
+        addressable set for these criteria — the request is held with **409** and a
+        `status: saturation_warning` body (see `SaturationWarning`) instead of running. **No credits
+        are charged and no job is started.** To run it anyway, re-submit with
+        `parameters.acknowledge_low_yield: true`; the acknowledged run charges normally and starts.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DiscoveryRequest" }
+      responses:
+        "200":
+          description: >-
+            Job queued, OR the existing job when the request was de-duplicated — by a replayed
+            idempotency key, or by a query-fingerprint match against a discovery you already
+            started. A de-duplicated response carries `deduplicated: true` + `reason` and is NOT
+            charged (the credit debit is refunded). Distinguish the two shapes via `deduplicated`.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - { $ref: "#/components/schemas/JobAccepted" }
+                  - { $ref: "#/components/schemas/DuplicateResponse" }
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "402":
+          description: Insufficient credits (balance below the per-discovery cost).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "409":
+          description: >-
+            Pre-flight warning, run held — a **saturation warning** (this ICP would yield ~0
+            net-new companies for you), an **ICP-mismatch warning** (the targeting is a material
+            mismatch for your product/offering; a corrected ICP is offered under `suggestions`), or a
+            **low-yield prediction warning** (ICPs like yours historically under-delivered). **No
+            credits were charged and no job was started.** Re-submit with
+            `parameters.acknowledge_low_yield: true` to run and be charged anyway.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/SaturationWarning"
+                  - $ref: "#/components/schemas/IcpMismatchWarning"
+                  - $ref: "#/components/schemas/LowYieldPredictionWarning"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "503":
+          description: Credit service unavailable.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /mcp/credits:
+    get:
+      tags: [credits]
+      operationId: getCredits
+      summary: Get the caller's current credit balance.
+      description: |
+        Returns the authenticated customer's credit balance and the per-job cost. Check this
+        before `execute` (which debits `job_cost` and returns 402 when the balance is short).
+      responses:
+        "200":
+          description: The caller's balance.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  customer_id: { type: string }
+                  balance:  { type: integer, description: Current credit balance. }
+                  job_cost: { type: integer, description: Credits debited per discovery job. }
+                required: [customer_id, balance, job_cost]
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "405": { $ref: "#/components/responses/MethodNotAllowed" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "503":
+          description: Credit service unavailable.
+
+  /mcp/credits/ledger:
+    get:
+      tags: [credits]
+      operationId: getCreditLedger
+      summary: Get the caller's credit-transaction history.
+      description: |
+        Returns the authenticated customer's credit transactions — debits (discovery-job charges),
+        refunds, and manual adjustments — newest first, reconstructed from durable job and refund
+        markers. EVERY row carries a signed `amount` in credits, so a client can `sum(amount)` to
+        reconcile the ledger against `balance`. `limit` bounds the number of TRANSACTIONS returned
+        (a single job can contribute up to two rows — a debit and its refund) and `offset` selects a
+        stable page; `total` + `has_more` let a client walk the full reconstructable history. The
+        ledger is a BOUNDED WINDOW: markers older than `window_start` (≈7 days) have expired and can
+        no longer be reconstructed — `history_incomplete=true` signals such older history exists
+        (`truncated` is a separate this-page hard-cap signal, always false here).
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 500, default: 50 }
+          description: Maximum number of transactions to return (newest first). Rejected with 400 if 0/negative or above 500.
+        - name: offset
+          in: query
+          required: false
+          schema: { type: integer, minimum: 0, default: 0 }
+          description: Number of transactions to skip from the newest, for paging. Rejected with 400 if negative.
+      responses:
+        "200":
+          description: The caller's credit-transaction history.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CreditLedger" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "405": { $ref: "#/components/responses/MethodNotAllowed" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+
+  /mcp/jobs:
+    get:
+      tags: [discovery]
+      operationId: listJobs
+      summary: List the caller's discovery jobs.
+      description: >-
+        Returns each of the caller's jobs as a lean `{jobId, status}` summary. Poll
+        `GET /mcp/jobs/{jobId}/status` for a single job's progress detail.
+      responses:
+        "200":
+          description: The caller's jobs.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  jobs:
+                    type: array
+                    items: { $ref: "#/components/schemas/JobSummary" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "405": { $ref: "#/components/responses/MethodNotAllowed" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+
+  /mcp/jobs/{jobId}/status:
+    parameters:
+      - $ref: "#/components/parameters/JobId"
+    get:
+      tags: [discovery]
+      operationId: getJobStatus
+      summary: Poll a job's status.
+      parameters:
+        - name: cursor
+          in: query
+          required: false
+          schema: { type: string }
+          description: >-
+            Opaque progressive-polling cursor. Pass the previous response's `next_cursor` to
+            receive only the prospect domains added since that poll. Omit for the full `found[]`
+            accumulated so far.
+      responses:
+        "200":
+          description: Current job status.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/JobStatus" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/NotOwner" }
+        "405": { $ref: "#/components/responses/MethodNotAllowed" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+
+  /mcp/jobs/{jobId}/result:
+    parameters:
+      - $ref: "#/components/parameters/JobId"
+    get:
+      tags: [discovery]
+      operationId: getJobResult
+      summary: Fetch a completed job's result summary.
+      description: |
+        Returns the result once the job reaches any terminal state:
+        `completed`, `failed`, `exhausted`, or `cancelled`. A `cancelled` job
+        returns the prospects it had already delivered before cancellation (it is
+        terminal-with-data, not a perpetual 202). Non-terminal states return the
+        current status with a "not yet complete" message.
+      responses:
+        "200":
+          description: Job result — a terminal state (incl. `cancelled`).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/JobResult" }
+        "202":
+          description: >-
+            The job has not reached a terminal state yet. Poll again; this body carries the
+            current status and never partial results.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/JobNotComplete" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/NotOwner" }
+        "405": { $ref: "#/components/responses/MethodNotAllowed" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+
+  /mcp/jobs/{jobId}/cancel:
+    parameters:
+      - $ref: "#/components/parameters/JobId"
+    post:
+      tags: [discovery]
+      operationId: cancelJob
+      summary: Cancel a running discovery job.
+      description: |
+        Stops a running discovery, releasing its concurrency slot so a new `execute` can start.
+        Credits are refunded on the server side (see `credits_refunded`) only when the run had
+        delivered **zero** prospects at cancel time; if prospects were already delivered you keep
+        them and are not refunded. Those already-delivered prospects remain retrievable after
+        cancellation via `GET /mcp/jobs/{jobId}/result` and `GET /api/v1/discoveries/{jobId}`
+        (`cancelled` is a terminal state that carries its delivered results).
+        Only the job's owner may cancel it. Cancelling an already-terminal job is a no-op that
+        returns the job's current state.
+      responses:
+        "200":
+          description: The job's post-cancel state (and any refund applied).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/JobCancelled" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/NotOwner" }
+        "405": { $ref: "#/components/responses/MethodNotAllowed" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+
+  /mcp/prospects:
+    get:
+      tags: [prospects]
+      operationId: listProspectsMcp
+      summary: List prospects (alias of GET /api/v1/prospects).
+      description: An alias of `GET /api/v1/prospects` with identical semantics. New integrations should use `GET /api/v1/prospects`.
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+        - $ref: "#/components/parameters/IncludeDelivered"
+        - $ref: "#/components/parameters/JobIdQuery"
+        - $ref: "#/components/parameters/Country"
+      responses:
+        "200":
+          description: Customer-safe prospects.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ProspectList" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "405": { $ref: "#/components/responses/MethodNotAllowed" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+
+  /api/v1/prospects:
+    get:
+      tags: [prospects]
+      operationId: listProspects
+      summary: List the caller's prospects across all discoveries (de-duplicated).
+      description: |
+        The customer-wide prospect inbox. **With no `job_id` (default):** returns one row
+        per company across every discovery the caller has run — if the same company was
+        re-discovered by multiple jobs, the newest re-discovery wins (de-duplicated).
+        **With `job_id`:** narrows to that single job and returns its per-discovery rows
+        (one per company↔job edge), i.e. the same result as
+        `GET /api/v1/discoveries/{jobId}/prospects`.
+
+        Undelivered prospects only, unless `include_delivered=true`. Responses contain only
+        customer-safe fields; internal scoring and provenance fields are never included.
+
+        For a single run's results, prefer `GET /api/v1/discoveries/{jobId}/prospects`.
+        For semantic ranking, see `GET /api/v1/prospects/search`.
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+        - $ref: "#/components/parameters/IncludeDelivered"
+        - $ref: "#/components/parameters/JobIdQuery"
+        - $ref: "#/components/parameters/Country"
+      responses:
+        "200":
+          description: Customer-safe prospects.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ProspectList" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "405": { $ref: "#/components/responses/MethodNotAllowed" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+
+  /api/v1/prospects/search:
+    get:
+      tags: [prospects]
+      operationId: searchProspects
+      summary: Semantic search over the caller's prospects (lean summaries + progressive cursor).
+      description: |
+        Returns LEAN prospect summaries (~11 customer-safe fields) — not the full record — so the
+        response can never exceed the client token budget. To read every field for one company,
+        call `GET /api/v1/prospects/{domain}` with a summary's `domain`.
+
+        Pagination is a progressive OPAQUE cursor: omit `cursor` for the first page, then pass the
+        previous response's `next_cursor` back verbatim to fetch the next. Treat it as opaque — do
+        not parse or construct it (its encoding is an implementation detail); an unrecognized cursor
+        safely restarts from the first page. `has_more=false` / `next_cursor=null` means you have
+        seen everything above the relevance floor — stop.
+      parameters:
+        - name: q
+          in: query
+          required: true
+          description: Free-text semantic query.
+          schema: { type: string, minLength: 1 }
+        - $ref: "#/components/parameters/SearchLimit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: A lean, capped page of ranked summaries (each carries a `semantic_score`).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ProspectSummaryList" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "405": { $ref: "#/components/responses/MethodNotAllowed" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+
+  /api/v1/prospects/ack:
+    post:
+      tags: [prospects]
+      operationId: ackProspect
+      summary: Acknowledge prospect delivery (batch).
+      description: |
+        Marks one or more domains delivered so they aren't returned again. **Job-blind by design:**
+        one ack marks each domain delivered across all of the caller's jobs. **Idempotent:** an
+        unknown or already-acknowledged domain is a harmless no-op (returns `200` with a count that
+        reflects only the records actually marked), so clients never need to special-case them.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AckRequest" }
+      responses:
+        "200":
+          description: Acknowledged.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AckResult" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "405": { $ref: "#/components/responses/MethodNotAllowed" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+
+  /api/v1/prospects/{domain}:
+    parameters:
+      - name: domain
+        in: path
+        required: true
+        description: The prospect's primary domain.
+        schema: { type: string, examples: [acme.de] }
+    get:
+      tags: [prospects]
+      operationId: getProspect
+      summary: Prospect detail by domain (customer-safe fields + enrichments).
+      responses:
+        "200":
+          description: Prospect detail. `status` is `active` or `delivered` (a known company).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ProspectDetail" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "405": { $ref: "#/components/responses/MethodNotAllowed" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+
+  /api/v1/discoveries:
+    get:
+      tags: [discoveries]
+      operationId: listDiscoveries
+      summary: List the caller's discoveries.
+      description: |
+        Newest-first page of the caller's discoveries. Page with `limit` (default 50, max 200)
+        and `offset`. A `limit` outside 1–200, a negative or non-integer `limit`/`offset`, or any
+        other query parameter, is rejected with `400 invalid_query`.
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+      responses:
+        "200":
+          description: >-
+            The caller's discoveries, with the canonical pagination envelope (`total`, `count`,
+            `offset`, `has_more`) shared with the credit-ledger surface so a client pages every list
+            surface the same way.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [customer_id, jobs, count, total, offset, has_more]
+                properties:
+                  customer_id:
+                    type: string
+                    description: The authenticated customer these discoveries belong to.
+                  jobs:
+                    type: array
+                    items: { $ref: "#/components/schemas/JobStatus" }
+                  count:
+                    type: integer
+                    minimum: 0
+                    description: Number of discoveries in THIS page (never exceeds the requested `limit`).
+                  total:
+                    type: integer
+                    minimum: 0
+                    description: Total discoveries for the caller (across all pages).
+                  offset:
+                    type: integer
+                    minimum: 0
+                    description: The starting index this page was served from (echoes the request `offset`).
+                  has_more:
+                    type: boolean
+                    description: True when this page left discoveries unreturned — fetch the next with `offset += count`.
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "405": { $ref: "#/components/responses/MethodNotAllowed" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+    post:
+      tags: [discoveries]
+      operationId: createDiscovery
+      summary: Trigger a discovery (by ICP id or inline criteria).
+      description: |
+        Debits 100 credits (the per-discovery cost) and queues a discovery. The body is EITHER
+        `{icpId}` (runs a saved ICP's criteria) OR inline `DiscoveryCriteria` — mutually exclusive,
+        and ENFORCED: mixing them is a `400 schema_validation_failed` rejected before any debit,
+        never a silent "the saved ICP won and your inline fields were discarded". The lone
+        exception is the warn-and-confirm control `acknowledge_low_yield`, which may accompany
+        `icpId`. `X-Idempotency-Key` is required. An unknown `icpId` refunds the debit and
+        returns 404.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DiscoveryTrigger" }
+      responses:
+        "200":
+          description: Queued, or the existing job for a duplicate (idempotency key or query).
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - { $ref: "#/components/schemas/JobAccepted" }
+                  - { $ref: "#/components/schemas/DuplicateResponse" }
+        "400": { $ref: "#/components/responses/ValidationFailed" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "402":
+          description: Insufficient credits.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "404":
+          description: Unknown icpId (debit refunded).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "409":
+          description: >-
+            Pre-flight warning, run held — a **saturation warning** (this ICP would yield ~0
+            net-new companies for you), an **ICP-mismatch warning** (the targeting is a material
+            mismatch for your product/offering; a corrected ICP is offered under `suggestions`), or a
+            **low-yield prediction warning** (ICPs like yours historically under-delivered). **No
+            credits were charged and no job was started.** Re-submit with
+            `acknowledge_low_yield: true` to run and be charged anyway.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/SaturationWarning"
+                  - $ref: "#/components/schemas/IcpMismatchWarning"
+                  - $ref: "#/components/schemas/LowYieldPredictionWarning"
+        "405": { $ref: "#/components/responses/MethodNotAllowed" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+
+  /api/v1/discoveries/{jobId}:
+    parameters:
+      - $ref: "#/components/parameters/JobId"
+    get:
+      tags: [discoveries]
+      operationId: getDiscovery
+      summary: Merged discovery view (status + result when terminal).
+      responses:
+        "200":
+          description: |
+            Always returns the current status; includes `result` once terminal
+            (`completed`, `failed`, `exhausted`, or `cancelled`). A `cancelled` run's
+            `result` carries the prospects it delivered before cancellation.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Discovery" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/NotOwner" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "405": { $ref: "#/components/responses/MethodNotAllowed" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+
+  /api/v1/discoveries/{jobId}/prospects:
+    parameters:
+      - $ref: "#/components/parameters/JobId"
+    get:
+      tags: [discoveries]
+      operationId: getDiscoveryProspects
+      summary: List the prospects one discovery run found (per-run view).
+      description: |
+        The discovery-scoped sub-resource: "what did **this** run find." Always a single
+        job, returning its per-discovery rows (one per company↔job edge) — not
+        de-duplicated against the caller's other jobs. Undelivered prospects only, unless
+        `include_delivered=true`. Tenant-scoped by the token; the `jobId` never crosses
+        tenants.
+
+        This is the per-run equivalent of `GET /api/v1/prospects?job_id={jobId}`. For the
+        de-duplicated view across all of the caller's discoveries, use
+        `GET /api/v1/prospects` with no `job_id`.
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+        - $ref: "#/components/parameters/IncludeDelivered"
+        - $ref: "#/components/parameters/Country"
+      responses:
+        "200":
+          description: Customer-safe prospects for the job.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ProspectList" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "405": { $ref: "#/components/responses/MethodNotAllowed" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+
+  /api/v1/icps:
+    get:
+      tags: [icps]
+      operationId: listIcps
+      summary: List the caller's saved ICPs.
+      responses:
+        "200":
+          description: The caller's ICPs.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  icps:
+                    type: array
+                    items: { $ref: "#/components/schemas/Icp" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "405": { $ref: "#/components/responses/MethodNotAllowed" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+    post:
+      tags: [icps]
+      operationId: createIcp
+      summary: Create a saved ICP (Ideal Customer Profile).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/IcpRequest" }
+      responses:
+        "201":
+          description: Created.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Icp" }
+        "400": { $ref: "#/components/responses/ValidationFailed" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "405": { $ref: "#/components/responses/MethodNotAllowed" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+
+  /api/v1/icps/{icpId}:
+    parameters:
+      - name: icpId
+        in: path
+        required: true
+        description: The id of the saved ICP.
+        schema: { type: string }
+    get:
+      tags: [icps]
+      operationId: getIcp
+      summary: Get one ICP.
+      responses:
+        "200":
+          description: The ICP.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Icp" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "405": { $ref: "#/components/responses/MethodNotAllowed" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+    put:
+      tags: [icps]
+      operationId: updateIcp
+      summary: Replace an ICP.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/IcpRequest" }
+      responses:
+        "200":
+          description: Updated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Icp" }
+        "400": { $ref: "#/components/responses/ValidationFailed" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "405": { $ref: "#/components/responses/MethodNotAllowed" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+    delete:
+      tags: [icps]
+      operationId: deleteIcp
+      summary: Delete an ICP.
+      responses:
+        "200":
+          description: Deleted.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  deleted: { type: boolean }
+                  icpId: { type: string }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "405": { $ref: "#/components/responses/MethodNotAllowed" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+
+  /api/v1/opportunities:
+    get:
+      tags: [opportunities]
+      operationId: listCircularOpportunities
+      summary: List the caller's grounded circular-economy opportunities.
+      description: |
+        The set of circular-economy opportunities inferred from YOUR OWN stored business profile:
+        for each, the flow, asset, capacity or capability it rests on and the kind of company that
+        completes it. Costs no credits and runs no search.
+
+        The list is served from an already-computed portfolio and is dated by `computed_at`, which
+        is when it was DERIVED - not when you asked. It is never padded: one grounded opportunity
+        yields one entry.
+
+        **Read `speech_act` before you use a label.** An element whose `grounding` is `IMPLIED` is
+        a hypothesis - it carries `speech_act: ASK` and may only ever be put as a question, never
+        stated as fact. The two elements are graded independently and mean different things: the
+        `resource` is a claim about YOUR OWN business, the `counterpart` is a hypothesis about
+        which kind of company would want it.
+
+        `outreach_draft_eligible` answers only whether the entry may GROUND a draft, and it turns
+        on the `resource`, because that is what a message would be about. An entry may be
+        draft-eligible while its `counterpart` is still `ASK` - that is the ordinary case, not an
+        edge case - and in that case the market hypothesis still may not be asserted in the
+        message. Running one requires you to confirm or correct the resource first; see
+        `POST /api/v1/discoveries` with `opportunityHandle`.
+
+        Order is server-authoritative and is not a ranking you should re-apply - the same order is
+        used on every surface these opportunities appear on.
+      responses:
+        "200":
+          description: The caller's grounded opportunities.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CircularOpportunityList" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "405": { $ref: "#/components/responses/MethodNotAllowed" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+
+  /api/v1/tenant/odoo-connection:
+    description: |
+      Self-serve onboarding for your Odoo CRM connection. You submit your own Odoo destination
+      and credentials; the connection is live-tested (and any stage/team/user id validated)
+      before anything is saved, and stored encrypted-at-rest. Your identity comes from the
+      access token — a body `customer_id` that disagrees with it is rejected. The `odoo_api_key`
+      is write-only: it is never returned on any response. `odoo_url` must be a public http(s)
+      host — a URL resolving to a private, loopback, link-local, reserved, or multicast address
+      is rejected with `422 unsafe_url`.
+    post:
+      tags: [tenant]
+      operationId: submitOdooConnection
+      summary: Submit / activate this tenant's Odoo connection.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/TenantOdooConnectionRequest" }
+      responses:
+        "200":
+          description: Connection re-validated and updated (a connection already existed).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TenantOdooConnection" }
+        "201":
+          description: Connection validated and activated (first registration).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TenantOdooConnection" }
+        "400":
+          description: Malformed body or a `customer_id` that disagrees with the token identity.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TenantConnectionError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403":
+          description: The token identity is reserved-unrouted and can never map to an Odoo.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TenantConnectionError" }
+        "409":
+          description: The destination is already registered, or an onboarding is in progress.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TenantConnectionError" }
+        "422":
+          description: |
+            Unprocessable — the live connection test failed, an FK id does not exist,
+            `odoo_url` resolves to a non-public (internal) address (`error: unsafe_url`), or
+            host validation timed out (`error: url_validation_timeout`, fail-closed).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TenantConnectionError" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "503":
+          description: |
+            Tenant-registry unavailable — either not configured on this deployment
+            (`error: registry_unavailable`) or the backend is temporarily unreachable
+            (`error: registry_degraded`, `retryable: true`, with a `Retry-After` header —
+            safe to retry with backoff).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TenantConnectionError" }
+    get:
+      tags: [tenant]
+      operationId: getOdooConnection
+      summary: Get this tenant's registered Odoo connection (no secrets).
+      responses:
+        "200":
+          description: The registered connection.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TenantOdooConnection" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404":
+          description: No Odoo connection registered for this tenant.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TenantConnectionError" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "503":
+          description: |
+            Tenant-registry unavailable — either not configured on this deployment
+            (`error: registry_unavailable`) or the backend is temporarily unreachable
+            (`error: registry_degraded`, `retryable: true`, with a `Retry-After` header —
+            safe to retry with backoff).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TenantConnectionError" }
+    delete:
+      tags: [tenant]
+      operationId: revokeOdooConnection
+      summary: Revoke this tenant's Odoo connection (idempotent).
+      responses:
+        "200":
+          description: |
+            Revoked (idempotent). `status` is `revoked` when a connection existed and was
+            removed, or `not_connected` when nothing was registered (no-op).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TenantOdooConnectionRevoked" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "503":
+          description: |
+            Tenant-registry unavailable — either not configured on this deployment
+            (`error: registry_unavailable`) or the backend is temporarily unreachable
+            (`error: registry_degraded`, `retryable: true`, with a `Retry-After` header —
+            safe to retry with backoff).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TenantConnectionError" }
+
+components:
+  securitySchemes:
+    cognitoClientCredentials:
+      type: oauth2
+      description: |
+        OAuth2 machine-to-machine using the `client_credentials` grant (OpenID Connect; the
+        OpenAPI `flows.clientCredentials` object below). This is the ONLY supported grant — do
+        NOT use the interactive `authorization_code` flow that the identity provider's discovery
+        document may advertise; it is for a different (user-facing) client and rejects M2M.
+        Your `client_id`/`client_secret` are issued per customer (via the Telegram
+        `/credentials` flow). POST them to the `tokenUrl` below to obtain an access token, then
+        send it as `Authorization: Bearer <token>` on every request.
+      flows:
+        clientCredentials:
+          tokenUrl: https://prosp-mcp-641053169627.auth.eu-central-1.amazoncognito.com/oauth2/token
+          scopes:
+            mcp/execute: Start and manage discoveries and read prospects.
+
+  parameters:
+    IdempotencyKey:
+      name: X-Idempotency-Key
+      in: header
+      required: true
+      description: Client-generated key that makes `execute` safe to retry.
+      schema: { type: string, minLength: 1, maxLength: 255 }
+    JobId:
+      name: jobId
+      in: path
+      required: true
+      description: The discovery's id, as returned when you started it.
+      schema: { type: string, pattern: "^[a-zA-Z0-9-]+$" }
+    JobIdQuery:
+      name: job_id
+      in: query
+      required: false
+      description: |
+        Narrow to a single discovery. Also switches the listing from the de-duplicated
+        customer-wide view to that job's per-discovery rows. Never crosses tenants.
+      schema: { type: string }
+    Limit:
+      name: limit
+      in: query
+      required: false
+      description: >-
+        Maximum number of prospects to return per page (1–200; defaults to 50). A value outside
+        the range is rejected with a 400, not clamped.
+      schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+    Offset:
+      name: offset
+      in: query
+      required: false
+      description: Number of prospects to skip before the page starts, for offset pagination (defaults to 0).
+      schema: { type: integer, minimum: 0, default: 0 }
+    SearchLimit:
+      name: limit
+      in: query
+      required: false
+      description: >-
+        Page size for search (1–50, default 20). Deliberately smaller than the list `limit`;
+        a value outside the range is rejected with a 400, not clamped.
+      schema: { type: integer, minimum: 1, maximum: 50, default: 20 }
+    Cursor:
+      name: cursor
+      in: query
+      required: false
+      description: >-
+        Opaque progressive-pagination cursor. Omit for the first page; pass the previous
+        response's `next_cursor` back verbatim to fetch the next. Treat it as an opaque token:
+        do NOT parse it, construct it, or do arithmetic on it — its internal encoding is an
+        implementation detail that may change without notice. An unrecognized or malformed cursor
+        is safely treated as "start from the beginning" rather than rejected.
+      schema: { type: string, minLength: 1 }
+    IncludeDelivered:
+      name: include_delivered
+      in: query
+      required: false
+      description: Include already-acknowledged prospects (default false).
+      schema: { type: boolean, default: false }
+    Country:
+      name: country
+      in: query
+      required: false
+      description: |
+        Narrow to one or more ISO 3166-1 alpha-2 country codes, case-insensitive
+        (`country=sk` or `country=SK,CZ` — comma-separated, no repeated `country=` keys).
+        Matches the delivered company's `country_code`. Checked against the real ISO 3166-1
+        alpha-2 list; an unrecognized code is rejected with `400 invalid_query` naming the
+        value, before any other processing. A HARD filter on this read only — it does not
+        change what a discovery targets or delivers, and `total` always counts the filtered
+        set (never the caller's whole, unfiltered inbox).
+      schema: { type: string, pattern: "^[A-Za-z]{2}(,[A-Za-z]{2})*$", examples: [SK, "SK,CZ"] }
+
+  responses:
+    BadRequest:
+      description: Malformed request (missing/invalid field or header).
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    NotFound:
+      description: Resource not found.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    ValidationFailed:
+      description: Criteria validation failed (field-level violations).
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ValidationError" }
+    Unauthorized:
+      description: Missing/invalid/expired Bearer token.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    NotOwner:
+      description: The token's tenant does not own this job.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    MethodNotAllowed:
+      description: HTTP method not allowed on this endpoint (rejected before any credit debit).
+      headers:
+        Allow:
+          description: Methods this endpoint accepts.
+          schema: { type: string, examples: ["GET"] }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    RateLimited:
+      description: Rate limit exceeded (100 requests / 60s per customer).
+      headers:
+        Retry-After:
+          description: Seconds until the window resets.
+          schema: { type: integer, examples: [60] }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    TooManyRequests:
+      description: >-
+        Request throttled. `error` is `rate_limit_exceeded` when the 100-requests/60s per-customer
+        window is exceeded, or `concurrent_limit` when the tenant already has the maximum number of
+        discovery jobs running. On `concurrent_limit` the request's credits are refunded (no charge).
+      headers:
+        Retry-After:
+          description: Seconds until the window resets (rate-limit case only).
+          schema: { type: integer, examples: [60] }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+
+  schemas:
+    JobNotComplete:
+      type: object
+      description: >-
+        The in-flight answer to a result poll: the job exists and is still running, so there is
+        nothing terminal to return yet. Deliberately OPEN to additional properties — the fields
+        below are what the surface sends today, and a poll response is not the place to fail a
+        customer's client over an added key.
+      required: [status, message]
+      properties:
+        status:
+          type: string
+          description: The job's current non-terminal state (e.g. `pending`, `processing`, `running`).
+        message:
+          type: string
+          description: Human-readable detail, e.g. "Job not yet complete".
+        ok:
+          type: boolean
+          description: >-
+            `false` while the job is still running — results are not available yet, keep polling.
+            This is NOT an error: no `error` code accompanies it.
+        http_status:
+          type: integer
+          description: Echo of the HTTP status (202), so a client reading only the body can branch on it.
+        request_id:
+          type: [string, "null"]
+          description: Correlation id — quote this in support tickets about a stuck poll.
+
+    Error:
+      type: object
+      description: The single error shape for the whole surface.
+      required: [error, message]
+      properties:
+        error:
+          type: string
+          description: >-
+            Stable machine-readable code. Common values include: `invalid_token`,
+            `insufficient_credits`, `method_not_allowed`, `rate_limit_exceeded`,
+            `concurrent_limit`, `missing_idempotency_key` (the required `X-Idempotency-Key`
+            header was absent on `execute`), `schema_validation_failed` (request body failed
+            the OpenAPI schema — rejected before any credit debit), `validation_failed` /
+            `icp_not_found` (the discovery criteria were malformed / matched no ideal-customer
+            profile — no job created, any debit refunded), `invalid_query` (an unknown or
+            malformed search/list query param), `invalid_job_id`, and `not_owner`.
+          examples: [missing_idempotency_key, schema_validation_failed, validation_failed, insufficient_credits, rate_limit_exceeded]
+        message:
+          type: string
+          description: Human-readable detail.
+        request_id:
+          type: [string, "null"]
+          description: Correlation id — quote this in support tickets.
+
+    DiscoveryRequest:
+      type: object
+      # additionalProperties:false rejects an unknown ENVELOPE key (a typo'd/injected top-level
+      # field alongside toolName/parameters) with a NAMED 400 at the gateway — parity with the
+      # nested DiscoveryCriteria guard below and the sibling write surfaces. The `parameters`
+      # object is itself validated by DiscoveryCriteria; this guards the envelope.
+      additionalProperties: false
+      description: Request body for `POST /mcp/tools/execute`.
+      required: [toolName, parameters]
+      properties:
+        toolName:
+          type: string
+          # Enum-constrained so the gateway request-validator rejects an unknown tool with 400
+          # BEFORE the credit debit — a client-side typo ("zzz", "") must never dispatch a billable
+          # discovery run. Extend this list when a new tool ships.
+          enum: [discovery]
+          description: The tool to run. Use `discovery` to start a prospect discovery.
+          examples: [discovery]
+        parameters:
+          description: The discovery criteria to run.
+          $ref: "#/components/schemas/DiscoveryCriteria"
+
+    IcpRequest:
+      type: object
+      # additionalProperties:false rejects an unknown envelope key with 400 at the gateway
+      # trust boundary — parity with the sibling write surfaces (TenantOdooConnectionRequest,
+      # CRM §10.1) so a typo'd/injected field never silently persists onto a saved ICP. The
+      # nested `criteria` object is validated by DiscoveryCriteria; this guards the ENVELOPE.
+      additionalProperties: false
+      description: Body to create or replace a saved ICP — an optional display name plus the discovery criteria.
+      required: [criteria]
+      properties:
+        name:
+          type: string
+          # minLength:1 rejects an empty display name (a blank label is never a valid ICP name);
+          # the field stays optional (absent name is fine) but, when present, must be non-empty.
+          minLength: 1
+          description: Optional human-readable label for this ICP.
+          examples: ["EU Retail SMEs"]
+        criteria:
+          description: The saved discovery criteria this ICP re-runs.
+          $ref: "#/components/schemas/DiscoveryCriteria"
+
+    Icp:
+      type: object
+      description: A saved Ideal-Customer-Profile — reusable discovery criteria you can re-run by id.
+      required: [icpId, criteria]
+      properties:
+        icpId:
+          type: string
+          description: Server-assigned unique id for this ICP; pass it to `POST /api/v1/discoveries` to run it.
+        name:
+          type: string
+          description: The display name you gave this ICP.
+        criteria:
+          description: The discovery criteria stored in this ICP.
+          $ref: "#/components/schemas/DiscoveryCriteria"
+        createdAt:
+          type: string
+          format: date-time
+          description: When the ICP was created (ISO-8601).
+        updatedAt:
+          type: string
+          format: date-time
+          description: When the ICP was last updated (ISO-8601).
+
+    TenantOdooConnectionRequest:
+      type: object
+      additionalProperties: false
+      description: |
+        Your own Odoo destination and credentials for self-serve onboarding. `odoo_api_key`
+        is write-only (accepted here, never returned). `odoo_url` must be a public http(s)
+        host — private, loopback, link-local, and reserved addresses are rejected.
+      required: [odoo_url, odoo_db, odoo_uid, odoo_api_key]
+      properties:
+        odoo_url:
+          type: string
+          description: Public https base URL of the tenant's Odoo instance.
+          examples: ["https://mycompany.odoo.com"]
+        odoo_db:
+          type: string
+          description: >-
+            Your Odoo database name — one of the four API authentication parameters (alongside
+            `odoo_url`, `odoo_uid`, `odoo_api_key`). An Odoo server can host multiple databases,
+            so this identifies which one to sync leads into. Leads are written through Odoo's
+            JSON-RPC API — no direct database access is used. If unsure, find it at
+            `https://<your-odoo-host>/web/database/list`.
+          examples: ["mycompany-main-12345"]
+        odoo_uid:
+          type: integer
+          minimum: 1
+          description: The Odoo user id the API key belongs to.
+        odoo_api_key:
+          type: string
+          minLength: 1
+          writeOnly: true
+          description: Odoo API key used to authenticate. Write-only — accepted here but never returned on any response.
+        stage_id:
+          type: integer
+          minimum: 1
+          description: Optional Odoo CRM stage id to place new leads in. Validated to exist before the connection is saved.
+        team_id:
+          type: integer
+          minimum: 1
+          description: Optional Odoo sales-team id to assign new leads to. Validated to exist before the connection is saved.
+        user_id:
+          type: integer
+          minimum: 1
+          description: Optional Odoo user id to assign as the salesperson on new leads. Validated to exist before the connection is saved.
+        enrichment_stage_id:
+          type: integer
+          minimum: 1
+          description: Optional Odoo CRM stage id for leads awaiting further contact enrichment. Validated to exist before the connection is saved.
+        lead_type:
+          type: string
+          enum: [lead, opportunity]
+          description: Whether new records are created as CRM leads or opportunities. Defaults to `opportunity` when omitted.
+          examples: ["opportunity", "lead"]
+
+    TenantOdooConnection:
+      type: object
+      additionalProperties: false
+      description: |
+        Your registered Odoo connection, without any secrets. `validated_at` and `message`
+        are present only on a successful submit response. The `odoo_api_key` and any other
+        credential material are never included in this response.
+      required: [customer_id, odoo_url, odoo_db, odoo_uid, status]
+      properties:
+        customer_id:
+          type: string
+          description: Your tenant identifier (derived from the access token).
+        odoo_url:
+          type: string
+          description: The Odoo base URL leads are written to.
+          examples: ["https://mycompany.odoo.com"]
+        odoo_db:
+          type: string
+          description: >-
+            Your Odoo database name — the API authentication parameter identifying which
+            database on the Odoo server leads are synced into. Leads are written through Odoo's
+            JSON-RPC API; no direct database access is used.
+        odoo_uid:
+          type: integer
+          description: The Odoo user id the stored API key belongs to.
+        status:
+          type: string
+          description: Connection status (e.g. `active`).
+          examples: ["active"]
+        stage_id:
+          type: [integer, "null"]
+          description: The configured Odoo CRM stage id for new leads, or null if unset.
+        team_id:
+          type: [integer, "null"]
+          description: The configured Odoo sales-team id for new leads, or null if unset.
+        user_id:
+          type: [integer, "null"]
+          description: The configured Odoo salesperson user id for new leads, or null if unset.
+        enrichment_stage_id:
+          type: [integer, "null"]
+          description: The configured Odoo CRM stage id for leads awaiting enrichment, or null if unset.
+        lead_type:
+          type: string
+          enum: [lead, opportunity]
+          description: Whether records are created as leads or opportunities.
+          examples: ["opportunity"]
+        validated_at:
+          type: string
+          format: date-time
+          description: When the connection was last successfully validated (present only on a submit response).
+        message:
+          type: string
+          description: Human-readable outcome of the submit (present only on a submit response).
+
+    TenantOdooConnectionRevoked:
+      # PUBLIC (post-gateway) contract. An internal `existed` boolean is stripped at the gateway
+      # before the customer sees it (status already distinguishes the outcome: `revoked` = a
+      # connection existed and was removed; `not_connected` = idempotent no-op). Do NOT document
+      # `existed` here — it never reaches the customer.
+      type: object
+      description: Result of revoking your Odoo connection.
+      additionalProperties: false
+      required: [customer_id, status]
+      properties:
+        customer_id:
+          type: string
+          description: Your tenant identifier.
+        status:
+          type: string
+          description: "`revoked` when a connection existed and was removed; `not_connected` when nothing was registered (idempotent no-op)."
+          examples: ["revoked", "not_connected"]
+
+    TenantConnectionError:
+      type: object
+      additionalProperties: false
+      description: |
+        Error shape for the CRM-connection onboarding endpoints. Distinct from the API-wide
+        `Error`: it omits `request_id`, and the body never exposes a resolved IP address or
+        other internal detail.
+      required: [error, message]
+      properties:
+        error:
+          type: string
+          description: |
+            Stable machine-readable error code. Meanings: `invalid_shape` (malformed body);
+            `identity_mismatch` (a body `customer_id` disagrees with your token); `reserved_identity`
+            (this identity can never map to an Odoo); `destination_conflict` (that Odoo destination is
+            already registered); `onboarding_in_progress` (a registration for you is already running);
+            `connection_failed` (the live connection test failed); `invalid_fk` (a stage/team/user id
+            does not exist in your Odoo); `unsafe_url` (`odoo_url` resolves to a non-public address);
+            `url_validation_timeout` (host validation timed out, fail-closed); `not_found` (no connection
+            registered); `registry_unavailable` (onboarding not configured on this deployment);
+            `registry_degraded` (backend temporarily unreachable — retryable).
+          examples: [invalid_shape, identity_mismatch, reserved_identity, destination_conflict, onboarding_in_progress, connection_failed, invalid_fk, unsafe_url, url_validation_timeout, not_found, registry_unavailable, registry_degraded]
+        message:
+          type: string
+          description: Human-readable detail for the error.
+        retryable:
+          type: boolean
+          description: |
+            Present and `true` on a `registry_degraded` 503 — the tenant-registry backend is
+            temporarily unreachable (bounded off-loop call timed out). Safe to retry with backoff;
+            the response also carries a `Retry-After` header. Absent on non-retryable errors.
+
+    ValidationError:
+      type: object
+      description: A 400 response carrying one or more field-level criteria violations.
+      required: [error, message, violations]
+      properties:
+        error:
+          type: string
+          description: Stable machine-readable error code.
+          examples: [validation_failed]
+        message:
+          type: string
+          description: Human-readable summary of what failed validation.
+        violations:
+          type: array
+          description: One entry per invalid field.
+          items:
+            type: object
+            required: [field, message]
+            properties:
+              field:
+                type: string
+                description: Name of the request field that failed validation.
+              message:
+                type: string
+                description: Why this field was rejected.
+
+    DiscoveryCriteria:
+      type: object
+      # additionalProperties:false rejects an unknown criteria key with a NAMED 400
+      # (schema_validation_failed) at the gateway trust boundary — parity with the sibling
+      # write surfaces (IcpRequest, TenantOdooConnectionRequest). Without it an unknown field
+      # (a typo like `industrys`, an injected `zzz_bogus`) passes the gateway schema untouched
+      # and only trips the orchestrator's generic `validation_failed`, which cannot name the
+      # offending property. Every documented criteria field is enumerated under `properties`
+      # below, so a well-formed request is never falsely rejected.
+      additionalProperties: false
+      description: |
+        The criteria that describe the companies you want to find. Only `query` is required;
+        the other fields narrow and steer the search. `maxResults` must be 1–200 (a value outside
+        the range is rejected with a 400), and invalid `company_sizes` values are likewise rejected
+        with a 400 rather than silently ignored. Unknown fields are rejected with a 400 that names
+        the offending property.
+      required: [query]
+      properties:
+        query:
+          type: string
+          description: Free-text description of the companies you want to discover. The primary search signal.
+          examples: ["Find retail partners in Europe"]
+        industries:
+          type: array
+          description: Target industries. Prospects are scored for fit against these; companies in unrelated industries are filtered out.
+          items: { type: string }
+          examples: [["Retail", "Fashion"]]
+        locations:
+          type: array
+          description: Target countries or regions to search within (e.g. country names). Restricts results to companies located there.
+          items: { type: string }
+          examples: [["Germany", "Austria"]]
+        company_sizes:
+          type: array
+          description: |
+            Company-size buckets to include, by employee headcount. Any combination of:
+            `micro` (≤10), `small` (up to ~50), `medium` (up to ~200), `large` (up to ~500),
+            `enterprise` (500+). Omit to allow any size. Each bucket maps to a
+            `company_size` value; request `micro` to prioritize the ≤10-employee shops, which are
+            returned with `company_size: micro` (the output `company_size` uses the SAME lowercase
+            tokens as this input filter, so a value read off a result can be re-submitted verbatim).
+            NOTE: this filter is ADVISORY, not strict — in thin markets the engine may relax it
+            to adjacent buckets and still deliver e.g. `micro` under a `small` request (this is
+            disclosed at delivery via a `FILTER_RELAXED` suggestion). So omitting a size does not
+            guarantee its exclusion; it expresses preference, not a hard exclusion.
+          items:
+            type: string
+            enum: [micro, small, medium, large, enterprise]
+        keywords:
+          type: array
+          description: Additional keywords or phrases to bias the search toward (e.g. products, technologies, or capabilities).
+          items: { type: string }
+        exclusions:
+          type: array
+          description: Domains or terms to exclude from results — e.g. competitors, existing customers, or your own brand. Matching companies are dropped from discovery.
+          items: { type: string }
+        sub_country_regions:
+          type: array
+          description: |
+            ISO-3166-2 sub-country regions (e.g. states or provinces) to focus the search within a
+            country. Validated against the supported region set. This is a REGIONAL PREFERENCE, not a
+            hard filter: companies located in the requested region(s) are prioritized (ranked higher
+            for relevance), which can substantially raise the in-region share of your results, while
+            companies OUTSIDE those regions are still returned, ranked lower. It is a precision dial —
+            expect fewer but more-targeted results, trading total volume for regional focus. Omit it
+            (or clear it) to broaden coverage across the whole country. When this field is set, the
+            discovery result's `suggestions` array discloses the relaxation: a `FILTER_RELAXED` region
+            suggestion (naming the filter, with a `{sub_country_regions: []}` correction) when returned
+            companies with a known region fall outside the request, otherwise an informational
+            `REGION_PREFERENCE_APPLIED` note — both carrying the same one-tap correction.
+          items: { type: string }
+        target_business_models:
+          type: array
+          description: |
+            Optional value-chain-role filter. When set, only companies whose classified
+            business model is one of these roles are kept; a prospect whose role is a confirmed
+            member of none is dropped. Use e.g. `["manufacturer"]` for manufacturers only, or
+            `["distributor"]` for wholesale distributors only. Omit to accept any role
+            (default — no role filtering).
+          items:
+            type: string
+            enum: [manufacturer, retailer, distributor, service_provider, unknown]
+        website:
+          type: string
+          description: Your own website. Automatically excluded from results so you never discover yourself.
+        maxResults:
+          type: integer
+          minimum: 1
+          # maximum:200 mirrors the orchestrator's own criteria validation (validateCriteriaOrReject),
+          # which REJECTS out-of-range maxResults rather than clamping. Enforcing it here lets the
+          # gateway validator return a clean 400 early + consistently (single rejection contract).
+          maximum: 200
+          default: 50
+          description: Maximum number of prospects to return for this discovery (1–200; a value outside this range is rejected with 400, not clamped; defaults to 50).
+        acknowledge_low_yield: { $ref: "#/components/schemas/AcknowledgeLowYield" }
+        language:
+          type: string
+          description: |
+            Optional market-language hint as an ISO-639-1 code (e.g. `de`, `cs`, `pl`). Steers the
+            query→ICP expansion so keyword/industry expansion is generated in the market's language
+            rather than inferred solely from `query`. Advisory, not a hard filter — company and person
+            names are never translated, and results are not restricted to a single content language.
+            Omit to let the engine infer the language from `query` itself.
+          examples: ["de"]
+
+    SaturationWarning:
+      type: object
+      description: |
+        Returned with **409** by `POST /mcp/tools/execute` (and `POST /api/v1/discoveries`) when the
+        saturation pre-check estimates this ICP would yield ~0 net-new companies for you and the
+        estimate is reliable. **No credits were charged and no job was started.** Re-submit the same
+        request with `parameters.acknowledge_low_yield: true` to run and be charged anyway.
+      required: [status, expected_new_companies, message]
+      properties:
+        status:
+          type: string
+          enum: [saturation_warning]
+          description: Always `saturation_warning` for this response.
+        expected_new_companies:
+          type: integer
+          minimum: 0
+          description: Estimated number of net-new companies (not already owned by you) this run would yield.
+        acknowledge_param:
+          type: string
+          description: The request parameter to set to `true` on re-submit to run anyway (`acknowledge_low_yield`).
+          examples: [acknowledge_low_yield]
+        message:
+          type: string
+          description: Human-readable explanation of the warning and how to proceed.
+        request_id:
+          type: string
+          description: Correlation id — quote it in support tickets.
+
+    IcpMismatchWarning:
+      type: object
+      description: |
+        Returned with **409** by `POST /mcp/tools/execute` (and `POST /api/v1/discoveries`) when the
+        ICP-coherence pre-check judges the draft targeting (industries/keywords/query) to be a
+        material mismatch for the seller's own product/offering — e.g. a warehouse-fulfillment-robotics
+        seller targeting small grocery/food retail. **No credits were charged and no job was started.**
+        A corrected-ICP suggestion is offered under `suggestions[]`. Re-submit the same request with
+        `parameters.acknowledge_low_yield: true` to run the original ICP anyway and be charged. Only
+        produced when the seller has a stored profile/offering; skipped otherwise (the run proceeds).
+      required: [status, message]
+      properties:
+        status:
+          type: string
+          enum: [icp_mismatch_warning]
+          description: Always `icp_mismatch_warning` for this response.
+        acknowledge_param:
+          type: string
+          description: The request parameter to set to `true` on re-submit to run anyway (`acknowledge_low_yield`).
+          examples: [acknowledge_low_yield]
+        message:
+          type: string
+          description: Human-readable explanation of the mismatch, the corrected ICP, and how to proceed.
+        suggestions:
+          type: array
+          description: A single corrected-ICP suggestion (better-fit industries/keywords/query for the offering).
+          items:
+            $ref: "#/components/schemas/Suggestion"
+        request_id:
+          type: string
+          description: Correlation id — quote it in support tickets.
+
+    LowYieldPredictionWarning:
+      type: object
+      description: |
+        Returned with **409** by `POST /mcp/tools/execute` (and `POST /api/v1/discoveries`) when the
+        learned ICP-outcome corpus predicts this draft ICP will materially under-deliver (ICPs like
+        yours historically returned few results). **No credits were charged and no job was started.**
+        Re-submit the same request with `parameters.acknowledge_low_yield: true` to run and be
+        charged anyway. Rides the same warn-and-confirm channel as `SaturationWarning` /
+        `IcpMismatchWarning` — one acknowledgement parameter clears all pre-flight warnings.
+      required: [status, message]
+      properties:
+        status:
+          type: string
+          enum: [low_yield_prediction_warning]
+          description: Always `low_yield_prediction_warning` for this response.
+        acknowledge_param:
+          type: string
+          description: The request parameter to set to `true` on re-submit to run anyway (`acknowledge_low_yield`).
+          examples: [acknowledge_low_yield]
+        message:
+          type: string
+          description: Human-readable explanation of the prediction and how to proceed.
+        suggestion:
+          type: string
+          description: A bounded, leak-safe advisory (e.g. broaden the ICP) — no counts or cross-customer data.
+        request_id:
+          type: string
+          description: Correlation id — quote it in support tickets.
+
+    JobAccepted:
+      type: object
+      description: Returned when a discovery has been accepted and queued for processing.
+      required: [jobId, status]
+      properties:
+        jobId:
+          type: string
+          description: Id of the newly queued discovery. Use it to poll status and read results.
+        status:
+          type: string
+          description: Always `queued` — the discovery has been accepted and will start shortly.
+          enum: [queued]
+        createdAt:
+          type: string
+          format: date-time
+          description: When the discovery was queued (ISO-8601).
+        poll_after_seconds:
+          type: integer
+          minimum: 1
+          description: >-
+            Recommended number of seconds to wait before polling this discovery's status again.
+            A cadence hint for polite back-off — poll no more often than this rather than
+            hammering the API.
+          examples: [20]
+        estimated_duration_seconds:
+          type: integer
+          minimum: 1
+          description: >-
+            Expected wall-clock duration for this discovery, in seconds — the single planning-safe number,
+            always present. Equals the p95 of recent OBSERVED job runtimes (the industry-standard user-facing
+            UPPER BOUND so a slow-but-healthy run is not mistaken for a stuck one, and a client planning
+            timeouts is not misled low): it is identical to `estimated_duration_p95_seconds` once history
+            exists, and falls back to a static coarse default until enough jobs have finished. For the full
+            percentile trio read `estimated_duration_p50_seconds` / `estimated_duration_p90_seconds` /
+            `estimated_duration_p95_seconds`. An estimate, not a guarantee.
+          examples: [2900]
+        estimated_duration_p50_seconds:
+          type: integer
+          minimum: 1
+          description: >-
+            Median (p50) of recent OBSERVED job runtimes, in seconds — the TYPICAL duration. The lowest member
+            of the explicit p50/p90/p95 trio; `estimated_duration_p95_seconds` is the planning-safe upper
+            bound. Omitted (together with the p90 and p95 fields) until enough jobs have finished to derive it.
+          examples: [1140]
+        estimated_duration_p90_seconds:
+          type: integer
+          minimum: 1
+          description: >-
+            90th-percentile (p90) of recent OBSERVED job runtimes, in seconds — a monitoring-baseline
+            percentile and the middle member of the explicit p50/p90/p95 trio. Omitted (together with the p50
+            and p95 fields) until enough jobs have finished to derive it.
+          examples: [2400]
+        estimated_duration_p95_seconds:
+          type: integer
+          minimum: 1
+          description: >-
+            95th-percentile (p95) of recent OBSERVED job runtimes, in seconds — the planning-safe user-facing
+            UPPER BOUND, and the top member of the explicit p50/p90/p95 trio. This is the same value carried by
+            `estimated_duration_seconds` whenever history exists (that field is the always-present single
+            number; this one is the labelled member of the trio). Omitted (together with the p50 and p90
+            fields) until enough jobs have finished to derive it.
+          examples: [2900]
+        estimated_yield:
+          type: integer
+          minimum: 0
+          description: >-
+            Expectation-setting hint: the TOTAL number of prospects this discovery is likely to DELIVER —
+            i.e. total deliverable, NOT net-new. It is projected from YOUR own historical delivery ratio
+            (prospects delivered ÷ target requested, accumulated across your completed discoveries) applied
+            to this run's requested target, and it is never projected above the request. "Total deliverable"
+            means the count is GROSS: it includes domains you may already own from a prior discovery (see
+            `already_owned_count` on the status/result for how many of the delivered set were already yours);
+            it is not a promise of that many BRAND-NEW companies. The projection is deliberately
+            CONSERVATIVE (it tracks your historical delivery ratio and empirically under-predicts a
+            fast-converging run), so on the status poll it is floored at the live `prospectsFound` — the
+            value shown is `max(frozen_estimate, prospectsFound)` and therefore never sits BELOW the count
+            already delivered in the same response. Omitted entirely (never null) until you have enough
+            completed-discovery history to project honestly. An estimate, not a guarantee.
+          examples: [4]
+
+    DuplicateResponse:
+      type: object
+      description: Returned instead of a new job when the request matched a discovery you already started.
+      required: [jobId, status, deduplicated, reason]
+      properties:
+        jobId:
+          type: string
+          description: Id of the existing discovery the request was matched to.
+        status:
+          type: string
+          description: Status of the matched discovery.
+          enum: [queued]
+        deduplicated:
+          type: boolean
+          description: Always `true` — this response indicates the request was de-duplicated onto an existing job.
+          enum: [true]
+        reason:
+          type: string
+          enum: [idempotency_key, duplicate_query]
+          description: "Why the request was de-duplicated: `idempotency_key` = you replayed the same idempotency key; `duplicate_query` = an identical discovery is already running."
+        message:
+          type: string
+          description: Human-readable explanation of the de-duplication.
+
+    AcknowledgeLowYield:
+      type: boolean
+      description: |
+        Set to `true` to run this discovery even when the saturation pre-check estimates ~0
+        net-new companies (see the `409 saturation_warning` response on `POST /mcp/tools/execute`).
+        The acknowledged run charges normally and starts. Omit (or `false`) for the default
+        behaviour, where a saturated ICP is held with a `409` and NOT charged. Not a search
+        criterion — it steers the warn-and-confirm gate only, which is why it is the ONE field
+        that may accompany `icpId` in a `DiscoveryTrigger` body.
+
+    DiscoveryTrigger:
+      type: object
+      description: |
+        The body for starting a discovery. Provide EITHER a saved ICP id OR inline criteria —
+        mutually exclusive, and enforced: a body carrying `icpId` alongside any search criterion
+        (`query`, `industries`, `locations`, `keywords`, `company_sizes`, `exclusions`,
+        `maxResults`, `language`, `website`) is rejected with `400 schema_validation_failed`
+        BEFORE any credit is debited, rather than silently running the saved ICP's criteria and
+        discarding the inline ones. The single exception is `acknowledge_low_yield`, which is a
+        warn-and-confirm control rather than a search criterion: `{icpId, acknowledge_low_yield}`
+        is how a saved ICP held by a `409` is re-submitted to run anyway.
+      oneOf:
+        - type: object
+          required: [icpId]
+          # additionalProperties:false is what makes the two branches MUTUALLY EXCLUSIVE. Without
+          # it a combined {icpId + inline criteria} body matched this branch (extras allowed) and
+          # failed only the DiscoveryCriteria branch, so `oneOf` saw exactly-one match and ACCEPTED
+          # it — creating a job, debiting 100 credits, and silently running the saved ICP's criteria
+          # while discarding the caller's inline ones. Closing the branch makes such a body match
+          # NEITHER branch, which is the documented 400.
+          additionalProperties: false
+          properties:
+            icpId:
+              type: string
+              description: Id of a saved ICP to run. Its stored criteria are used for this discovery.
+            # The one non-criterion field admitted alongside icpId — same single definition the
+            # inline DiscoveryCriteria branch uses, never a hand-mirrored copy.
+            acknowledge_low_yield: { $ref: "#/components/schemas/AcknowledgeLowYield" }
+        # Running a circular opportunity. Closed like the icpId branch and for the same reason:
+        # every search input is derived SERVER-SIDE from the graded opportunity the handle names,
+        # so a body that also carried inline criteria would be asking for two different searches.
+        - type: object
+          required: [opportunityHandle]
+          additionalProperties: false
+          properties:
+            opportunityHandle:
+              type: string
+              description: >-
+                The `handle` of one entry from `GET /api/v1/opportunities`. Opaque, and resolved
+                against YOUR OWN portfolio - it names a graded opportunity, never a search. An
+                unknown handle refunds the debit and returns 404.
+            confirmedResource:
+              type: string
+              description: >-
+                Your own description of the resource, REQUIRED when the entry's
+                `requires_resource_confirmation` is true (its resource is an unconfirmed
+                hypothesis). Without it the run is refused with 404
+                `resource_confirmation_required` and the debit is refunded - an inferred
+                hypothesis may not be used to target a search until you have confirmed or
+                corrected it. What you send is RETAINED as a stated fact about your business and
+                informs later inference, so correct it rather than echoing ours back.
+            acknowledge_low_yield: { $ref: "#/components/schemas/AcknowledgeLowYield" }
+        - $ref: "#/components/schemas/DiscoveryCriteria"
+
+    Discovery:
+      type: object
+      description: A discovery's status merged with its result. The `result` block is present only once the discovery reaches a terminal state.
+      required: [jobId, status]
+      properties:
+        jobId:
+          type: string
+          description: Id of this discovery.
+        icp_id: { $ref: "#/components/schemas/JobIcpId" }
+        status:
+          description: Current lifecycle state of the discovery.
+          $ref: "#/components/schemas/JobState"
+        result:
+          description: The finished discovery result. Present only when `status` is terminal.
+          $ref: "#/components/schemas/JobResult"
+
+    JobIcpId:
+      type: string
+      description: >-
+        The saved ICP this discovery was started from (`POST /api/v1/discoveries {"icpId": ...}`),
+        for billing attribution — the same value the matching credit-ledger rows carry, so a
+        charge reconciles back to the ICP that caused it. Served on EVERY job surface (the
+        progressive status, the merged discovery view, the finished result, and each entry of the
+        discoveries list) from one reader, so a customer can attribute a run to its ICP without
+        waiting for the run to finish or cross-referencing the ledger. ABSENT (field omitted, never
+        an empty string) when the run was ad-hoc from inline criteria. Ids are scoped to the calling
+        customer — the same namespace `GET /api/v1/icps` returns.
+
+    TerminalReason:
+      type: [string, "null"]
+      enum: [candidates_exhausted, trailing_candidates_forgiven, candidate_cap_reached,
+             candidate_search_failed, time_limit_reached, stalled_no_progress, fan_in_incomplete,
+             target_reached, saturated_known_set, cancelled_by_customer, null]
+      description: >-
+        Why the discovery stopped, once terminal; null while still running, and null on any job
+        terminal before this field's writers shipped. Carried on BOTH the progressive status and
+        the finalized result — they read the same durable value, so the two surfaces cannot
+        disagree about why a run ended. `candidates_exhausted` = the market had no
+        more matching candidates to evaluate, and every candidate it did dispatch was evaluated;
+        `trailing_candidates_forgiven` = the run stopped while a small remainder of its own
+        candidates (up to 5%) was still being evaluated, so the shortfall was forgiven rather than
+        exhausted — reported separately from `candidates_exhausted` because the two call for
+        OPPOSITE responses: a genuinely dry market wants a wider profile, whereas a forgiven
+        remainder means the run was cut short and re-running the SAME profile may deliver;
+        `candidate_cap_reached` = when a run's candidates ran out before your target, it fetched
+        further batches of new candidates, and it stopped because it had screened the maximum
+        number of candidates one run may evaluate — the sources were still returning new
+        candidates, so the shortfall reflects the per-run screening limit, not an exhausted market;
+        `candidate_search_failed` = the run's candidates ran out before your target and the search
+        for further candidates failed repeatedly, so the market was never shown to be exhausted —
+        re-running the SAME profile later may deliver;
+        `time_limit_reached` = the run hit its time budget
+        while still producing; `stalled_no_progress` = the run stopped producing results and was
+        terminated early rather than hitting its budget (a different situation from either of the
+        two above, and reported separately so it is not mistaken for a thin market or a short
+        budget); `fan_in_incomplete` = a search step never finished, so the run was
+        never able to ask for more candidates; `target_reached` = the run delivered everything
+        you asked for; `saturated_known_set` = every delivered domain was already yours from an
+        earlier search (refunded); `cancelled_by_customer` = you cancelled it via
+        `POST /mcp/jobs/{jobId}/cancel`. When credits are refunded, the refund reason matches this.
+
+    AlreadyOwnedCount:
+      type: integer
+      minimum: 0
+      description: >-
+        How many of this discovery's delivered domains you ALREADY owned from a PRIOR discovery
+        (any earlier search, not just this one's filters) — i.e. cross-search overlap with your
+        existing prospects. 0 means every delivered domain is new to you. Domains already owned
+        under this exact search's filters are de-duplicated out before delivery and are not
+        counted here. Served on both the progressive status and the finalized result from one
+        durable value. See `already_owned_withheld_count` for how many WERE de-duplicated out.
+      examples: [2]
+
+    AlreadyOwnedWithheldCount:
+      type: integer
+      minimum: 1
+      description: >-
+        How many companies this discovery found, judged in-scope for THIS search, and then did NOT
+        deliver because you already own them from an earlier run of the same search. This is the
+        count `already_owned_count` explicitly excludes: those domains were suppressed one step
+        BEFORE delivery, so they appear in neither `prospects` nor `total_prospects`. It is the
+        number that explains an otherwise puzzling result — a repeat search of a market you have
+        already worked returns few new companies precisely BECAUSE most of what it found is
+        already yours, and without this field that outcome is indistinguishable from a failed run.
+        Counted as DISTINCT companies across both suppression paths (freshly searched and re-served
+        from your existing knowledge base), so it never double-counts one company found twice.
+        ABSENT — never 0 — when nothing was suppressed, so any value you receive is a real one.
+      examples: [11]
+
+    CandidatesScreened:
+      type: integer
+      minimum: 0
+      description: >-
+        Number of candidate companies this discovery began SCREENING (search/candidate-dispatch
+        phase). Increases monotonically during screening so a client sees live progress even
+        before the first prospect domain lands; 0 before screening has started. It legitimately
+        PLATEAUS once search has exhausted the niche and the run moves into its crawl/validation tail
+        — that is not a stall. For liveness during that tail, read `evaluated_count`. On the finished
+        result it is the frozen final value, so the same number explains a run after it ends.
+      examples: [157]
+
+    EvaluatedCount:
+      type: integer
+      minimum: 0
+      description: >-
+        Number of screened candidates that have finished crawl + validation (a running verdict
+        count = accepted + rejected). Complements `candidates_screened`: it keeps climbing through the
+        crawl/validation tail — after screening plateaus — so a polling client sees liveness for the
+        WHOLE run. Retains its final total once the discovery is terminal, where together with
+        `candidates_screened` it is the funnel that explains the delivered count.
+      examples: [195]
+
+    JobStatus:
+      type: object
+      description: |
+        Progressive discovery status. While the job runs, `found[]` accumulates the prospect
+        DOMAINS discovered so far (validated-only — a bare domain is customer-safe), so a polling
+        client sees results before the job finishes instead of nothing until it ends. Pass the
+        previous response's `next_cursor` back as the `cursor` query param to receive only the
+        domains added since the last poll; `has_more` stays true until a terminal state, at which
+        point `found[]` is served from the finalized result and `next_cursor` is null.
+      required: [jobId, status]
+      properties:
+        jobId:
+          type: string
+          description: Id of this discovery.
+        icp_id: { $ref: "#/components/schemas/JobIcpId" }
+        status:
+          description: Current lifecycle state of the discovery.
+          $ref: "#/components/schemas/JobState"
+        total_prospects:
+          type: integer
+          minimum: 0
+          description: >-
+            Canonical count of validated prospects this discovery has delivered so far — the SAME
+            per-discovery delivery metric the finalized `JobResult.total_prospects` carries, read
+            here as a LIVE snapshot that grows monotonically while the job runs and equals the
+            terminal `JobResult.total_prospects` once the job is done. Key on this ONE field name to
+            group/count a discovery's delivery across the status and result surfaces. This is a
+            single-job delivery count — NOT the pagination `total` on `ProspectList`/`ProspectSummaryList`,
+            which counts a LIST/SEARCH result set across your whole inbox.
+          examples: [3]
+        withheld_count:
+          type: integer
+          minimum: 0
+          description: >-
+            How many companies this discovery DELIVERED and then RETRACTED, so `total_prospects`
+            above is the SERVABLE set rather than the originally-announced one. A prospect is
+            retracted when a check that can only complete after delivery decides it does not
+            belong to your search — most often a headquarters re-check placing it outside your
+            target region. Retracted companies are removed from `prospects[]`/`found[]` and never
+            reach your CRM. ABSENT (never `0`) when nothing was retracted: absence is the signal.
+          examples: [1]
+        withheld:
+          type: array
+          description: >-
+            The retracted companies, one entry per row removed from `prospects[]`/`found[]`.
+            Present only alongside a non-zero `withheld_count`.
+          items:
+            type: object
+            properties:
+              domain:
+                type: string
+                description: The retracted company's domain, as it was originally delivered.
+              reason:
+                type: string
+                description: >-
+                  Bounded reason the company was retracted. `sub_region` = its headquarters
+                  resolved outside your target region; `exclusion` / `business_model` = it matched
+                  a filter you set; `kb_seed_dedup` = you already own it from an earlier search;
+                  `delivery_cap` = it arrived after the run had already met your target.
+                enum: [sub_region, kb_seed_dedup, exclusion, business_model, delivery_cap, unspecified]
+        prospectsFound:
+          type: integer
+          minimum: 0
+          deprecated: true
+          description: >-
+            DEPRECATED camelCase alias of `total_prospects` (identical value); kept during a
+            back-compat transition so existing clients keying on `prospectsFound` do not break.
+            New integrations MUST read `total_prospects` (the canonical, snake_case name shared with
+            `JobResult`). This alias will be removed in a future major version once no live consumer
+            depends on it.
+        target:
+          type: [integer, "null"]
+          minimum: 1
+          description: Requested prospect target (maxResults); null for jobs predating target persistence.
+        found:
+          type: array
+          items: { type: string }
+          description: >-
+            Prospect domains discovered so far, in discovery order. With a `cursor`, only the
+            domains added since that cursor; without one, the full list so far. Call
+            `GET /api/v1/prospects/{domain}` (or read the result once terminal) for full detail
+            on any domain.
+        next_cursor:
+          type: [string, "null"]
+          description: >-
+            Opaque cursor to pass as the `cursor` query param on the next poll to fetch only newer
+            domains. Null once the job is terminal (nothing more will accumulate).
+        has_more:
+          type: boolean
+          description: True while the job is non-terminal and more domains may still accumulate.
+        candidates_screened: { $ref: "#/components/schemas/CandidatesScreened" }
+        evaluated_count: { $ref: "#/components/schemas/EvaluatedCount" }
+        stage:
+          type: string
+          enum: [searching, screening, complete]
+          description: >-
+            Coarse progress phase, a companion to `candidates_screened`. `searching` = still issuing
+            discovery queries, no candidates evaluated yet; `screening` = evaluating candidate
+            companies; `complete` = the job is terminal (finished, whatever its `terminal_reason`).
+          examples: [screening]
+        last_activity_at:
+          type: string
+          format: date-time
+          description: >-
+            RFC-3339 UTC timestamp (…Z) of the last per-candidate verdict (accept/reject) — the SAME
+            timestamp format as every other date-time the API surfaces (`discovered_at`,
+            `employee_count_as_of`, `facts[].extracted_at`, credit-ledger timestamps). Present only
+            while the job is RUNNING and at least one candidate has been evaluated; omitted on terminal
+            jobs and before the first verdict. With `seconds_since_last_activity` it distinguishes a
+            working-but-slow job from a stalled one when `candidates_screened`/`evaluated_count` look
+            static during the slow evaluation tail.
+          examples: ["2026-08-09T11:38:12.474Z"]
+        seconds_since_last_activity:
+          type: integer
+          minimum: 0
+          description: >-
+            Seconds since `last_activity_at`, computed fresh each poll (resets toward 0 on every new
+            verdict, grows only during genuine silence). Present only while running with at least one
+            verdict — the read-time-fresh liveness signal a polling client uses to tell working-but-slow
+            from stuck.
+          examples: [45]
+        poll_after_seconds:
+          type: integer
+          minimum: 1
+          description: >-
+            Recommended number of seconds to wait before polling this discovery's status again.
+            A cadence hint for polite back-off — poll no more often than this rather than
+            hammering the API.
+          examples: [20]
+        estimated_duration_seconds:
+          type: integer
+          minimum: 1
+          description: >-
+            Expected wall-clock duration for this discovery, in seconds — the single planning-safe number,
+            always present. Equals the p95 of recent OBSERVED job runtimes (the industry-standard user-facing
+            UPPER BOUND so a slow-but-healthy run is not mistaken for a stuck one, and a client planning
+            timeouts is not misled low): it is identical to `estimated_duration_p95_seconds` once history
+            exists, and falls back to a static coarse default until enough jobs have finished. For the full
+            percentile trio read `estimated_duration_p50_seconds` / `estimated_duration_p90_seconds` /
+            `estimated_duration_p95_seconds`. An estimate, not a guarantee.
+          examples: [2900]
+        estimated_duration_p50_seconds:
+          type: integer
+          minimum: 1
+          description: >-
+            Median (p50) of recent OBSERVED job runtimes, in seconds — the TYPICAL duration. The lowest member
+            of the explicit p50/p90/p95 trio; `estimated_duration_p95_seconds` is the planning-safe upper
+            bound. Omitted (together with the p90 and p95 fields) until enough jobs have finished to derive it.
+          examples: [1140]
+        estimated_duration_p90_seconds:
+          type: integer
+          minimum: 1
+          description: >-
+            90th-percentile (p90) of recent OBSERVED job runtimes, in seconds — a monitoring-baseline
+            percentile and the middle member of the explicit p50/p90/p95 trio. Omitted (together with the p50
+            and p95 fields) until enough jobs have finished to derive it.
+          examples: [2400]
+        estimated_duration_p95_seconds:
+          type: integer
+          minimum: 1
+          description: >-
+            95th-percentile (p95) of recent OBSERVED job runtimes, in seconds — the planning-safe user-facing
+            UPPER BOUND, and the top member of the explicit p50/p90/p95 trio. This is the same value carried by
+            `estimated_duration_seconds` whenever history exists (that field is the always-present single
+            number; this one is the labelled member of the trio). Omitted (together with the p50 and p90
+            fields) until enough jobs have finished to derive it.
+          examples: [2900]
+        estimated_yield:
+          type: integer
+          minimum: 0
+          description: >-
+            Expectation-setting hint: the TOTAL number of prospects this discovery is likely to DELIVER —
+            i.e. total deliverable, NOT net-new. It is projected from YOUR own historical delivery ratio
+            (prospects delivered ÷ target requested, accumulated across your completed discoveries) applied
+            to this run's requested target, and it is never projected above the request. "Total deliverable"
+            means the count is GROSS: it includes domains you may already own from a prior discovery (see
+            `already_owned_count` for how many of the delivered set were already yours); it is not a promise
+            of that many BRAND-NEW companies. It derives from the SAME frozen value returned when the
+            discovery was accepted (surfaced here on every poll so a client that did not capture the accept
+            response can still read it), but because the projection is deliberately CONSERVATIVE and a
+            fast-converging run can overtake it, the value shown here is floored at the live `prospectsFound`
+            — i.e. `max(frozen_estimate, prospectsFound)` — so this hint is NEVER less than the count already
+            delivered in the same response. Omitted entirely (never null) when the job carried no create-time
+            projection (insufficient history). An estimate, not a guarantee.
+          examples: [4]
+        terminal_reason: { $ref: "#/components/schemas/TerminalReason" }
+        already_owned_count: { $ref: "#/components/schemas/AlreadyOwnedCount" }
+        suggestions:
+          type: array
+          description: >-
+            The SAME data-driven next-step entries `JobResult.suggestions` carries, served here so a
+            client that only ever polls status is not dead-ended on an underperforming run. Read
+            through the one shared reader, so this array can never disagree with the finalized
+            result about which advisories are still true. It has two lives across a discovery's
+            lifetime: while the run is still going it carries AT MOST ONE early `BROADEN_QUERY`
+            entry, emitted only once the observed counters imply the requested target is
+            unreachable, so you can act at minute 5 instead of at the terminal; once the run is
+            terminal it carries that run's frozen advice and disclosures — the underperformance
+            recommendation and any mandatory `FILTER_RELAXED` / `REGION_PREFERENCE_APPLIED` note.
+            ABSENT (never `[]`) when there is nothing to say — absence is the signal, and unlike
+            `JobResult.suggestions` this property has no `[]` default. See `Suggestion` for the
+            per-entry shape and `JobResult.suggestions` for the full terminal vocabulary.
+          items: { $ref: "#/components/schemas/Suggestion" }
+
+    CreditLedger:
+      type: object
+      description: >-
+        A customer's credit-transaction history (`GET /mcp/credits/ledger`). Every transaction row
+        carries a signed `amount`, so `sum(transactions[].amount)` reconciles the credit movement
+        against `balance`.
+      required: [customer_id, balance, transactions, count, total, offset, has_more, window_start, truncated, history_incomplete]
+      properties:
+        customer_id:
+          type: string
+          description: The authenticated customer these transactions belong to.
+        balance:
+          type: integer
+          description: Current credit balance.
+        count:
+          type: integer
+          minimum: 0
+          description: Number of transactions in THIS page (never exceeds the requested `limit`).
+        total:
+          type: integer
+          minimum: 0
+          description: >-
+            Total reconstructable transactions in the window (across all pages). When
+            `history_incomplete` is true this is a lower bound — older, marker-expired history is not counted.
+        offset:
+          type: integer
+          minimum: 0
+          description: The starting index this page was served from (echoes the request `offset`, clamped to `total`).
+        has_more:
+          type: boolean
+          description: True when this page left transactions unreturned — fetch the next page with `offset += count`.
+        window_start:
+          type: string
+          format: date-time
+          description: >-
+            RFC-3339 UTC start of the reconstructable window (`now − marker TTL`, ≈7 days).
+            Transactions older than this have expired markers and cannot be reconstructed.
+        truncated:
+          type: boolean
+          description: >-
+            PURE this-page hard-cap signal: true only when an item/byte cap dropped rows from THIS
+            page. The ledger paginates on `offset`/`limit` with no per-page item/byte cap (`has_more`
+            covers the tail), so `truncated` is always `false` here. Retained for a uniform pagination
+            envelope across list surfaces. The "older history exists" signal is the DISTINCT
+            `history_incomplete` field below — do NOT read `truncated` for data completeness.
+        history_incomplete:
+          type: boolean
+          description: >-
+            Data-COMPLETENESS signal (distinct from `truncated`): true when older account history
+            exists that the bounded markers can no longer reconstruct — set in exactly two cases:
+            (1) the customer has more jobs than a single read enumerates (only the newest are scanned),
+            or (2) a job's paired debit/refund fell outside the reconstructable window so one half-pair
+            row was suppressed. When true, the visible rows are still internally consistent but do NOT
+            span the customer's whole account history. A COMPLETE page (`has_more=false`,
+            `count == total`) can still be `history_incomplete=true` — the two flags are orthogonal.
+        transactions:
+          type: array
+          description: Credit transactions, newest first.
+          items: { $ref: "#/components/schemas/LedgerTransaction" }
+
+    LedgerTransaction:
+      type: object
+      description: >-
+        One credit-ledger row. EVERY row carries a signed `amount` (credits) — negative for a
+        debit, positive for a refund/grant — so a client can sum the column to reconcile against
+        `balance`. Carries NO internal provenance flags: this is a customer-facing billing surface.
+      required: [type, amount, reason, timestamp]
+      additionalProperties: false
+      properties:
+        type:
+          type: string
+          enum: [debit, refund, adjustment]
+          description: >-
+            `debit` = a discovery-job charge; `refund` = credits returned for a terminated/refunded
+            job; `adjustment` = a manual balance change.
+        job_id:
+          type: string
+          description: The discovery job this row belongs to. Absent on manual adjustments.
+        icp_id:
+          type: string
+          description: >-
+            The saved ICP this charge is attributable to — the `icpId` the run was started with via
+            `POST /api/v1/discoveries {"icpId": ...}`. Lets a customer running several saved ICPs
+            reconcile a charge back to the ICP that caused it. Carried on both the `debit` row and
+            its paired `refund` row, so an attribution survives the two landing on different pages.
+            ABSENT (field omitted, never an empty string) for an ad-hoc run started from inline
+            criteria, and on `adjustment` rows, which have no job. Ids are scoped to the calling
+            customer — the same namespace `GET /api/v1/icps` returns.
+        amount:
+          type: integer
+          description: Signed credit movement — negative for a debit, positive for a refund/grant.
+        reason:
+          type: string
+          description: >-
+            Bounded reason for the movement (e.g. `discovery_job`, `candidates_exhausted`,
+            `time_limit_reached`, `manual_reconciliation`).
+        balance_after:
+          type: [integer, "null"]
+          description: >-
+            Best-effort: the TRUE balance immediately after this event, present ONLY when a durable
+            post-event snapshot was recorded at the source (`jobs:charged-balance:{jobId}`, written by
+            the gateway debit script). OMITTED (field absent) on rows with no snapshot — historical
+            debits that predate the snapshot feature, and reconstructed/inferred refunds — because a
+            running balance is NOT reliably reconstructable after the fact (concurrent jobs and
+            top-ups make back-derivation unsound). Never fabricated: a null/absent value means
+            "unknown", not zero. Reconcile via the signed `amount` column, which every row carries.
+        timestamp:
+          type: string
+          format: date-time
+          description: RFC-3339 UTC timestamp (…Z) of the transaction.
+        adjustment_id:
+          type: string
+          description: Audit id of a manual adjustment (adjustment rows only).
+        actor:
+          type: string
+          description: Who performed a manual adjustment (adjustment rows only).
+
+    JobSummary:
+      type: object
+      description: >-
+        Lean job list item (`GET /mcp/jobs`) — identity plus lifecycle state only. For a single
+        job's progress (target, prospectsFound, found[], progressive cursor) call
+        `GET /mcp/jobs/{jobId}/status`.
+      required: [jobId, status]
+      properties:
+        jobId:
+          type: string
+          description: Id of this discovery.
+        status:
+          description: Current lifecycle state of the discovery.
+          $ref: "#/components/schemas/JobState"
+
+    JobCancelled:
+      type: object
+      description: Result of `POST /mcp/jobs/{jobId}/cancel` — the job's post-cancel state and any refund applied.
+      required: [jobId, status]
+      properties:
+        jobId:
+          type: string
+          description: Id of the cancelled discovery.
+        status:
+          description: Lifecycle state after the cancel (`cancelled`, or the existing terminal state if already finished).
+          $ref: "#/components/schemas/JobState"
+        credits_refunded:
+          type: [integer, "null"]
+          minimum: 0
+          description: Credits returned to the caller's balance for the cancelled run. Null/0 when nothing was refundable.
+        credits_refund_reason:
+          type: [string, "null"]
+          description: Human-readable reason the refund was (or was not) applied.
+
+    JobResult:
+      type: object
+      description: |
+        The result of a finished discovery, present once the run reaches a terminal state.
+        Field names are snake_case. `prospects[]` carries only customer-safe fields — internal
+        scoring, provenance, and raw content are never included.
+      required: [jobId, status]
+      properties:
+        jobId:
+          type: string
+          description: Id of this discovery.
+        icp_id: { $ref: "#/components/schemas/JobIcpId" }
+        status:
+          description: Terminal lifecycle state of the discovery (`completed`, `failed`, or `exhausted`).
+          $ref: "#/components/schemas/JobState"
+        total_prospects:
+          type: integer
+          minimum: 0
+          description: >-
+            Number of prospects this discovery produced — the canonical per-discovery delivery
+            count, the SAME field name and metric the live `JobStatus.total_prospects` reports (this
+            is its terminal, frozen value). Key on this ONE name to group/count a discovery's
+            delivery across the status and result surfaces. On the merged `Discovery` view this is
+            read at `result.total_prospects`. Distinct from the pagination `total` on
+            `ProspectList`/`ProspectSummaryList` (a LIST/SEARCH result-set count across your inbox).
+        withheld_count:
+          type: integer
+          minimum: 0
+          description: >-
+            How many companies this discovery DELIVERED and then RETRACTED, so `total_prospects`
+            above is the SERVABLE set rather than the originally-announced one. A prospect is
+            retracted when a check that can only complete after delivery decides it does not
+            belong to your search — most often a headquarters re-check placing it outside your
+            target region. Retracted companies are removed from `prospects[]`/`found[]` and never
+            reach your CRM. ABSENT (never `0`) when nothing was retracted: absence is the signal.
+          examples: [1]
+        withheld:
+          type: array
+          description: >-
+            The retracted companies, one entry per row removed from `prospects[]`/`found[]`.
+            Present only alongside a non-zero `withheld_count`.
+          items:
+            type: object
+            properties:
+              domain:
+                type: string
+                description: The retracted company's domain, as it was originally delivered.
+              reason:
+                type: string
+                description: >-
+                  Bounded reason the company was retracted. `sub_region` = its headquarters
+                  resolved outside your target region; `exclusion` / `business_model` = it matched
+                  a filter you set; `kb_seed_dedup` = you already own it from an earlier search;
+                  `delivery_cap` = it arrived after the run had already met your target.
+                enum: [sub_region, kb_seed_dedup, exclusion, business_model, delivery_cap, unspecified]
+        terminal_reason: { $ref: "#/components/schemas/TerminalReason" }
+        already_owned_count: { $ref: "#/components/schemas/AlreadyOwnedCount" }
+        already_owned_withheld_count: { $ref: "#/components/schemas/AlreadyOwnedWithheldCount" }
+        candidates_screened: { $ref: "#/components/schemas/CandidatesScreened" }
+        evaluated_count: { $ref: "#/components/schemas/EvaluatedCount" }
+        auto_complete_reason:
+          type: [string, "null"]
+          enum: [stuck_processing_no_marker, stuck_processing_no_prospects, "null"]
+          description: >-
+            Present ONLY when automatic recovery force-completed a run that stalled in `processing`
+            with no completion marker (`stuck_processing_no_marker` when prospects had accumulated,
+            `stuck_processing_no_prospects` when none had). Absent on every normally-terminating run.
+        credits_refunded:
+          type: [integer, "null"]
+          minimum: 0
+          description: >-
+            Credits returned to the caller's balance when this run was auto-refunded (e.g. an
+            exhausted run that delivered fewer prospects than requested). Absent when no refund
+            applied. Same field, semantics, and shape as `JobCancelled.credits_refunded` — one
+            canonical refund projection across the result and cancel surfaces.
+        credits_refund_reason:
+          type: [string, "null"]
+          description: >-
+            Bounded reason the refund was applied (e.g. `candidates_exhausted`,
+            `time_limit_reached`), resolved from durable terminal state. Present iff
+            `credits_refunded` is. Mirrors `JobCancelled.credits_refund_reason`.
+        completed_at:
+          type: [string, "null"]
+          format: date-time
+          description: When the discovery finished (ISO-8601). Null while not yet terminal.
+        prospects:
+          type: array
+          description: The customer-safe prospects this run found (same field set as `ProspectList`).
+          items: { $ref: "#/components/schemas/Prospect" }
+        suggestions:
+          type: array
+          default: []
+          description: >-
+            Data-driven entries derived from THIS run. At most ONE leak-safe ADVICE recommendation
+            (the single most impactful change) is emitted when the run underperformed (exhausted with
+            fewer prospects than requested), each carrying a human-readable message and an optional
+            `suggested_parameters` delta to merge over your original criteria and start a new discovery.
+            In addition, ZERO OR MORE mandatory `FILTER_RELAXED` disclosures may appear on any terminal
+            run when a requested filter (`company_sizes` or `sub_country_regions`) was relaxed so some
+            returned companies fall outside it, each carrying a `suggested_parameters` clearing that
+            filter. For a region-scoped run where no out-of-region company is yet provable (the region
+            signal often finalizes after async enrichment), a single informational
+            `REGION_PREFERENCE_APPLIED` note appears instead, carrying the same `{sub_country_regions: []}`
+            correction. Empty when the run met target, no filter was relaxed, and no regional
+            preference was requested.
+          items: { $ref: "#/components/schemas/Suggestion" }
+        circular_opportunity:
+          description: >-
+            ONE circular-economy opportunity inferred from your own stored business profile,
+            offered alongside this finished run rather than as a separate message. ABSENT - never
+            null and never an empty object - whenever there is nothing well-grounded to offer, you
+            have opted out, or this run was itself started from an opportunity. The same entry is
+            returned for every read of this discovery, so polling does not change it.
+          $ref: "#/components/schemas/CircularOpportunity"
+
+    CircularClaim:
+      type: object
+      required: [label, grounding, speech_act]
+      additionalProperties: false
+      description: >-
+        One claim, together with what may be DONE with it. `label` is presented verbatim in its
+        original language and is never translated - it may carry a product, brand or material
+        designation. `speech_act` is the machine-readable form of a rule that is a sentence on a
+        chat surface: an `IMPLIED` claim is something we inferred about your business, not
+        something you told us, so it may only ever be put to you as a QUESTION.
+      properties:
+        label:
+          type: string
+          description: The flow, asset, capacity, capability or counterpart type, in plain commercial language.
+        grounding:
+          type: string
+          enum: [STATED, CONFIRMED, IMPLIED]
+          description: >-
+            `STATED` - appears in your business profile. `CONFIRMED` - you corrected or confirmed
+            it and we retained that. `IMPLIED` - inferred, and not yet confirmed by you.
+        speech_act:
+          type: string
+          enum: [ASSERT, ASK]
+          description: >-
+            `ASSERT` for a stated or confirmed claim. `ASK` for an unconfirmed hypothesis, which
+            must be phrased as a question about your business and must not enter outreach.
+
+    CircularOpportunity:
+      type: object
+      required: [handle, category_group, mode, direction, resource, counterpart]
+      additionalProperties: false
+      description: >-
+        One graded circular-economy opportunity for your business. Individually runnable via
+        `POST /api/v1/discoveries` with `opportunityHandle`.
+      properties:
+        handle:
+          type: string
+          description: Opaque id of this entry, scoped to your portfolio. Pass it to run the counterpart search.
+        category_group:
+          type: string
+          description: >-
+            The kind of opportunity - materials recovery is one of several and is never a default.
+            A bounded vocabulary; treat an unfamiliar value as opaque rather than as an error.
+        mode:
+          type: string
+          description: The shape of the search this entry becomes. Bounded vocabulary.
+        direction:
+          type: string
+          enum: [CUSTOMER_HOLDS, CUSTOMER_SEEKS]
+          description: >-
+            `CUSTOMER_HOLDS` - you hold underutilized value and the search finds who wants it.
+            `CUSTOMER_SEEKS` - you would source value another company holds.
+        resource:
+          description: What of YOURS the opportunity rests on.
+          $ref: "#/components/schemas/CircularClaim"
+        counterpart:
+          description: The kind of company that completes it.
+          $ref: "#/components/schemas/CircularClaim"
+        markets:
+          type: array
+          default: []
+          items: { type: string }
+          description: ISO-3166 alpha-2 markets the counterpart search would cover.
+        proximity_bound:
+          type: boolean
+          default: false
+          description: >-
+            True when the exchange only transacts over short distances (heat, CO2, water, bulky
+            low-value material, shared capacity), so reachability constrains the search.
+        grounding_sources:
+          type: array
+          default: []
+          items: { type: string }
+          description: >-
+            Customer-safe CATEGORIES the claims rest on - where and when, never who. Paired with
+            the list's `computed_at`, these are the provenance of everything shown here.
+        outreach_draft_eligible:
+          type: boolean
+          description: >-
+            Whether this entry may GROUND an outreach draft. False when the `resource` - the thing
+            a message would be ABOUT - is an unconfirmed hypothesis; such an entry must not be used
+            to compose outreach in any form, not even as a question, until the customer confirms
+            it. True does NOT license asserting the `counterpart`: that is a hypothesis about a
+            MARKET rather than about the customer, it carries its own `speech_act`, and on a true
+            entry it is very often still `ASK`. Read both.
+        requires_resource_confirmation:
+          type: boolean
+          description: >-
+            True when running this entry requires `confirmedResource` on the trigger, because its
+            resource is an unconfirmed hypothesis.
+        credits_cost:
+          type: integer
+          minimum: 0
+          description: What running the counterpart search costs, shown before anything is spent.
+
+    CircularOpportunityList:
+      type: object
+      required: [opportunities, computed_at]
+      description: The caller's grounded circular-economy opportunities.
+      properties:
+        opportunities:
+          type: array
+          default: []
+          items: { $ref: "#/components/schemas/CircularOpportunity" }
+          description: >-
+            In server-authoritative order. Never padded - an empty array means nothing is
+            well-grounded, which is a real answer and not a failure.
+        computed_at:
+          type: integer
+          format: int64
+          description: >-
+            Epoch milliseconds when this portfolio was DERIVED. It is not recomputed to answer a
+            read, so a value some days old is expected and is the honest date of these claims.
+        opted_out:
+          type: boolean
+          default: false
+          description: >-
+            True when you have turned circular suggestions off. The list is then empty because you
+            asked for it to be, which is a different thing from having no opportunities.
+
+    Suggestion:
+      type: object
+      required: [code, message]
+      additionalProperties: false
+      description: >-
+        A single customer-safe entry derived from THIS job's measured signals. Two kinds share
+        this shape, distinguished by `code`: (1) a bounded ADVICE recommendation (never a
+        rejection reason); and (2) a mandatory `FILTER_RELAXED` DISCLOSURE that a requested filter
+        was relaxed to fill quota. In both cases the human-readable `message` carries the detail —
+        no internal rejection classes, funnel counts, or structured disclosure internals are
+        delivered. Every suggestion carries exactly `{code, message, suggested_parameters}`.
+      properties:
+        code:
+          type: string
+          description: >-
+            Bounded code (NOT a rejection reason). The first seven values are advice codes; `FILTER_RELAXED`
+            is a mandatory relaxation disclosure, `TRANSIENT_INTERRUPTION` advises a plain re-run after
+            an infra stall, `PIPELINE_LIMITED` and `ALREADY_DELIVERED` are honest non-actionable outcomes
+            that deliberately carry NO broadening advice, and `REGION_PREFERENCE_APPLIED` is an
+            informational note that a `sub_country_regions` preference shaped this run.
+          enum: [WIDEN_LOCATION, ALLOW_LARGER_SIZE, ALLOW_SMALLER_SIZE, BROADEN_QUERY, LIMITED_MARKET_DATA, LOWER_TARGET, icp_realignment, TRANSIENT_INTERRUPTION, PIPELINE_LIMITED, ALREADY_DELIVERED, FILTER_RELAXED, REGION_PREFERENCE_APPLIED]
+          x-code-notes:
+            TRANSIENT_INTERRUPTION: >-
+              Under-delivery caused by a transient infrastructure stall (crawl-queue TTL expiry), NOT market
+              thinness. Message-only, retry-oriented — re-running the same search will likely return more.
+            PIPELINE_LIMITED: >-
+              Under-delivery whose dominant cause was candidates WE could not turn into a usable company
+              record — an anti-bot wall, a crawl failure, a page that was not a company, a phantom entity,
+              or a verdict we could not reach. The customer's criteria are NOT the binding constraint, so
+              this code deliberately carries NO `suggested_parameters` and no broadening advice: telling a
+              customer to widen their filters to compensate for our coverage gap would be misleading.
+            ALREADY_DELIVERED: >-
+              Under-delivery whose dominant cause was candidates that MATCHED the criteria and were dropped
+              only because they are already known — already delivered under this ICP, the customer's own
+              domain, a competitor, or a duplicate. Supply exhaustion for this exact search profile;
+              broadening would not have recovered them, so the code is message-only.
+            FILTER_RELAXED: >-
+              Mandatory disclosure that a requested filter (`company_sizes` or `sub_country_regions`) was
+              relaxed so some RETURNED prospects fall outside it. The `message` states which filter and by
+              how much; the underlying detail (violating prospects, match counts) is never delivered. Carries `suggested_parameters` clearing that filter (e.g.
+              `{sub_country_regions: []}`) as the one-tap correction.
+            REGION_PREFERENCE_APPLIED: >-
+              Informational note emitted on a terminal run whose request carried a non-empty
+              `sub_country_regions` when a quantified `FILTER_RELAXED` region disclosure did not fire
+              (the region signal often finalizes only after async enrichment). Discloses that the regional
+              filter is a PREFERENCE — in-region companies are ranked higher while out-of-region companies
+              are still returned ranked lower — so results are more targeted but fewer. Carries the same
+              `{sub_country_regions: []}` correction to broaden coverage across the whole country.
+        message:
+          type: string
+          description: >-
+            Customer-safe, human-readable recommendation or disclosure. Contains no internal
+            rejection reasons or funnel counts.
+        suggested_parameters:
+          description: Optional criteria changes to apply and re-run. Absent when the advice needs no parameter change.
+          $ref: "#/components/schemas/SuggestedCriteria"
+
+    SuggestedCriteria:
+      type: object
+      additionalProperties: false
+      description: >-
+        A partial `DiscoveryCriteria` delta. Merge it over your original request (the delta wins)
+        and start a new discovery. Every field is optional; only the changed values are present.
+        An empty array (e.g. `sub_country_regions: []`) explicitly clears that field.
+        When the run under-delivered, an LLM improvement pass may also rewrite the free-text
+        `query` itself — when present, `query` REPLACES your original `query` verbatim (it is not
+        merged token-wise); apply it alongside the other fields to re-run the improved ICP.
+      properties:
+        query:
+          type: string
+          description: >-
+            LLM-rewritten replacement for the free-text `query`, refined from this run's outcome to
+            surface more matching companies. Present only when the improvement pass produced a better
+            query; use it as-is in place of your original `query` on the re-run.
+        locations:
+          type: array
+          description: Suggested replacement for `locations` (e.g. a wider set of countries).
+          items: { type: string }
+        company_sizes:
+          type: array
+          description: Suggested replacement for `company_sizes`.
+          items:
+            type: string
+            enum: [micro, small, medium, large, enterprise]
+        sub_country_regions:
+          type: array
+          description: Suggested replacement for `sub_country_regions`. An empty array clears the field.
+          items: { type: string }
+        industries:
+          type: array
+          description: Suggested replacement for `industries`.
+          items: { type: string }
+        keywords:
+          type: array
+          description: Suggested replacement for `keywords`.
+          items: { type: string }
+        maxResults:
+          type: integer
+          minimum: 1
+          maximum: 200
+          description: Suggested replacement for `maxResults`.
+
+    JobState:
+      type: string
+      description: >-
+        Discovery lifecycle state. `queued` = accepted, not yet started; `running` and `processing`
+        = discovery in progress; `completed` = finished and reached its target; `failed` = ended with
+        an error; `exhausted` = finished but ran out of candidates before hitting the target;
+        `cancelled` = stopped by the caller via `POST /mcp/jobs/{jobId}/cancel`. The last four are
+        terminal.
+      enum: [queued, running, processing, completed, failed, exhausted, cancelled]
+
+    ProspectList:
+      type: object
+      description: A page of discovered companies (customer-safe fields only).
+      required: [prospects]
+      properties:
+        prospects:
+          type: array
+          description: The discovered companies in this response.
+          items: { $ref: "#/components/schemas/Prospect" }
+        total:
+          type: integer
+          minimum: 0
+          description: >-
+            PAGINATION count — the number of prospects returned in THIS list response. This is a
+            LIST result-set count over your de-duplicated inbox (optionally scoped by `job_id`), a
+            DIFFERENT concept from a single discovery's delivery count (`JobResult.total_prospects` /
+            `JobStatus.total_prospects`) — do not group the two together. Named `total` to match the
+            sibling search list (`ProspectSummaryList.total`); note that sibling counts total MATCHES
+            (which can exceed the page), whereas this one counts the rows in this page.
+        customer_id:
+          type: string
+          description: The authenticated tenant these prospects belong to.
+        suggestions:
+          type: array
+          default: []
+          description: >-
+            On the per-run view (`GET /api/v1/discoveries/{jobId}/prospects`), the same
+            data-driven next-step recommendation(s) `JobResult.suggestions` carries — present
+            only when the run underperformed. Empty on successful runs and on the de-duplicated
+            `GET /api/v1/prospects` list.
+          items: { $ref: "#/components/schemas/Suggestion" }
+
+    ProspectDetail:
+      type: object
+      description: >-
+        A single company looked up by domain via `GET /api/v1/prospects/{domain}`. Returned only
+        when the company exists for this tenant: `prospect` carries its full customer-safe record —
+        including detail-only enrichments (such as `knowledge_graph` and `pages`) not returned by
+        the list endpoints. An unknown domain is a `404` carrying the standard `Error` envelope
+        (`{error: "not_found", message, request_id}`), not a `200` body.
+      required: [status]
+      properties:
+        status:
+          type: string
+          description: "`active` = an undelivered match; `delivered` = already acknowledged."
+          enum: [active, delivered]
+        domain:
+          type: string
+          description: >-
+            The domain this record was looked up by, echoed at the envelope root on every detail
+            response — the same value as `prospect.domain`. Served so a client batching several
+            lookups can attribute a response without reaching into the nested record.
+          examples: [acme.de]
+        prospect:
+          description: The company's full customer-safe record.
+          $ref: "#/components/schemas/Prospect"
+
+    AckRequest:
+      type: object
+      description: Body for acknowledging delivery of one or more companies (batch).
+      additionalProperties: false
+      required: [domains]
+      properties:
+        domains:
+          type: array
+          minItems: 1
+          items: { type: string }
+          description: |
+            Domains to acknowledge. Each is marked delivered so it isn't returned again across
+            any of your discoveries. Idempotent — acking an unknown or already-acknowledged
+            domain is a harmless no-op that simply contributes 0 to the count.
+          examples: [[acme.de, example.de]]
+
+    AckResult:
+      type: object
+      description: Result of an acknowledge call.
+      properties:
+        customer_id:
+          type: string
+          description: The acknowledging customer's id (echoed from the X-Customer-Id header).
+        acknowledged:
+          type: integer
+          description: |
+            Number of prospect records marked delivered across the requested domains. Idempotent —
+            unknown or already-acknowledged domains contribute 0.
+        matched:
+          type: integer
+          description: |
+            How many of the requested domains belong to this customer (already-acknowledged ones
+            included). When it is 0 — every requested domain is unknown to this customer — the call
+            answers 404 instead of a 200 that acknowledged nothing.
+        requested:
+          type: integer
+          description: Number of domains in the request.
+
+    Contact:
+      type: object
+      description: |
+        A discovered person at the company — customer-safe fields only. Most fields are nullable
+        since discovery frequently yields partial data. Any field not listed here is never
+        returned.
+      additionalProperties: false
+      properties:
+        name: { type: [string, "null"], description: The person's full name. }
+        email: { type: [string, "null"], description: "The person's email address, where discovered." }
+        position: { type: [string, "null"], description: The person's job title or role. }
+        title: { type: [string, "null"], description: "The person's job title or role, as surfaced during discovery (alternative source to `position`)." }
+        phone: { type: [string, "null"], description: A direct phone number for the person. }
+        department: { type: [string, "null"], description: The department or function the person works in. }
+        organization: { type: [string, "null"], description: The organization or company the person is associated with. }
+        linkedin_url: { type: [string, "null"], description: The person's LinkedIn profile URL. }
+        instagram_url: { type: [string, "null"], description: The person's Instagram profile URL. }
+        facebook_url: { type: [string, "null"], description: The person's Facebook profile URL. }
+        twitter_url: { type: [string, "null"], description: The person's X (Twitter) profile URL. }
+        youtube_url: { type: [string, "null"], description: The person's YouTube channel URL. }
+        telegram_url: { type: [string, "null"], description: The person's Telegram contact URL. }
+        viber_url: { type: [string, "null"], description: The person's Viber contact URL. }
+        whatsapp_url: { type: [string, "null"], description: The person's WhatsApp click-to-chat URL. }
+        contact_address: { type: [string, "null"], description: "The person's street address, where discovered." }
+        contact_city: { type: [string, "null"], description: The person's city. }
+        contact_country: { type: [string, "null"], description: The person's country. }
+        contact_country_code: { type: [string, "null"], description: The person's country as an ISO-3166-1 alpha-2 code. }
+        contact_region: { type: [string, "null"], description: The person's sub-country region (e.g. state or province). }
+        registry_source:
+          type: [string, "null"]
+          description: The government registry this person was verified against, when applicable.
+        email_source:
+          type: [string, "null"]
+          description: >-
+            Provenance of `email` when it was INFERRED rather than directly discovered.
+            `derived_domain_pattern` = a name-coupled mailbox reconstructed from the company's own
+            observed local-part convention (confidence ~0.5, never verified); `micro_company_generic_pairing`
+            = a sole owner paired to the company's generic mailbox. Absent (null) for a crawled/verified
+            email. Use it to weight an inferred address (which carries bounce risk) before outreach.
+        is_officer:
+          type: boolean
+          description: True when this person matches a statutory officer listed in a government registry.
+
+    Prospect:
+      type: object
+      description: |
+        A discovered company — customer-safe fields only. Internal scoring, provenance, and raw
+        content fields are never present; any field not listed here is never returned. Most
+        fields are nullable, since discovery frequently yields partial data. `domain` is always
+        present. A few fields are populated only on specific endpoints, noted per-field
+        (e.g. `knowledge_graph`/`pages` on the detail endpoint, `semantic_score` on search).
+
+        There is deliberately no bare `source` field: a single name would be ambiguous about what
+        it describes. Provenance is published per subject instead: `registry_source`,
+        `employee_count_source`, `footer_legal_name_source` and `social_source` here, and
+        `email_source` on the nested `contacts` entries.
+      additionalProperties: false
+      required: [domain]
+      properties:
+        domain:
+          type: string
+          description: The company's primary website domain. The stable identifier for the prospect.
+          examples: [acme.de]
+        name: { type: [string, "null"], description: The company's name. }
+        description: { type: [string, "null"], description: Short description of what the company does. }
+        industry:
+          type: [string, "null"]
+          description: >-
+            The company's primary industry (coarse-grained). Free-text, but normalized from a
+            canonical taxonomy: `fashion_retail`, `electronics_retail`, `grocery_retail`,
+            `home_furniture`, `furniture_manufacturing`, `automotive`, `manufacturing`,
+            `chemicals_materials`, `agriculture_food_production`,
+            `logistics`, `b2b_services`, `technology_software`, `healthcare`, `financial_services`,
+            `cosmetics_beauty`, `jewelry_accessories`, `hospitality_restaurant`, `energy`,
+            `sporting_goods`, `recreation`, `education`, and the specialty-retail categories
+            `florist_flowers`, `bakery_pastry`, `butcher_delicatessen`, `optician_eyewear`,
+            `pharmacy_drugstore`, `pet_shop`, `toy_hobby`, `stationery_office_supplies`,
+            `bookstore`, `garden_center`, `musical_instruments`, and `hardware_diy`. The list is
+            not strict — a value outside it may occasionally be returned — so treat it as the
+            expected vocabulary rather than a closed enum.
+        employee_count: { type: [integer, "null"], description: Estimated number of employees. }
+        employee_count_source:
+          type: [string, "null"]
+          enum: [official_registry, public_knowledge_base, professional_network, web_research, company_website, unverified_estimate, verified, null]
+          description: >-
+            Authority band of `employee_count` — a source-agnostic label for the kind of source that
+            won the precedence contest when the value was last written (`official_registry` >
+            `public_knowledge_base` > `professional_network` > `web_research` > `company_website` >
+            `unverified_estimate`, with `verified` an operator override). `official_registry` is an
+            official government/company registry; `public_knowledge_base` is a public, structured,
+            source-referenced knowledge base; `professional_network` is a public professional-network
+            profile; `web_research` is a third-party OSINT figure researched from cited public
+            sources; `company_website` is the company's own website; `unverified_estimate` is an
+            UNVERIFIED third-party or model-derived estimate — nothing was measured, filed or
+            self-declared, so treat it as the pipeline's best guess and NOT as a sourced figure.
+            Surfaced customer-side so the freshness/authority
+            of the headcount can be audited (provenance of a delivered fact) without naming any
+            internal pipeline/vendor. Null when no source has been recorded.
+        employee_count_as_of:
+          type: [string, "null"]
+          format: date-time
+          description: >-
+            ISO-8601 UTC timestamp of when `employee_count` was last written by a winning source
+            (server-stamped). The freshness marker paired with `employee_count_source`.
+            Null when no source has been recorded.
+        company_size:
+          type: [string, "null"]
+          enum: [micro, small, medium, large, enterprise, null]
+          description: >-
+            Company size bucket by employee headcount (lowercase; null when undetermined).
+            `micro` (≤10 employees), `small` (≤50), `medium` (≤200), `large` (≤500),
+            `enterprise` (500+). Uses the SAME lowercase tokens as the `company_sizes` INPUT filter
+            (DiscoveryCriteria.company_sizes), so a value read off a result can be re-submitted
+            verbatim as a filter without a 400. `micro` companies are returned by a `small`
+            `company_sizes` filter.
+        headquarters_location: { type: [string, "null"], description: 'Headquarters location as a "City, Country" string.' }
+        country: { type: [string, "null"], description: The company's country. }
+        country_code: { type: [string, "null"], description: The company's country as an ISO-3166-1 alpha-2 code. }
+        city: { type: [string, "null"], description: The company's city. }
+        state: { type: [string, "null"], description: "The company's state, province, or region." }
+        postal_code: { type: [string, "null"], description: The company's postal or ZIP code. }
+        street: { type: [string, "null"], description: The company's street address. }
+        street_romanized:
+          type: [string, "null"]
+          description: Latin-script transliteration of `street`, for companies in non-Latin-script markets.
+        contacts:
+          type: array
+          description: People discovered at the company.
+          items: { $ref: "#/components/schemas/Contact" }
+        phones:
+          type: array
+          description: Company phone numbers.
+          items: { type: string }
+        company_emails:
+          type: array
+          description: General company email addresses (e.g. info@, sales@), as opposed to a specific person's.
+          items: { type: string }
+        city_romanized:
+          type: [string, "null"]
+          description: Latin-script transliteration of city (non-Latin source markets).
+        state_romanized:
+          type: [string, "null"]
+          description: Latin-script transliteration of state (non-Latin source markets).
+        linkedin_url: { type: [string, "null"], description: The company's LinkedIn page URL. }
+        instagram_url: { type: [string, "null"], description: The company's Instagram profile URL. }
+        facebook_url: { type: [string, "null"], description: The company's Facebook page URL. }
+        twitter_url: { type: [string, "null"], description: The company's X (Twitter) profile URL. }
+        youtube_url: { type: [string, "null"], description: The company's YouTube channel URL. }
+        telegram_url: { type: [string, "null"], description: The company's Telegram channel or click-to-chat URL. }
+        viber_url: { type: [string, "null"], description: The company's Viber click-to-chat URL. }
+        whatsapp_url: { type: [string, "null"], description: The company's WhatsApp click-to-chat URL. }
+        weibo_url: { type: [string, "null"], description: The company's Weibo profile URL. }
+        douyin_url: { type: [string, "null"], description: The company's Douyin (Chinese TikTok) profile URL. }
+        wechat_id: { type: [string, "null"], description: WeChat account ID (WeChat has no public profile URL). }
+        qq_id: { type: [string, "null"], description: QQ account ID (QQ has no public profile URL). }
+        business_model:
+          type: [string, "null"]
+          enum: [manufacturer, retailer, distributor, service_provider, unknown, null]
+          description: >-
+            The company's classified business model — `manufacturer`, `retailer`, `distributor`,
+            or `unknown`. Null when not classified.
+        estimated_annual_revenue_usd:
+          type: [integer, "null"]
+          description: >-
+            Estimated annual revenue in whole USD dollars, derived from a model (based on
+            employee count). Null when undetermined — never a fabricated zero.
+        estimated_revenue_currency:
+          type: [string, "null"]
+          description: ISO-4217 alpha-3 currency for the revenue estimate (currently always USD).
+        founded_year:
+          type: [integer, "null"]
+          description: Year the company was founded (company-maturity signal). Null when unknown.
+        reported_revenue_usd:
+          type: [integer, "null"]
+          description: >-
+            Reported annual revenue in whole USD dollars, sourced from public company financials
+            (distinct from the model-based `estimated_annual_revenue_usd`). Null when not reported.
+        funding_total_usd:
+          type: [integer, "null"]
+          description: >-
+            Total capital raised to date in whole USD dollars, from public company financials.
+            Null when not reported.
+        funding_latest_round:
+          type: [object, "null"]
+          description: >-
+            Latest funding round (round name/type, date, amount, currency). Returned as a decoded
+            object — the API decodes the stored JSON for you at the boundary, so do NOT decode a
+            second time. The key set comes from the financial source and is not closed: read the
+            keys you need and ignore the rest. Often null.
+        web_traffic:
+          type: [object, "null"]
+          description: >-
+            Website-traffic snapshot. Returned as a decoded object — the API decodes the stored
+            JSON for you at the boundary, so do NOT decode a second time. The properties below are
+            the ones commonly present; the key set comes from the traffic source and is not closed,
+            so read the keys you need and ignore the rest. Often null.
+          properties:
+            visitsMonthly:
+              type: [number, "null"]
+              description: Visits in the most recent complete month.
+            countryRank:
+              type: [number, "null"]
+              description: Traffic rank of the site within its own country (lower is busier).
+            avgDurationSeconds:
+              type: [number, "null"]
+              description: Average visit duration in seconds.
+            history:
+              type: [array, "null"]
+              description: Month-by-month visit history, oldest period first.
+              items:
+                type: object
+                properties:
+                  value:
+                    type: [number, "null"]
+                    description: Visits in that period.
+                  dateFrom:
+                    type: [string, "null"]
+                    description: "Start of the period, `YYYY-MM`."
+                  dateTo:
+                    type: [string, "null"]
+                    description: "End of the period, `YYYY-MM`."
+        hq_address:
+          type: [string, "null"]
+          description: Full one-line formatted headquarters address (companion to city/country/postal).
+        logo_url:
+          type: [string, "null"]
+          format: uri
+          description: Company logo/image URL.
+        source_published_date:
+          type: [string, "null"]
+          description: Publication date of the web source this prospect was surfaced from (per-source freshness).
+        source_last_updated:
+          type: [string, "null"]
+          description: Last-updated date of the web source this prospect was surfaced from (per-source freshness).
+        registry_id: { type: [string, "null"], description: "The company's government registry identifier (e.g. IČO, HRB, KRS), where matched." }
+        registry_source: { type: [string, "null"], description: "Which government registry `registry_id` came from." }
+        # The per-market registry identifiers (uk_company_number, siren, siret, hrb_number,
+        # hrb_court, business_id_fi, org_number_no, org_number_se, krs_number, edrpou, cnpj,
+        # cvm_code, business_number_ca, jurisdiction_code, ico, il_company_number) were REMOVED
+        # from this contract: they were this schema's own self-described "per-market decomposition
+        # of `registry_id`" — a second shape of the datum `registry_id` + `registry_source` already
+        # carries. Measured on the production graph: 10 of the 16 had no writer anywhere, the other
+        # 6 were byte-identical to `registry_id` on 374 of 376 rows, and none was ever projected by
+        # a read path, so no customer received one. Read the identifier from `registry_id` and the
+        # issuing register from `registry_source`.
+        lei: { type: [string, "null"], description: "Legal Entity Identifier (ISO 17442), where the company is present in the GLEIF register. Null otherwise." }
+        uscc: { type: [string, "null"], description: "Chinese Unified Social Credit Code. Populated only for Chinese companies. Null otherwise." }
+        social_profiles:
+          type: [array, "null"]
+          description: >-
+            Per-platform public social profiles discovered for the company, beyond the singular
+            per-platform `*_url` fields (which carry only the headline platform). One entry per
+            platform, returned as decoded objects — the API decodes the stored JSON for you at the
+            boundary, so do NOT decode a second time.
+          items:
+            type: object
+            required: [platform, url]
+            additionalProperties: false
+            properties:
+              platform:
+                type: string
+                description: >-
+                  Which public platform this entry is from, and the provenance for the rest of the
+                  entry's fields (e.g. `linkedin`, `youtube`, `twitter`, `instagram`).
+              url:
+                type: string
+                description: The public profile URL on that platform.
+              follower_count:
+                type: [integer, "null"]
+                description: >-
+                  Audience size on that platform (followers, or subscribers on video platforms).
+                  Null when the profile published no count.
+              description:
+                type: [string, "null"]
+                description: >-
+                  The company's own business summary as published on that platform, verbatim.
+                  Null when the profile published none.
+              legal_name:
+                type: [string, "null"]
+                description: >-
+                  Registered legal-entity name CANDIDATE taken from that profile's own title or
+                  summary. A candidate only — it never overrides the company name. Null when the
+                  profile published no distinct legal name.
+              extra_links:
+                type: [array, "null"]
+                items: { type: string }
+                description: >-
+                  External links the profile itself lists (subsidiary, other-market or store
+                  domains). Null for platforms that publish no such block.
+        employer_reputation_tier:
+          type: [string, "null"]
+          enum: [strong, mixed, limited, null]
+          description: >-
+            Coarse, un-attributed employer-reputation band — `strong`, `mixed`, or `limited`.
+            A derived legitimacy/size-corroboration signal; NOT a third-party review platform's
+            verbatim rating (which is never returned) and carrying NO source name. Null when no
+            reputation signal is available.
+        beian_number:
+          type: [string, "null"]
+          description: >-
+            China MIIT web-filing number (beian = the ICP备案 recordal, e.g. 湘ICP备17001547号)
+            mined from the site footer. A MIIT-registered-commercial-site provenance
+            signal — NOT a corporate registry id (registry_source is set to 'MIIT-BEIAN'
+            when present).
+        footer_legal_name:
+          type: [string, "null"]
+          description: >-
+            Market-agnostic registered legal-name candidate anchored in the page footer /
+            legal-notice region. Two producers today: the CN beian (ICP备案)/copyright footer
+            (Chinese …有限公司 or English … LIMITED/LTD) and the DE/AT §5 TMG Impressum legal
+            name (…GmbH/AG). Verbatim — never translated. A candidate that never overwrites
+            company_name. Which producer supplied it is on footer_legal_name_source.
+        footer_legal_name_source:
+          type: [string, "null"]
+          enum: [beian, impressum, copyright, null]
+          description: >-
+            Where `footer_legal_name` was taken from — `beian` (Chinese MIIT web-filing footer),
+            `impressum` (German/Austrian legal-notice footer), or `copyright` (a plain copyright
+            line). Null when `footer_legal_name` is null.
+        social_description:
+          type: [string, "null"]
+          description: >-
+            Business summary harvested from the prospect's public social profile page
+            (no login). Winning-platform priority LinkedIn > YouTube > Twitter; the
+            source platform is on social_source.
+        social_follower_count:
+          type: [integer, "null"]
+          description: >-
+            Audience-size traction proxy from the winning social profile — LinkedIn
+            follower count OR YouTube subscriber count (which one is on social_source).
+        social_legal_name:
+          type: [string, "null"]
+          description: >-
+            Registered legal-entity name candidate from a social profile's og:title /
+            og:description (never overwrites company_name; names never translated).
+        social_source:
+          type: [string, "null"]
+          enum: [linkedin, youtube, twitter, null]
+          description: >-
+            Which public social profile the social intel above came from — `linkedin`, `youtube`,
+            or `twitter`. Null when no social profile was found.
+        social_extra_links:
+          type: [array, "null"]
+          items: { type: string }
+          description: >-
+            YouTube channel About-tab external links (subsidiary / other-market / store
+            domains). A YouTube-only signal.
+        nace_code: { type: [string, "null"], description: "The company's NACE industry-classification code, from its registry entry where available." }
+        legal_form: { type: [string, "null"], description: "The company's legal form (e.g. GmbH, s.r.o., Ltd), from its registry entry where available." }
+        officers:
+          type: [array, "null"]
+          description: Names of the company's statutory officers, from its government registry entry where available.
+          items: { type: string }
+        registration_date: { type: [string, "null"], description: "Date the company was registered, from its registry entry where available." }
+        discovered_at: { type: [string, "null"], format: date-time, description: "When this company was first discovered for you (ISO-8601)." }
+        detected_language:
+          type: [string, "null"]
+          description: ISO-639-1 language detected for the company's content.
+        vat_id: { type: [string, "null"], description: VAT/tax identifier where available. }
+        detected_industry:
+          type: [string, "null"]
+          description: >-
+            Finer-grained detected industry (companion to the coarse `industry`). Drawn from the
+            same canonical taxonomy listed under `industry` — including the specialty-retail
+            categories (`florist_flowers`, `bakery_pastry`, `butcher_delicatessen`,
+            `optician_eyewear`, `pharmacy_drugstore`, `pet_shop`, `toy_hobby`,
+            `stationery_office_supplies`, `bookstore`, `garden_center`, `musical_instruments`,
+            `hardware_diy`) — and likewise not a strict closed set.
+        company_status:
+          type: [string, "null"]
+          description: The company's operational status, where a government registry reports it (e.g. `active`, `liquidated`, `dissolved`). Free-text — not a fixed set.
+        has_wikipedia_article:
+          type: [boolean, "null"]
+          description: Notability / enterprise signal — a Wikipedia article was found.
+        domain_age_days:
+          type: [integer, "null"]
+          description: Age of the registered domain in days — company maturity/stability signal.
+        branch_regions:
+          type: [array, "null"]
+          description: Registry-authoritative ISO-3166-2 branch-office regions (multi-location footprint).
+          items: { type: string }
+        sub_country_region:
+          type: [string, "null"]
+          description: >-
+            The ISO-3166-2 sub-country region (e.g. `ES-VC`, `DE-BY`) the company's own
+            headquarters geography places it in — resolved from its stored `state`, `city` and
+            `postal_code`, so it can be checked against the address on the same record. It is the
+            region a `sub_country_regions` discovery filter is matched against. Null when that
+            geography does not resolve to a region; it is cleared again if a later correction to the
+            address stops supporting it. A single HQ region, distinct from `branch_regions`.
+        certifications:
+          type: [array, "null"]
+          description: >-
+            Quality/compliance certifications the company publicly claims (e.g. ISO 9001:2015,
+            IATF 16949, IPC-A-610, RoHS, REACH), extracted from the company's public web presence.
+          items: { type: string }
+        customer_count:
+          type: [integer, "null"]
+          description: Self-reported count of customers/clients served — a traction proxy (distinct from employee_count).
+        export_markets:
+          type: [object, "null"]
+          description: >-
+            Export / market-distribution snapshot. Returned as a decoded object — the API decodes
+            the stored JSON for you at the boundary, so do NOT decode a second time. Two shapes are
+            emitted depending on what the source disclosed: `{"regions":{"Europe":48,...}}` (share
+            per region) or `{"export_share_pct":80,"regions":[...]}` (headline share plus a region
+            list). The key set is not closed. Often null.
+        production_capacity:
+          type: [string, "null"]
+          description: >-
+            Manufacturing-capacity snapshot (e.g. "30,000 sq.m; 3,000 part numbers; 10+ SMT lines") — a
+            capability signal for manufacturing/EMS prospects.
+        served_industries:
+          type: [array, "null"]
+          description: Verticals/end-markets the company states it serves — a multi-value companion to detected_industry.
+          items: { type: string }
+        branch_footprint:
+          type: [array, "null"]
+          description: >-
+            Multi-site branch/office city names the company publicly lists (GeoNames-gated) — a human-readable
+            companion to the ISO-3166-2 branch_regions.
+          items: { type: string }
+        origin_country:
+          type: [string, "null"]
+          description: The company's inferred country of origin, as an ISO-3166-1 alpha-2 code. Helps distinguish a headquarters from a local subsidiary.
+        facts:
+          type: array
+          description: >-
+            Extracted business facts about the company — leadership, products/services, market
+            positioning, history, and certifications — each as a short natural-language statement
+            WITH provenance (origin + when it was extracted) for SDR briefing. Present on every
+            prospect; an empty array when no facts are available. Capped per prospect to keep the
+            response bounded.
+          items:
+            type: object
+            properties:
+              text:
+                type: string
+                description: The business fact, as a short natural-language statement.
+              source:
+                type: string
+                # MAINTAINER NOTE — deliberately a YAML comment, not part of `description`.
+                # `description` IS rendered to customers, so the previous version of this note
+                # published our internal discovery-vendor list (four provider names) in
+                # the public contract while explaining that no internal provenance reaches the
+                # customer — and it disclosed that gateway response validation is fail-open.
+                # customer-facing-leak-check flagged it for 8 consecutive runs and was RIGHT:
+                # a vendor name in a negated sentence is still a vendor name in the API docs.
+                # PyYAML drops `#` comments, so the guard cannot see this block, and the facts
+                # below survive for whoever edits the enum:
+                #   * every internal discovery provider is collapsed to `web` by
+                #     `_customer_safe_fact_source` in the knowledge service; only genuinely
+                #     public sources (Wikidata, Wikipedia) are named to the customer.
+                #   * the canary `test_source_vocabulary_single_source.py` asserts this enum
+                #     equals that function's full range BI-DIRECTIONALLY, because gateway
+                #     response validation is log-only/fail-open (`schema_validate.lua`) and
+                #     would NOT catch an unpublished value reaching a strict-enum client.
+                description: >-
+                  Origin the fact was derived from — `web` (extracted from the company's public
+                  web content), `wikidata` (a structured Wikidata claim), or `wikipedia` (the
+                  resolved Wikipedia article).
+                enum: [web, wikidata, wikipedia]
+              source_url:
+                type: [string, "null"]
+                format: uri
+                description: >-
+                  Stable click-through link to the company HOMEPAGE — the entry point to the
+                  company's public web content. This is NOT necessarily the exact sub-page the
+                  fact was extracted from; the exact per-page source URL is not retained, so this
+                  field is the company homepage rather than an overclaimed extraction URL.
+              extracted_at:
+                type: [string, "null"]
+                format: date-time
+                description: ISO-8601 timestamp of when the fact was extracted.
+              first_party:
+                type: boolean
+                description: >-
+                  `true` when the fact is VERIFIED to come from the company's OWN web presence
+                  — a citation whose registrable (eTLD+1) domain equals the prospect's.
+
+                  `false` means "not verified as first-party", which covers TWO different
+                  situations and is never a positive claim of third-party origin: the fact was
+                  mined from a third-party page (a directory, aggregator, news site or filing,
+                  and note Wikipedia/Wikidata count as third-party here however well their
+                  entity was resolved), OR its provenance cannot be established because no
+                  citation host was ever stored for it. The second case is not marginal —
+                  MEASURED on the production corpus, 46% of facts carry no
+                  stored citation host at all; they are legacy points and the inspectable
+                  sample was model-derived rather than site-derived. A consumer must therefore
+                  read `false` as "unconfirmed", not as "independently sourced".
+
+                  Why it is customer-visible: a first-party claim is the company describing
+                  itself, while a third-party claim is someone else describing it, and an SDR
+                  should weigh a self-description differently from an independent one before
+                  quoting it. Third-party facts also carry the residual entity-confusion risk
+                  that first-party facts cannot: DNS ownership is collision-free, whereas a
+                  shared brand token, ticker or surname is not. Off-domain facts pass an entity-identity
+                  check, but that check can let a fact through when it is unavailable — which is exactly
+                  why the customer still gets to see the distinction.
+
+                  ABSENCE IS NOT `false`. The key is omitted on facts stored before it was
+                  introduced, and such a fact's provenance is UNKNOWN, not third-party — a
+                  consumer that defaults a missing value to `false` will silently mislabel every
+                  It is therefore deliberately NOT in `required`.
+            required: [text, source]
+        knowledge_graph:
+          description: Extracted knowledge-graph facts about the company (relationship triples). Returned only by the detail endpoint (`GET /api/v1/prospects/{domain}`).
+          type: [array, "null"]
+          items: {}
+        knowledge_graph_grouped:
+          type: [object, "null"]
+          additionalProperties: true
+          description: The same knowledge-graph facts, grouped by relationship type for convenience. Returned only by the detail endpoint.
+        pages:
+          description: References to the company web pages that were read during discovery. Returned only by the detail endpoint.
+          type: [array, "null"]
+          items: {}
+        semantic_score:
+          type: [number, "null"]
+          description: Relevance score for this company against the search query. Returned only by the search endpoint (`GET /api/v1/prospects/search`).
+
+    ProspectSummary:
+      type: object
+      description: |
+        A lean company summary returned by `GET /api/v1/prospects/search` — a deliberate subset
+        of `Prospect` so a search page stays small. `domain` is always present; use it with
+        `GET /api/v1/prospects/{domain}` to fetch the full record (contacts, emails, registry
+        data, social profiles, and more). Only the fields listed here are returned.
+      additionalProperties: false
+      required: [domain]
+      properties:
+        domain: { type: string, examples: [acme.de], description: The company's primary website domain. Use it to fetch the full record. }
+        name: { type: [string, "null"], description: The company's name. }
+        industry: { type: [string, "null"], description: The company's primary industry. }
+        company_size:
+          type: [string, "null"]
+          enum: [micro, small, medium, large, enterprise, null]
+          description: >-
+            Company size bucket by employee headcount (lowercase; null when undetermined).
+            `micro` (≤10 employees), `small` (≤50), `medium` (≤200), `large` (≤500),
+            `enterprise` (500+). Uses the SAME lowercase tokens as the `company_sizes` INPUT filter
+            (DiscoveryCriteria.company_sizes), so a value read off a result can be re-submitted
+            verbatim as a filter without a 400. `micro` companies are returned by a `small`
+            `company_sizes` filter.
+        headquarters_location: { type: [string, "null"], description: 'Headquarters location as a "City, Country" string.' }
+        country: { type: [string, "null"], description: The company's country. }
+        city: { type: [string, "null"], description: The company's city. }
+        employee_count: { type: [integer, "null"], description: Estimated number of employees. }
+        logo_url:
+          type: [string, "null"]
+          format: uri
+          description: Company logo/image URL.
+        description:
+          type: [string, "null"]
+          description: >-
+            Short teaser, capped at 200 Unicode characters (never split mid-character). When the
+            source description exceeds the cap it is cut at a word boundary and an ellipsis (…) is
+            appended, so a shortened teaser is always visibly marked as truncated.
+        semantic_score:
+          type: [number, "null"]
+          description: Blended relevance score for this search result.
+
+    ProspectSummaryList:
+      type: object
+      description: A capped page of lean search summaries with progressive-cursor pagination.
+      required: [prospects]
+      properties:
+        prospects:
+          type: array
+          description: The lean company summaries on this page.
+          items: { $ref: "#/components/schemas/ProspectSummary" }
+        total:
+          type: integer
+          minimum: 0
+          description: >-
+            PAGINATION count — the number of MATCHES for this query (relevance-floor-passing
+            results), NOT the page length. Use it for a "showing X of N" label (X = `prospects.length`,
+            N = `total`). When `has_more` is true because deep pagination hit the recall cap,
+            `total` is a lower bound and `has_more` signals the unreached tail. This is a SEARCH
+            result-set count, a DIFFERENT concept from a single discovery's delivery count
+            (`JobResult.total_prospects` / `JobStatus.total_prospects`) — do not group the two
+            together. (Contrast `ProspectList.total`, which is the same NAME but counts the rows in
+            the returned page rather than all matches.)
+        customer_id:
+          type: string
+          description: The authenticated tenant.
+        query:
+          type: string
+          description: Echo of the `q` that produced this page.
+        has_more:
+          type: boolean
+          description: >-
+            True when another page exists above the relevance floor. False means you have seen
+            everything relevant — stop paging.
+        next_cursor:
+          type: [string, "null"]
+          description: >-
+            Opaque cursor for the next page (pass back as `cursor`); null at the terminus.
+        truncated:
+          type: [boolean, "null"]
+          description: >-
+            True when a hard item/byte cap dropped rows from THIS page (distinct from `has_more`,
+            which signals whether more pages remain).
