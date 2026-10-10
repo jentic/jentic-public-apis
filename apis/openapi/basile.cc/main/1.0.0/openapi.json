@@ -1,0 +1,1313 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Basile API",
+    "version": "1.0.0",
+    "description": "**Basile** est une base de données B2B française : ~26,8 M sociétés et ~29,5 M\ncontacts, issus du croisement de trois sources :\n- **Legal** — registre légal français (INSEE / INPI-RNE) : dirigeants, SIREN, NAF, forme juridique…\n- **LKI** — profils LinkedIn : intitulé de poste, séniorité, compétences, écoles…\n- **GMB** — Google My Business : note, avis, horaires, catégorie…\n\nL'API expose deux recherches symétriques — **personnes** (`/people`) et\n**entreprises** (`/companies`) — avec un système de filtres `include`/`exclude`,\nun comptage gratuit avant extraction, et un export CSV enrichi.\n\n### Authentification\nToutes les requêtes portent la clé API dans le header `Authorization`, **en clair,\nsans préfixe `Bearer`** : `Authorization: sk_live_xxxxxxxx`.\n\n### `find` vs `export` : ce que chacun renvoie\nLes deux acceptent exactement les mêmes `filters`. La différence est la **richesse des données**.\n\n- **`/people/find` renvoie la personne, PAS sa société.** Identité, localisation, poste,\n  URL LinkedIn, plus le **nom** et l'**identifiant interne** de son employeur — mais **aucune**\n  donnée de cette société : ni SIREN/NAF/forme juridique, ni effectif/secteur/description,\n  ni note/avis/adresse Google.\n- **`/people/export` renvoie la ligne complète : 92 colonnes** — 22 sur la personne,\n  **18 sur sa société LinkedIn**, **31 sur sa société au registre légal**, **11 Google Maps**,\n  6 drapeaux de présence. Pour UNE fiche, `GET /people/{id}/full` rend le même modèle sans\n  passer par un export.\n- **`/companies/find` croise DÉJÀ les trois sources** : chaque résultat porte sa fiche et,\n  quand la correspondance existe, celles des deux autres sources sous `x_legal` / `x_lki` /\n  `x_gmb`. Contrairement aux personnes, inutile d'exporter pour voir les trois sources.\n- **`/companies/export` renvoie 70 colonnes** : les mêmes données mises à plat en CSV.\n\nRègle pratique : pour des contacts avec le contexte de leur entreprise, `/find` sert à cibler\net à compter, puis **c'est `/export` qui produit la donnée exploitable**.\n\n### Facturation\n**Compter est gratuit, sans limite.** Envoyez `{ \"countOnly\": true }` (ou `limit: 0`) :\nla réponse contient `total` et un tableau `leads` vide, et **rien n'est débité**.\n\n**Récupérer des enregistrements coûte 1 crédit par enregistrement renvoyé** — sur `/find`\n(hors mode count-only), sur `/people/{id}` et `/companies/{id}`, et sur `/export`. Le débit\na lieu **à chaque appel** : redemander les mêmes enregistrements est **re-facturé** (la\ndonnée a pu être rafraîchie depuis ; il n'existe pas de registre « déjà payé »).\n\n⚠️ `limit: 1` n'est **pas** un mode de comptage : il renvoie 1 enregistrement, donc\n1 crédit. Pour compter, utilisez `countOnly: true`.\n\nQuota épuisé → **402** `quota_exhausted`, renvoyé **avant** les enregistrements : rien\nn'est livré et rien n'est débité.\n\nRègle d'or : **comptez d'abord** avec `countOnly`, puis n'extrayez que les enregistrements\ndont vous avez besoin.\n",
+    "contact": {
+      "name": "Support Basile",
+      "url": "https://basile.cc",
+      "email": "contact@basile.cc"
+    },
+    "x-jentic-source-url": "https://docs.basile.cc/openapi.yaml"
+  },
+  "servers": [
+    {
+      "url": "https://api.basile.cc",
+      "description": "Production"
+    }
+  ],
+  "paths": {
+    "/people/find": {
+      "post": {
+        "tags": [
+          "Personnes"
+        ],
+        "summary": "Rechercher des personnes",
+        "description": "Recherche de contacts (dirigeants légaux et/ou profils LinkedIn). Renvoie\nun total et une page de résultats. **Pour compter sans extraire ni être\nfacturé**, envoyer `countOnly: true` (ou `limit: 0`) : la réponse contient\n`total` et un `leads` vide. Sinon, chaque enregistrement renvoyé coûte\n1 crédit. La page 1 est accessible sans abonnement ; la pagination\n(page > 1) requiert un abonnement actif.\n",
+        "operationId": "findPeople",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FindPeopleRequest"
+              },
+              "examples": {
+                "compterCEO": {
+                  "summary": "Compter les CEO en France (gratuit, countOnly)",
+                  "value": {
+                    "countOnly": true,
+                    "filters": {
+                      "result_role": {
+                        "include": [
+                          "CEO",
+                          "Chief Executive Officer",
+                          "PDG",
+                          "Président Directeur Général",
+                          "Directeur Général"
+                        ]
+                      },
+                      "result_country_code": {
+                        "include": [
+                          "FR"
+                        ]
+                      },
+                      "hide_legal_entities": true
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Résultats paginés.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaginatedPeople"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Aucun filtre effectif. Une clé d'API doit poser au moins un filtre qui restreint réellement le résultat. Ne comptent pas : filters vide, {\"include\":[]}, null, \"\", une clé inconnue, et source seul.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": false
+                    },
+                    "error": {
+                      "type": "string",
+                      "example": "At least one filter is required."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "402": {
+            "$ref": "#/components/responses/SubscriptionRequired"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "cURL",
+            "source": "curl -s https://api.basile.cc/people/find \\\n  -H \"Authorization: $BASILE_KEY\" \\\n  -H \"Content-Type: application/json\" \\\n  -d '{\"countOnly\":true,\"filters\":{\"result_role\":{\"include\":[\"CEO\",\"PDG\"]},\"result_country_code\":{\"include\":[\"FR\"]},\"hide_legal_entities\":true}}'\n"
+          },
+          {
+            "lang": "Python",
+            "source": "import requests\nr = requests.post(\"https://api.basile.cc/people/find\",\n    headers={\"Authorization\": BASILE_KEY},\n    json={\"countOnly\": True, \"filters\": {\n        \"result_role\": {\"include\": [\"CEO\", \"PDG\"]},\n        \"result_country_code\": {\"include\": [\"FR\"]},\n        \"hide_legal_entities\": True}})\nprint(r.json()[\"total\"])\n"
+          },
+          {
+            "lang": "JavaScript",
+            "source": "const res = await fetch(\"https://api.basile.cc/people/find\", {\n  method: \"POST\",\n  headers: { Authorization: BASILE_KEY, \"Content-Type\": \"application/json\" },\n  body: JSON.stringify({ countOnly: true, filters: {\n    result_role: { include: [\"CEO\", \"PDG\"] },\n    result_country_code: { include: [\"FR\"] },\n    hide_legal_entities: true } }),\n});\nconsole.log((await res.json()).total);\n"
+          },
+          {
+            "lang": "PHP",
+            "source": "<?php\n$ch = curl_init(\"https://api.basile.cc/people/find\");\ncurl_setopt_array($ch, [\n  CURLOPT_RETURNTRANSFER => true,\n  CURLOPT_POST => true,\n  CURLOPT_HTTPHEADER => [\"Authorization: {$BASILE_KEY}\", \"Content-Type: application/json\"],\n  CURLOPT_POSTFIELDS => json_encode([\"countOnly\" => true, \"filters\" => [\n    \"result_role\" => [\"include\" => [\"CEO\", \"PDG\"]],\n    \"result_country_code\" => [\"include\" => [\"FR\"]],\n    \"hide_legal_entities\" => true]]),\n]);\n$data = json_decode(curl_exec($ch), true);\necho $data[\"total\"];\n"
+          }
+        ]
+      }
+    },
+    "/people/export": {
+      "post": {
+        "tags": [
+          "Personnes"
+        ],
+        "summary": "Exporter des personnes (CSV)",
+        "description": "Exporte un CSV enrichi (92 colonnes : identité, poste, profil LinkedIn,\nsociété, légal, GMB, contacts). Accepte les **mêmes `filters`** que `/find`,\nou une liste d'`ids`. Plafonné par le plan (header `X-Export-Max-Rows`).\nL'export est **streamé** (parcours du résultat par curseur, écriture au fil\nde l'eau) : un seul appel par `filters` suffit jusqu'à la limite par export\ndu plan — pas besoin de pré-collecter les IDs. Au-delà de cette limite,\ndécouper la recherche en segments (département / NAF / année…) et faire un\nexport par segment. L'export par `ids` reste utile quand on a déjà collecté\nune liste (via `/find` `idsOnly`) pour un ré-enrichissement par lots ou une\nsélection.\n",
+        "operationId": "exportPeople",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/ExportByFilters"
+                  },
+                  {
+                    "$ref": "#/components/schemas/ExportByIds"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Fichier CSV.",
+            "headers": {
+              "X-Export-Max-Rows": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Nombre max de lignes pour cet export (selon le plan)."
+              },
+              "X-Export-Capped": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "`true` si le résultat a été tronqué (plus de résultats au-delà)."
+              }
+            },
+            "content": {
+              "text/csv": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Aucun filtre effectif. Une clé d'API doit poser au moins un filtre qui restreint réellement le résultat. Ne comptent pas : filters vide, {\"include\":[]}, null, \"\", une clé inconnue, et source seul.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": false
+                    },
+                    "error": {
+                      "type": "string",
+                      "example": "At least one filter is required."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "429": {
+            "$ref": "#/components/responses/ExportLimit"
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "cURL",
+            "source": "curl -s https://api.basile.cc/people/export \\\n  -H \"Authorization: $BASILE_KEY\" -H \"Content-Type: application/json\" \\\n  -d '{\"filters\":{\"mandate_role\":{\"include\":[\"president\"]},\"result_is_current\":true}}' \\\n  -o people.csv\n"
+          }
+        ]
+      }
+    },
+    "/people/{id}": {
+      "get": {
+        "tags": [
+          "Personnes"
+        ],
+        "summary": "Fiche brute d'une personne",
+        "operationId": "getPerson",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "La personne."
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/people/roles/suggest": {
+      "get": {
+        "tags": [
+          "Suggestions"
+        ],
+        "summary": "Suggérer des intitulés de poste",
+        "operationId": "suggestRoles",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 10
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Liste de suggestions."
+          }
+        }
+      }
+    },
+    "/people/cities/suggest": {
+      "get": {
+        "tags": [
+          "Suggestions"
+        ],
+        "summary": "Suggérer des villes (personnes)",
+        "operationId": "suggestPeopleCities",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Liste de villes."
+          }
+        }
+      }
+    },
+    "/companies/find": {
+      "post": {
+        "tags": [
+          "Entreprises"
+        ],
+        "summary": "Rechercher des entreprises",
+        "description": "Recherche de sociétés sur les trois sources (registre, LinkedIn, GMB).\n**Pour compter sans extraire ni être facturé**, envoyer `countOnly: true`\n(ou `limit: 0`) : la réponse contient `total` et un `leads` vide. Sinon,\nchaque enregistrement renvoyé coûte 1 crédit.\nLes résultats rattachés au registre portent `data.procedure_statut` : le statut\nde procédure collective calculé sur les jugements publiés au BODACC (`code`,\n`depuis`, `tribunal`, `organes`, `plan_duree_ans`, `source`…), absent quand la\nsociété n'a jamais connu de procédure. C'est `code` qui distingue un plan\n(`plan_redressement`, `plan_sauvegarde`) d'une période d'observation\n(`redressement`, `sauvegarde`) : aucun filtre ne le fait.\n",
+        "operationId": "findCompanies",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FindCompaniesRequest"
+              },
+              "examples": {
+                "btp": {
+                  "summary": "Compter les artisans du bâtiment actifs à Paris (gratuit, countOnly)",
+                  "value": {
+                    "countOnly": true,
+                    "filters": {
+                      "activity": {
+                        "include": [
+                          "btp_global"
+                        ]
+                      },
+                      "company_ceased": false,
+                      "headquarters_postal_code": {
+                        "include": [
+                          "75001",
+                          "75002",
+                          "75003"
+                        ]
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Résultats paginés.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaginatedPeople"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Aucun filtre effectif. Une clé d'API doit poser au moins un filtre qui restreint réellement le résultat. Ne comptent pas : filters vide, {\"include\":[]}, null, \"\", une clé inconnue, et source seul.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": false
+                    },
+                    "error": {
+                      "type": "string",
+                      "example": "At least one filter is required."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "402": {
+            "$ref": "#/components/responses/SubscriptionRequired"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "cURL",
+            "source": "curl -s https://api.basile.cc/companies/find \\\n  -H \"Authorization: $BASILE_KEY\" -H \"Content-Type: application/json\" \\\n  -d '{\"countOnly\":true,\"filters\":{\"activity\":{\"include\":[\"btp_global\"]},\"company_ceased\":false}}'\n"
+          },
+          {
+            "lang": "Python",
+            "source": "import requests\nr = requests.post(\"https://api.basile.cc/companies/find\",\n    headers={\"Authorization\": BASILE_KEY},\n    json={\"countOnly\": True, \"filters\": {\n        \"activity\": {\"include\": [\"btp_global\"]},\n        \"company_ceased\": False}})\nprint(r.json()[\"total\"])\n"
+          }
+        ]
+      }
+    },
+    "/companies/export": {
+      "post": {
+        "tags": [
+          "Entreprises"
+        ],
+        "summary": "Exporter des entreprises (CSV)",
+        "description": "Mêmes règles que l'export personnes : accepte `filters` ou une liste d'`ids`,\nexport **streamé** (un seul appel par `filters` jusqu'à la limite par export\ndu plan), plafonné par le plan. Au-delà de la limite, découper en segments.\n",
+        "operationId": "exportCompanies",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/ExportByFilters"
+                  },
+                  {
+                    "$ref": "#/components/schemas/ExportByIds"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Fichier CSV.",
+            "content": {
+              "text/csv": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Aucun filtre effectif. Une clé d'API doit poser au moins un filtre qui restreint réellement le résultat. Ne comptent pas : filters vide, {\"include\":[]}, null, \"\", une clé inconnue, et source seul.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": false
+                    },
+                    "error": {
+                      "type": "string",
+                      "example": "At least one filter is required."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "429": {
+            "$ref": "#/components/responses/ExportLimit"
+          }
+        }
+      }
+    },
+    "/companies/{id}": {
+      "get": {
+        "tags": [
+          "Entreprises"
+        ],
+        "summary": "Fiche brute d'une entreprise",
+        "operationId": "getCompany",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "L'entreprise."
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/companies/activity-suggest": {
+      "get": {
+        "tags": [
+          "Suggestions"
+        ],
+        "summary": "Suggérer des activités (concepts pour le filtre `activity`)",
+        "description": "Renvoie des IDs de concept (taxonomie unifiée NAF · Maps · LinkedIn) à passer dans `filters.activity`.",
+        "operationId": "suggestActivity",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Concepts correspondants."
+          }
+        }
+      }
+    },
+    "/companies/legal-form-suggest": {
+      "get": {
+        "tags": [
+          "Suggestions"
+        ],
+        "summary": "Suggérer des formes juridiques",
+        "operationId": "suggestLegalForms",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Formes juridiques."
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "ApiKeyAuth": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "Authorization",
+        "description": "Clé API en clair (sans `Bearer`). Ex : `Authorization: sk_live_xxxx`."
+      }
+    },
+    "schemas": {
+      "IncludeExcludeFilter": {
+        "type": "object",
+        "description": "Filtre texte. `include` = OR entre les valeurs (au moins une matche).\n`exclude` = exclut toute valeur qui matche. Les deux peuvent être combinés.\nPlusieurs filtres distincts se combinent en **ET**.\n",
+        "properties": {
+          "include": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "exclude": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "example": {
+          "include": [
+            "Directeur Commercial",
+            "Sales Director"
+          ],
+          "exclude": [
+            "assistant"
+          ]
+        }
+      },
+      "RangeFilter": {
+        "type": "object",
+        "description": "Filtre numérique (bornes). Tous les opérateurs sont optionnels.",
+        "properties": {
+          ">": {
+            "type": "number"
+          },
+          ">=": {
+            "type": "number"
+          },
+          "<": {
+            "type": "number"
+          },
+          "<=": {
+            "type": "number"
+          }
+        },
+        "example": {
+          ">=": 40,
+          "<=": 55
+        }
+      },
+      "PaginationParams": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 5000,
+            "default": 100,
+            "description": "Taille de page (défaut 100). Cap = **1000** en mode normal ; **5000** en mode `idsOnly` côté `/people/find` (companies reste à 1000). `0` = **compter seulement** (équivalent à `countOnly: true`, gratuit). ⚠️ `1` n'est PAS un mode de comptage : cela renvoie 1 enregistrement, donc 1 crédit — utiliser `countOnly`.\n"
+          },
+          "countOnly": {
+            "type": "boolean",
+            "default": false,
+            "description": "Si `true`, `/find` ne renvoie que le `total` avec un tableau `leads` **vide** : c'est le mode de comptage **gratuit** (aucun enregistrement renvoyé, donc **aucun crédit débité**), quel que soit le nombre de résultats. Équivalent à `limit: 0`. À utiliser systématiquement pour cadrer un volume avant d'extraire.\n"
+          },
+          "paginationToken": {
+            "type": "string",
+            "description": "Curseur opaque renvoyé dans `pagination.nextToken` pour la page suivante."
+          },
+          "idsOnly": {
+            "type": "boolean",
+            "default": false,
+            "description": "Si `true`, `/find` ne renvoie que `{ _id, source }` (champ `data` vide), sans enrichissement par ligne — beaucoup plus léger et rapide pour collecter les IDs d'un grand résultat. Permet `limit` jusqu'à 5000 côté `/people/find`. À utiliser quand on a besoin de la liste d'IDs avant un export par `{ ids }` ou un ré-enrichissement par lots. Pour un simple CSV, préférer `/export` par `filters` (export streamé, jusqu'à la limite par export du plan).\n"
+          }
+        }
+      },
+      "FindPeopleRequest": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/PaginationParams"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "filters": {
+                "$ref": "#/components/schemas/FindPeopleFilters"
+              },
+              "employerFallback": {
+                "type": "boolean",
+                "default": true,
+                "description": "Recherche de personnes dans une société (`employer` ou `siren`) par clé d'API : `false` garde le comportement strict quand la recherche telle quelle rend zéro (aucune récupération : nom nettoyé, SIREN du registre, page au nom de la société, holding, intitulés de dirigeant). Les avertissements de `meta.warnings` restent.\n"
+              },
+              "registryMandates": {
+                "type": "boolean",
+                "default": true,
+                "description": "Dirigeants d'un SIREN par clé d'API (`siren` + `mandate_role`) : `false` garde le comportement d'avant, seules les fiches RATTACHÉES au SIREN (ni mandats lus au registre, ni holdings, ni repli LinkedIn).\n"
+              }
+            }
+          }
+        ]
+      },
+      "FindPeopleFilters": {
+        "type": "object",
+        "description": "Filtres de recherche de personnes. Deux sources : **Legal** (registre) et\n**LKI** (LinkedIn). Activer un filtre Legal-only exclut LinkedIn, et\ninversement (voir descriptions).\n",
+        "properties": {
+          "result_full_name": {
+            "$ref": "#/components/schemas/IncludeExcludeFilter",
+            "description": "Nom complet."
+          },
+          "result_first_name": {
+            "$ref": "#/components/schemas/IncludeExcludeFilter",
+            "description": "Prénom."
+          },
+          "result_last_name": {
+            "$ref": "#/components/schemas/IncludeExcludeFilter",
+            "description": "Nom de famille."
+          },
+          "result_role": {
+            "$ref": "#/components/schemas/IncludeExcludeFilter",
+            "description": "Intitulé de poste (texte). Mettre toutes les variantes (CEO, PDG, DG…)."
+          },
+          "activity": {
+            "$ref": "#/components/schemas/IncludeExcludeFilter",
+            "description": "Secteur/métier de l'entreprise de la personne (concept unifié NAF + LinkedIn). IDs via /companies/activity-suggest, ou préfixes naf:/lki:/gmb:."
+          },
+          "company_headcount": {
+            "$ref": "#/components/schemas/RangeFilter",
+            "description": "Multi-source. Effectif de l'entreprise ACTUELLE du contact. Évite le détour par /companies/find : on filtre les personnes directement par la taille de leur employeur. Croise l'effectif exact du registre légal et la bande de taille déclarée sur LinkedIn. Les fiches sans effectif connu sont exclues (~21 % sur un échantillon FR)."
+          },
+          "employer": {
+            "$ref": "#/components/schemas/IncludeExcludeFilter",
+            "description": "Employeur actuel. Valeur entre guillemets (\"Nom\") = match EXACT sur legal_name + current_company_name (dirigeants registre + salariés LinkedIn) ; valeur nue = contains. Multi-source."
+          },
+          "result_city": {
+            "$ref": "#/components/schemas/IncludeExcludeFilter",
+            "description": "Ville de la personne."
+          },
+          "result_country_code": {
+            "$ref": "#/components/schemas/IncludeExcludeFilter",
+            "description": "Code pays (ex. FR)."
+          },
+          "mandate_role": {
+            "$ref": "#/components/schemas/IncludeExcludeFilter",
+            "description": "Legal-only. Codes : gerant, president, dg, dgd, administrateur, commissaire_comptes, associe, directeur_non_dg, chef_entreprise, liquidateur, autre. Avec un siren et une clé d'API (dirigeants d'un SIREN) : les mandats du registre sont lus même quand la fiche est rattachée à une autre société, holdings comprises (deux niveaux, mandate.via), repli LinkedIn signalé et offert quand le registre ne connaît aucun dirigeant en poste, mandats terminés écartés ; libellés acceptés en plus des codes (« Président », « Gérant », « Directeur général », « DG délégué », PDG, CEO, dirigeant, mandataire social, CAC), valeur non reconnue ignorée (mandate_role_unknown). registryMandates: false garde les seules fiches rattachées au SIREN."
+          },
+          "siren": {
+            "$ref": "#/components/schemas/IncludeExcludeFilter",
+            "description": "SIREN exact de la société. Ramène ses dirigeants au registre ET ses salariés LinkedIn : le SIREN est résolu vers la page LinkedIn de l'entreprise. Si aucun SIREN n'a de page LinkedIn, meta.noticeCode = siren_no_linkedin_company et seul le registre répond."
+          },
+          "legal_name": {
+            "$ref": "#/components/schemas/IncludeExcludeFilter",
+            "description": "Legal-only. Raison sociale."
+          },
+          "nationality": {
+            "$ref": "#/components/schemas/IncludeExcludeFilter",
+            "description": "Legal-only. Nationalité (libellé)."
+          },
+          "nationality_code": {
+            "$ref": "#/components/schemas/IncludeExcludeFilter",
+            "description": "Legal-only. Code nationalité (ex. FR)."
+          },
+          "result_postal_code": {
+            "$ref": "#/components/schemas/IncludeExcludeFilter",
+            "description": "Legal-only. Code postal."
+          },
+          "result_is_legal_entity": {
+            "type": "boolean",
+            "description": "Legal-only. La 'personne' est une personne morale."
+          },
+          "result_is_current": {
+            "type": "boolean",
+            "description": "Legal-only. Mandat actuel uniquement."
+          },
+          "result_age": {
+            "$ref": "#/components/schemas/RangeFilter",
+            "description": "Legal-only. Âge."
+          },
+          "result_total_companies_count": {
+            "$ref": "#/components/schemas/RangeFilter",
+            "description": "Legal-only. Nb de sociétés dirigées."
+          },
+          "current_seniority": {
+            "$ref": "#/components/schemas/IncludeExcludeFilter",
+            "description": "LKI-only. Séniorité (C-Level, Director, VP, Head, Manager…)."
+          },
+          "current_job_functions": {
+            "$ref": "#/components/schemas/IncludeExcludeFilter",
+            "description": "LKI-only. Fonction (Sales, Marketing…)."
+          },
+          "skills": {
+            "$ref": "#/components/schemas/IncludeExcludeFilter",
+            "description": "LKI-only. Compétences."
+          },
+          "languages": {
+            "$ref": "#/components/schemas/IncludeExcludeFilter",
+            "description": "LKI-only. Langues. Saisie traduite (« Anglais » = english, « Français » = french) puis langue EXACTE, sans tenir compte de la casse ; hors lexique, début de valeur. Au plus 10 valeurs par côté (include, exclude), 2 lettres ou chiffres au moins par valeur : au-delà, meta.warnings filter_values_truncated ou filter_values_ignored."
+          },
+          "education": {
+            "$ref": "#/components/schemas/IncludeExcludeFilter",
+            "description": "LKI-only. École ou diplôme. Chaque mot saisi commence un mot du nom de l'école ou du diplôme, tous les mots exigés, dans n'importe quel ordre et dans la même école ; sans tenir compte des accents ; un mot de moins de 4 lettres se cherche en mot entier (« esc » ne ramène pas ESCP). Au plus 10 valeurs par côté, 2 lettres ou chiffres au moins par valeur : meta.warnings filter_values_truncated, filter_values_ignored (bloquant quand plus aucune valeur à inclure ne reste)."
+          },
+          "past_title": {
+            "$ref": "#/components/schemas/IncludeExcludeFilter",
+            "description": "LKI-only. Intitulé d'un poste passé."
+          },
+          "past_employer": {
+            "$ref": "#/components/schemas/IncludeExcludeFilter",
+            "description": "LKI-only. Employeur passé (alumni)."
+          },
+          "connection_count": {
+            "$ref": "#/components/schemas/RangeFilter",
+            "description": "LKI-only. Nb de connexions LinkedIn."
+          },
+          "current_tenure_years": {
+            "$ref": "#/components/schemas/RangeFilter",
+            "description": "LKI-only. Ancienneté au poste ACTUEL, en années (plus fin que tenure_bucket)."
+          },
+          "linkedin_url": {
+            "$ref": "#/components/schemas/IncludeExcludeFilter",
+            "description": "LKI-only. Retrouver un profil par son URL ou son handle LinkedIn."
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "Legal",
+              "LKI"
+            ],
+            "description": "Forcer une seule source."
+          },
+          "with_legal_data": {
+            "type": "boolean",
+            "description": "Restreint la recherche à la source Registre (équivaut à source=Legal). Attention : sur /companies/find, le filtre du même nom ne restreint PAS la source, c'est un filtre ET."
+          },
+          "with_linkedin_profile": {
+            "type": "boolean",
+            "description": "Restreint la recherche à la source LinkedIn (équivaut à source=LKI). Si les deux bascules sont vraies, with_legal_data l'emporte."
+          },
+          "hide_legal_entities": {
+            "type": "boolean",
+            "description": "Masque les personnes morales (recommandé : true) sans exclure LinkedIn."
+          }
+        }
+      },
+      "FindCompaniesRequest": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/PaginationParams"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "filters": {
+                "$ref": "#/components/schemas/FindCompaniesFilters"
+              }
+            }
+          }
+        ]
+      },
+      "FindCompaniesFilters": {
+        "type": "object",
+        "description": "Filtres de recherche d'entreprises. Trois sources : **Legal** (registre),\n**LKI** (LinkedIn), **GMB** (Google My Business).\n",
+        "properties": {
+          "name": {
+            "$ref": "#/components/schemas/IncludeExcludeFilter",
+            "description": "Nom d'entreprise (contains)."
+          },
+          "activity": {
+            "$ref": "#/components/schemas/IncludeExcludeFilter",
+            "description": "Métier unifié : IDs de concept (NAF + Maps + LinkedIn). Le meilleur filtre secteur. Multi-source."
+          },
+          "naf_code": {
+            "$ref": "#/components/schemas/IncludeExcludeFilter",
+            "description": "Legal-only. Codes NAF. Préfixe .x supporté (41.x = tout le 41) ou code exact (41.20A)."
+          },
+          "headquarters_department_code": {
+            "$ref": "#/components/schemas/IncludeExcludeFilter",
+            "description": "Legal-only. Département du siège (ex. 92, 75). Dérivé du code postal."
+          },
+          "headquarters_region_code": {
+            "$ref": "#/components/schemas/IncludeExcludeFilter",
+            "description": "⛔ IGNORÉ : ce filtre est retiré à la validation, il ne restreint rien (envoyé seul, la requête part sans filtre et l'API répond 400 'At least one filter is required'). Utiliser `region` avec le NOM canonique, ex. 'Auvergne-Rhône-Alpes'."
+          },
+          "headquarters_postal_code": {
+            "$ref": "#/components/schemas/IncludeExcludeFilter",
+            "description": "Legal-only. Code postal du siège (exact). LE filtre géo fiable — accepte de grandes listes (énumération département)."
+          },
+          "headquarters_city": {
+            "$ref": "#/components/schemas/IncludeExcludeFilter",
+            "description": "Ville du siège (Legal + LKI). Insensible à la casse et aux accents, correspondance par PRÉFIXE : 'saint-ét' trouve Saint-Étienne. Une seule graphie suffit."
+          },
+          "headquarters_country_code": {
+            "$ref": "#/components/schemas/IncludeExcludeFilter",
+            "description": "Code pays du siège (Legal + LKI)."
+          },
+          "legal_form": {
+            "$ref": "#/components/schemas/IncludeExcludeFilter",
+            "description": "Legal-only. Forme juridique."
+          },
+          "legal_category": {
+            "$ref": "#/components/schemas/IncludeExcludeFilter",
+            "description": "Legal-only. Code catégorie juridique INSEE."
+          },
+          "siren": {
+            "$ref": "#/components/schemas/IncludeExcludeFilter",
+            "description": "Legal-only. SIREN exact."
+          },
+          "headcount_min": {
+            "type": "integer",
+            "description": "Effectif minimum (Legal + LKI)."
+          },
+          "headcount_max": {
+            "type": "integer",
+            "description": "Effectif maximum (Legal + LKI)."
+          },
+          "capital_min": {
+            "type": "number",
+            "description": "Legal-only. Capital social min (€)."
+          },
+          "capital_max": {
+            "type": "number",
+            "description": "Legal-only. Capital social max (€)."
+          },
+          "company_ceased": {
+            "type": "boolean",
+            "description": "false = actives uniquement (recommandé). true = cessées."
+          },
+          "publishable": {
+            "type": "boolean",
+            "description": "Legal-only. Diffusable."
+          },
+          "with_procedure": {
+            "type": "boolean",
+            "description": "Legal-only (restreint la recherche au registre). true = la société a connu une procédure collective, en cours ou clôturée, d'après les jugements publiés au BODACC (546 592 sociétés). false = aucune procédure connue, ni en cours ni clôturée."
+          },
+          "procedure_open": {
+            "type": "boolean",
+            "description": "Legal-only (restreint la recherche au registre). true = procédure en cours, plans de redressement et de sauvegarde en cours d'exécution compris (168 250 sociétés, dont 150 544 encore actives). false = écarte les procédures en cours : garde les sociétés sans procédure et celles dont la procédure est clôturée."
+          },
+          "procedure_type": {
+            "$ref": "#/components/schemas/IncludeExcludeFilter",
+            "description": "Legal-only. include et exclude. Quatre valeurs exactes, casse et accents compris : Liquidation judiciaire, Redressement judiciaire, Procédure de sauvegarde, Autre procédure collective. Avec procedure_open=true, porte sur la procédure en cours (liquidation 116 310, redressement 42 110 plans compris, sauvegarde 6 885, autre 2 913) ; sinon sur tout l'historique. Exemple, liquidations en cours : {\"procedure_open\": true, \"procedure_type\": {\"include\": [\"Liquidation judiciaire\"]}}."
+          },
+          "idcc": {
+            "$ref": "#/components/schemas/IncludeExcludeFilter",
+            "description": "Legal-only. Convention collective par code IDCC, en chaîne et sans zéro initial (\"1486\", \"16\" et non \"0016\"), jamais l'intitulé. Connue pour 19 % des sociétés (5,2 M) : une recherche qui porte ce filtre rend structurellement moins."
+          },
+          "created_since_months": {
+            "type": "number",
+            "description": "Legal-only. Entreprises créées dans les N DERNIERS MOIS (ex. 3). Plus précis que creation_date_*, qui raisonne en années civiles."
+          },
+          "creation_date_min": {
+            "type": "string",
+            "description": "Legal-only. ANNÉE de création min (2015 ou '2015'). ⚠️ JAMAIS de date complète ('2015-03-01') : elle serait SILENCIEUSEMENT ignorée (résultats non filtrés)."
+          },
+          "creation_date_max": {
+            "type": "string",
+            "description": "Legal-only. ANNÉE de création max (année seule, pas de date complète)."
+          },
+          "industry_main": {
+            "$ref": "#/components/schemas/IncludeExcludeFilter",
+            "description": "LKI-only. Secteur LinkedIn (lacunaire — préférer activity/naf_code)."
+          },
+          "company_type": {
+            "$ref": "#/components/schemas/IncludeExcludeFilter",
+            "description": "LKI-only. Type (Privately Held…)."
+          },
+          "domain": {
+            "$ref": "#/components/schemas/IncludeExcludeFilter",
+            "description": "3 sources (LinkedIn y compris hors de France, Google, registre par le lien domaine → SIREN). Domaine web en correspondance EXACTE, une carte par domaine demandé. Saisie normalisée : \"https://www.acme.fr/contact?utm_source=x\" ou \"contact@acme.fr\" donnent acme.fr. Un nom seul sans point (decathlon) cherche les domaines connus qui commencent par decathlon. (decathlon.fr, decathlon.com…), à défaut par decathlon (4 caractères au moins), 25 au plus, une carte chacun ; \".\" seul : toute page LinkedIn qui a un site (en exclusion : qui n'en a pas), comme avant (filtre LinkedIn seul). Le domaine parent (pro.acme.fr → acme.fr) seulement si la forme exacte n'est connue nulle part, jamais pour une plateforme, un raccourcisseur ou un lien d'application (onelink.to, app.link…). meta.warnings : domain_invalid, domain_label, domain_any, domain_parent."
+          },
+          "followers_min": {
+            "type": "integer",
+            "description": "LKI-only. Followers LinkedIn min."
+          },
+          "followers_max": {
+            "type": "integer",
+            "description": "LKI-only. Followers LinkedIn max."
+          },
+          "rating_min": {
+            "type": "number",
+            "description": "GMB-only. Note Google min (0-5)."
+          },
+          "rating_max": {
+            "type": "number",
+            "description": "GMB-only. Note Google max."
+          },
+          "reviews_min": {
+            "type": "integer",
+            "description": "GMB-only. Nb d'avis min."
+          },
+          "reviews_max": {
+            "type": "integer",
+            "description": "GMB-only. Nb d'avis max."
+          },
+          "is_opening": {
+            "type": "boolean",
+            "description": "GMB-only. Ouvert le dimanche."
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "Legal",
+              "LKI",
+              "GMB"
+            ],
+            "description": "Forcer une seule source."
+          },
+          "with_legal_data": {
+            "type": "boolean",
+            "description": "Filtre ET, PAS un choix de source : garde les entreprises qui ont AUSSI une fiche au registre. Les trois sources restent interrogées, chacune filtrée. Pour ne lire que le registre, utiliser source=Legal."
+          },
+          "with_linkedin_page": {
+            "type": "boolean",
+            "description": "Filtre ET, PAS un choix de source : garde les entreprises qui ont AUSSI une page LinkedIn. Pour ne lire que LinkedIn, utiliser source=LKI."
+          },
+          "with_email": {
+            "type": "boolean",
+            "description": "Filtre ET : garde les entreprises pour lesquelles nous avons une adresse email d'entreprise, relevée sur leur site."
+          },
+          "with_phone": {
+            "type": "boolean",
+            "description": "Filtre ET : garde les entreprises pour lesquelles nous avons un numéro de téléphone d'entreprise (standard de la fiche Google Maps, ou numéro affiché sur le site) ; ce n'est pas le mobile d'une personne. La source LinkedIn ne répond pas encore à ce filtre et renvoie 0 : résultats incomplets, jamais faux."
+          }
+        }
+      },
+      "ExportByFilters": {
+        "type": "object",
+        "required": [
+          "filters"
+        ],
+        "properties": {
+          "filters": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/FindPeopleFilters"
+              },
+              {
+                "$ref": "#/components/schemas/FindCompaniesFilters"
+              }
+            ]
+          }
+        }
+      },
+      "ExportByIds": {
+        "type": "object",
+        "required": [
+          "ids"
+        ],
+        "properties": {
+          "ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "IDs renvoyés par `/find` (champ `_id` de chaque lead)."
+          }
+        }
+      },
+      "MergedItem": {
+        "type": "object",
+        "properties": {
+          "_id": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "Legal",
+              "LKI",
+              "GMB"
+            ]
+          },
+          "matchQuality": {
+            "type": "string",
+            "enum": [
+              "exact",
+              "employer_approximate",
+              "employer_former",
+              "name_only",
+              "role_approximate",
+              "holding_officer",
+              "registry_mandate",
+              "registry_holding",
+              "linkedin_title",
+              "registry_mandate_ended"
+            ],
+            "description": "`/people/find` par clé d'API, recherche récupérée après un zéro : comment la fiche répond. `exact` et `employer_approximate` (la bonne société, nom ou SIREN retrouvé) sont facturées ; `employer_former`, `name_only`, `role_approximate` (intitulé de dirigeant LinkedIn pour un mandat introuvable) et `holding_officer` (dirigeant de la holding qui dirige la société) sont offertes. Dirigeants d'un SIREN (`siren` + `mandate_role`) : `registry_mandate` (mandat lu au registre, fiche rattachée à une autre société) et `registry_holding` (dirigeant de la holding qui tient le mandat, chaîne dans `mandate.via`) sont facturées ; `linkedin_title` (profil LinkedIn à titre de dirigeant, aucun dirigeant en poste au registre) et `registry_mandate_ended` (mandat terminé au registre) sont offertes. Absent sur toute autre recherche.\n"
+          },
+          "mandate": {
+            "$ref": "#/components/schemas/MandatDirigeant"
+          },
+          "data": {
+            "type": "object",
+            "additionalProperties": true,
+            "description": "Champs bruts de la source (varie selon `source`)."
+          }
+        }
+      },
+      "MandatDirigeant": {
+        "type": "object",
+        "description": "Dirigeants d'un SIREN par clé d'API : le mandat que la personne exerce DANS LA SOCIÉTÉ CHERCHÉE, quelle que soit la société à laquelle sa fiche est rattachée. Absent sur toute autre recherche.\n",
+        "properties": {
+          "siren": {
+            "type": "string",
+            "description": "SIREN de la société cherchée."
+          },
+          "company_name": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string",
+            "description": "Mandat dans la société cherchée (« Président »), directement ou par la chaîne via."
+          },
+          "is_current": {
+            "type": "boolean"
+          },
+          "start_at": {
+            "type": "string",
+            "description": "AAAA-MM-JJ, quand le registre la donne."
+          },
+          "end_at": {
+            "type": "string",
+            "description": "AAAA-MM-JJ, quand le registre la donne."
+          },
+          "label": {
+            "type": "string",
+            "description": "Libellé prêt à afficher.",
+            "example": "Président de X via HOLDING Y"
+          },
+          "via": {
+            "$ref": "#/components/schemas/ViaHolding"
+          },
+          "person_role": {
+            "type": "string",
+            "description": "Rôle de la personne dans la dernière holding de la chaîne (« Gérant »)."
+          },
+          "card_siren": {
+            "type": "string",
+            "description": "Société à laquelle la fiche est rattachée, quand ce n'est pas la société cherchée."
+          },
+          "card_role": {
+            "type": "string",
+            "description": "Titre porté par la fiche, quand il diffère du mandat dans la société cherchée."
+          },
+          "unconfirmed": {
+            "type": "boolean",
+            "description": "Vrai quand le mandat n'est lu que sur la fiche rattachée, sans confirmation au registre des mandats (ces fiches viennent après les mandats confirmés)."
+          }
+        }
+      },
+      "ViaHolding": {
+        "type": "object",
+        "description": "Holding intermédiaire d'une chaîne de direction, de la société cherchée vers le haut.",
+        "properties": {
+          "siren": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string",
+            "description": "Mandat que CETTE holding exerce dans la société juste en dessous d'elle."
+          },
+          "via": {
+            "$ref": "#/components/schemas/ViaHolding"
+          }
+        }
+      },
+      "SearchWarning": {
+        "type": "object",
+        "description": "Avertissement structuré (`meta.warnings`) : filtre qui ne s'applique pas, récupération approchée, ou explication d'un zéro. Gratuit : un zéro ne débite aucun crédit.\n",
+        "properties": {
+          "code": {
+            "type": "string",
+            "description": "Code stable. Personnes dans une société (employeur ou SIREN) à zéro : `company_role_absent` (société connue, personne avec ce rôle ou ce nom), `company_without_people` (société connue, aucune personne rattachée chez Basile), `person_at_other_company` (la personne est connue ailleurs), `company_not_found` (aucune société sous ce nom ou ce SIREN, noms proches proposés). Récupérations : `employer_approximate`, `employer_former`, `employer_not_matched`, `role_approximate`, `holding_officers`. Activité : `activity_translated`, `activity_unreadable`, `activity_exclusion_ignored`. Dirigeants d'un SIREN : `siren_mandate_elsewhere`, `siren_via_holding`, `siren_holding_without_person`, `siren_linkedin_fallback`, `siren_mandates_ended`, `siren_no_known_mandate`, `siren_too_many`, `mandate_role_unknown` (un zéro qu'ils expliquent n'est pas complété par les récupérations par société). École et langues : `filter_values_truncated`, `filter_values_ignored`. Domaine (entreprises) : `domain_invalid`, `domain_label`, `domain_any`, `domain_parent`.\n",
+            "example": "company_role_absent"
+          },
+          "message": {
+            "type": "string",
+            "description": "Explication en anglais.",
+            "example": "ALTRAD ARNHOLDT (SIREN 400035903): 59 employees known on LinkedIn, none holds this role (Achat, Acheteur, Acheteuse…)."
+          },
+          "messageFr": {
+            "type": "string",
+            "description": "La même en français, quand elle existe.",
+            "example": "ALTRAD ARNHOLDT (SIREN 400035903) : 59 salariés connus sur LinkedIn, aucun n'a ce rôle (Achat, Acheteur, Acheteuse…)."
+          },
+          "filters": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Clés de filtre en cause."
+          },
+          "blocking": {
+            "type": "boolean",
+            "description": "Vrai quand ce constat suffit à rendre 0 résultat."
+          },
+          "details": {
+            "type": "object",
+            "additionalProperties": true,
+            "description": "Chiffres et noms propres au code : `knownEmployees`, `knownOfficers`, `siren`, `linkedinPage`, `inLegalRegistry`, `currentEmployer` (seulement si sûr), `suggestions` (noms proches et SIREN), `ceasedCompanies`, `activeHomonyms`, `matchedEmployers` et `sirens` (à relancer pour paginer une récupération), `truncated`. Dirigeants : `sirens`, `holdings`, `not_tried`, `other_current_roles`, `values`, `max`. École et langues : `side`, `max`, `received`, `dropped`, `minChars`, `ignored`.\n"
+          }
+        }
+      },
+      "SearchMeta": {
+        "type": "object",
+        "properties": {
+          "sources": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Sources réellement interrogées."
+          },
+          "noticeCode": {
+            "type": "string",
+            "description": "people_overcount, sources_split, siren_no_linkedin_company, gmb_filter_dropped, sources_conflict…"
+          },
+          "notice": {
+            "type": "string"
+          },
+          "countCapNotice": {
+            "type": "string"
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SearchWarning"
+            },
+            "description": "Présent seulement quand il y a quelque chose à dire."
+          }
+        }
+      },
+      "PaginatedPeople": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean"
+          },
+          "total": {
+            "type": "integer",
+            "description": "Total de résultats (somme des sources, sans dédup cross-source)."
+          },
+          "leads": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MergedItem"
+            }
+          },
+          "pagination": {
+            "type": "object",
+            "properties": {
+              "nextToken": {
+                "type": "string"
+              }
+            },
+            "description": "Présent uniquement s'il reste une page."
+          },
+          "meta": {
+            "$ref": "#/components/schemas/SearchMeta"
+          }
+        }
+      },
+      "PaginatedCompanies": {
+        "$ref": "#/components/schemas/PaginatedPeople"
+      },
+      "Error": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "example": false
+          },
+          "error": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "responses": {
+      "Unauthorized": {
+        "description": "Clé API absente ou invalide.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            },
+            "example": {
+              "error": "Unauthorized"
+            }
+          }
+        }
+      },
+      "SubscriptionRequired": {
+        "description": "La pagination (page > 1) requiert un abonnement actif.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            },
+            "example": {
+              "success": false,
+              "error": "subscription_required"
+            }
+          }
+        }
+      },
+      "RateLimited": {
+        "description": "Trop de requêtes. Respecter le header `Retry-After` (secondes).",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            },
+            "example": {
+              "success": false,
+              "error": "rate_limit_exceeded"
+            }
+          }
+        }
+      },
+      "ExportLimit": {
+        "description": "Quota d'export mensuel atteint, ou rate limit.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            },
+            "example": {
+              "success": false,
+              "error": "export_limit_reached"
+            }
+          }
+        }
+      },
+      "NotFound": {
+        "description": "Ressource introuvable.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            },
+            "example": {
+              "success": false,
+              "error": "Not found"
+            }
+          }
+        }
+      }
+    }
+  },
+  "security": [
+    {
+      "ApiKeyAuth": []
+    }
+  ],
+  "tags": [
+    {
+      "name": "Personnes",
+      "description": "Recherche et export de contacts (dirigeants légaux + profils LinkedIn)."
+    },
+    {
+      "name": "Entreprises",
+      "description": "Recherche et export de sociétés (registre + LinkedIn + Google My Business)."
+    },
+    {
+      "name": "Suggestions",
+      "description": "Autocomplétion pour trouver les valeurs valides des filtres."
+    }
+  ]
+}
