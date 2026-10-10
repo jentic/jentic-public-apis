@@ -1,0 +1,1686 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Canarics API for AI agents",
+    "version": "1.0.0",
+    "description": "API that lets a client's own AI assistant (Claude, ChatGPT, or any tool with HTTP access) check the client's Canarics account: minute usage vs plan, AI voice agents, call history and daily call statistics.\n\nNo Canarics account yet? An AI assistant can set the whole thing up: POST /api/v1/signup (no auth) starts a signup and returns a claim URL for the person responsible (they sign in, verify their phone, accept terms); GET /api/v1/signup/status then hands the assistant a one-time API key for the new team, and POST /api/v1/upgrade/checkout returns the hosted payment link the person opens to pay. The human stays in the loop exactly where it matters (identity, phone, terms, payment); everything else is machine-driven.\n\nDashboard deep links (hand to the human, manager login required): https://canarics.com/manager.html#/team for API keys and team members; each agent's manageUrl (conversations) and settingsUrl (prompt, voice, tools, Pipedrive token, Telegram, calendar), both returned by GET /api/v1/agents. These are the only valid dashboard links, never construct others.\n\nGetting a key: a team manager creates an API key in the Canarics dashboard (Team tab), or the signup flow above delivers one. Keys look like `cnr_<40 hex chars>`, are scoped to one team, and are read-only. Keep them secret; a manager can revoke a key at any time.\n\nAll endpoints return JSON. Errors use `{ \"error\": \"snake_case_code\", \"hint\": \"human/agent-readable explanation\" }`. Rate limits: 120 requests per minute and 5000 requests per UTC day per key (HTTP 429 when exceeded). Do not poll for new calls, register the team webhook and react to call.analyzed / call.missed events instead.\n\nMCP: the same data is exposed as a remote MCP server (Streamable HTTP, stateless) at `POST https://canarics.com/mcp`, authenticated with the same Bearer key. Listed in the official MCP registry as com.canarics/canarics. Tools: get_usage, list_agents, list_calls, list_conversations, get_daily_call_stats, get_contact, get_upgrade_options, create_upgrade_checkout (plus request_callback on callbacks-scoped keys); with no key at all, the signup tools start_signup and check_signup_status. Claude Code: `claude mcp add --transport http canarics https://canarics.com/mcp --header \"Authorization: Bearer cnr_...\"`.\n\nOutbound webhook (Canarics -> your API): a manager can register an HTTPS URL in the dashboard; Canarics then POSTs events. `call.analyzed` fires after every analyzed call (human and AI-agent calls) with fields: event, teamId, source (human_call | ai_agent_call), callId, userId or agentId, direction, number, durationSeconds, summary, score, sentiment, keyFacts, nextSteps, dealInfo, talkRatio, listenRatio, clientName, timestamp. `call.missed` fires the moment a customer's inbound call is logged as missed, with: event, teamId, source, userId, direction, number (as delivered by the carrier, may lack the + prefix; contacts and callbacks endpoints accept either form), timestamp, react to it by checking history (GET /api/v1/contacts/{number}) and, with a callbacks-scoped key, scheduling an AI callback (POST /api/v1/callbacks). Each delivery carries `X-Canarics-Event`, `X-Canarics-Timestamp` (unix seconds) and `X-Canarics-Signature: sha256=HMAC_SHA256(secret, \"{timestamp}.{rawBody}\")` computed with the team's signing secret (shown in the dashboard). Respond 2xx within 10s; failed deliveries retry twice (2s/4s backoff) and the webhook auto-disables after 100 consecutive failures.\n\nScopes: keys are read-only by default. On the Canarics outbound plan, a manager can create a key with the `callbacks` scope, which additionally allows POST /api/v1/callbacks (and the request_callback MCP tool), scheduling an AI voice-agent callback to a number the team already has call history with. Teams without the outbound plan get 403 outbound_plan_required. Never a cold-calling API: unknown numbers are rejected.",
+    "contact": {
+      "email": "sales@canarics.com",
+      "url": "https://canarics.com"
+    },
+    "x-jentic-source-url": "https://canarics.com/openapi.json"
+  },
+  "servers": [
+    {
+      "url": "https://salestick-backend-647994203646.europe-central2.run.app",
+      "description": "Production (EU, europe-central2)"
+    }
+  ],
+  "paths": {
+    "/mcp": {
+      "post": {
+        "summary": "Remote MCP server (Streamable HTTP, stateless)",
+        "description": "JSON-RPC 2.0 per the Model Context Protocol. Same Bearer key as the REST API. Tools: get_usage, list_agents, list_calls, list_conversations, get_daily_call_stats, get_contact, get_upgrade_options, create_upgrade_checkout (plus request_callback on callbacks-scoped keys). Without any Authorization header the server exposes only the signup tools (start_signup, check_signup_status), so an AI assistant can set up Canarics for a company that has no account yet. Send Accept: application/json, text/event-stream.",
+        "responses": {
+          "200": {
+            "description": "JSON-RPC response"
+          },
+          "401": {
+            "description": "Invalid key (a request with no key at all gets the public signup-only tools instead)"
+          }
+        }
+      }
+    },
+    "/api/v1": {
+      "get": {
+        "summary": "Discovery, endpoint list and auth instructions",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Endpoint directory"
+          }
+        }
+      }
+    },
+    "/api/v1/signup": {
+      "post": {
+        "summary": "Start a Canarics signup for a company with no account yet (no auth)",
+        "description": "For AI assistants onboarding their company. Creates a signup intent and returns a claim URL: send it to the person responsible. They open it, sign in, verify their phone by SMS and accept the terms; the trial then provisions itself with a demo AI voice agent generated from the company website. Keep the returned intentToken and poll GET /api/v1/signup/status. No email is sent by this endpoint. Rate-limited per IP.",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "companyName",
+                  "website"
+                ],
+                "properties": {
+                  "companyName": {
+                    "type": "string",
+                    "minLength": 2,
+                    "maxLength": 120
+                  },
+                  "website": {
+                    "type": "string",
+                    "maxLength": 300,
+                    "description": "Company website URL, the demo agent is generated from it"
+                  },
+                  "language": {
+                    "type": "string",
+                    "description": "Preferred conversation/summary language (e.g. Latvian, English, German). Default English."
+                  },
+                  "contactEmail": {
+                    "type": "string",
+                    "description": "Optional contact email of the person who will claim the signup"
+                  },
+                  "notes": {
+                    "type": "string",
+                    "maxLength": 500,
+                    "description": "Optional context on the intended use case"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Intent created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "intentId": {
+                      "type": "string"
+                    },
+                    "intentToken": {
+                      "type": "string",
+                      "description": "Shown once, needed for the status endpoint (x-intent-token header)"
+                    },
+                    "claimUrl": {
+                      "type": "string",
+                      "description": "Send this to the person; opening it starts the prefilled trial signup"
+                    },
+                    "expiresAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "next": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Per-IP daily limit reached",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/signup/status": {
+      "get": {
+        "summary": "Follow a signup intent (header x-intent-token)",
+        "description": "Pass the intentToken in the x-intent-token header (never in the URL). Statuses: pending (waiting for the human), expired, trial_active (claimed: the FIRST poll after this also returns a one-time read-only API key for the new team; store it), active (paid plan live). Poll slowly: the human step takes minutes.",
+        "security": [],
+        "parameters": [
+          {
+            "name": "x-intent-token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Current status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "pending",
+                        "expired",
+                        "trial_active",
+                        "active"
+                      ]
+                    },
+                    "teamId": {
+                      "type": "string"
+                    },
+                    "claimUrl": {
+                      "type": "string"
+                    },
+                    "dashboardUrl": {
+                      "type": "string"
+                    },
+                    "apiKey": {
+                      "type": "string",
+                      "description": "Present exactly once, on the first poll after the claim: a read-only cnr_ key for the new team"
+                    },
+                    "apiKeyNote": {
+                      "type": "string"
+                    },
+                    "next": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or wrong intent token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Polling too fast",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/upgrade": {
+      "get": {
+        "summary": "Trial teams: available paid plans and required billing fields",
+        "responses": {
+          "200": {
+            "description": "Plans, prices, and what checkout needs"
+          },
+          "403": {
+            "description": "Not a self-service trial team, plan changes go through sales",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/upgrade/checkout": {
+      "post": {
+        "summary": "Trial teams: create the paid-plan checkout (hosted payment link)",
+        "description": "Returns a hosted Revolut payment link. Send it to the person responsible: they open it and pay; an AI assistant must never enter payment details itself. Month 1 is paid at checkout, later months are invoiced. Activation is automatic after payment.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "plan",
+                  "regNr",
+                  "address"
+                ],
+                "properties": {
+                  "plan": {
+                    "type": "string",
+                    "enum": [
+                      "inbound",
+                      "outbound"
+                    ]
+                  },
+                  "regNr": {
+                    "type": "string",
+                    "maxLength": 40,
+                    "description": "Company registration number (for the invoice)"
+                  },
+                  "address": {
+                    "type": "string",
+                    "maxLength": 300,
+                    "description": "Company legal address (for the invoice)"
+                  },
+                  "billingEmail": {
+                    "type": "string",
+                    "description": "Optional, where invoices go; defaults to the account email"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Checkout created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "checkoutUrl": {
+                      "type": "string",
+                      "description": "Hosted payment page, for the human to open"
+                    },
+                    "plan": {
+                      "type": "string"
+                    },
+                    "priceEur": {
+                      "type": "number"
+                    },
+                    "currency": {
+                      "type": "string"
+                    },
+                    "next": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid plan or billing details",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not a trial team",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Already converted to a paid plan",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Payments not configured",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/me": {
+      "get": {
+        "summary": "Verify the API key",
+        "responses": {
+          "200": {
+            "description": "Key is valid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "teamId": {
+                      "type": "string"
+                    },
+                    "label": {
+                      "type": "string"
+                    },
+                    "scopes": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, malformed, unknown or revoked key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/usage": {
+      "get": {
+        "summary": "Minutes used vs plan this billing cycle",
+        "responses": {
+          "200": {
+            "description": "Usage snapshot",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "teamId": {
+                      "type": "string"
+                    },
+                    "minutesUsedThisCycle": {
+                      "type": "number"
+                    },
+                    "includedMinutes": {
+                      "type": "number",
+                      "nullable": true,
+                      "description": "null when the team has no minute plan (e.g. trial)"
+                    },
+                    "hardCapMinutes": {
+                      "type": "number",
+                      "nullable": true,
+                      "description": "Calls stop at this cap until the next cycle"
+                    },
+                    "overagePricePer100Min": {
+                      "type": "number",
+                      "nullable": true
+                    },
+                    "currency": {
+                      "type": "string"
+                    },
+                    "note": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/agents": {
+      "get": {
+        "summary": "List the team's AI voice agents",
+        "responses": {
+          "200": {
+            "description": "Sanitized agent configs",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "agents": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Agent"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/calls": {
+      "get": {
+        "summary": "Call log summaries (newest first, paginated)",
+        "parameters": [
+          {
+            "name": "from",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "description": "ISO 8601 start, e.g. 2026-09-01"
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "description": "ISO 8601 end; defaults to now"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "default": 100
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Pass the `cursor` value from the previous page"
+          },
+          {
+            "name": "direction",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "inbound",
+                "outbound"
+              ]
+            },
+            "description": "Filter applied to the returned page"
+          },
+          {
+            "name": "missed",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "true"
+              ]
+            },
+            "description": "Only missed calls (filter applied to the returned page)"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Page of calls",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "calls": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Call"
+                      }
+                    },
+                    "cursor": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "hasMore": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Missing/invalid from",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/conversations": {
+      "get": {
+        "summary": "AI voice-agent conversations (newest first, paginated)",
+        "description": "Conversations handled by the team's Canarics AI agents. Recorded human calls are served by /api/v1/calls instead; a team using only the AI receptionist finds its call history here.",
+        "parameters": [
+          {
+            "name": "from",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "description": "ISO 8601 start; defaults to 30 days ago"
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "description": "ISO 8601 end; defaults to now"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "default": 100
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Pass the `cursor` value from the previous page"
+          },
+          {
+            "name": "agentId",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Only one voice agent's conversations (filter applied to the returned page)"
+          },
+          {
+            "name": "direction",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "inbound",
+                "outbound"
+              ]
+            },
+            "description": "Filter applied to the returned page"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Page of conversations",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "conversations": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Conversation"
+                      }
+                    },
+                    "cursor": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "hasMore": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/contacts/{number}": {
+      "get": {
+        "summary": "Cross-call history for one phone number",
+        "parameters": [
+          {
+            "name": "number",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "E.164 phone number, e.g. +37122006986"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Contact history",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "contact": {
+                      "type": "object",
+                      "properties": {
+                        "number": {
+                          "type": "string"
+                        },
+                        "totalTouches": {
+                          "type": "number"
+                        },
+                        "lastTouchedAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "lastKind": {
+                          "type": "string",
+                          "description": "human or ai"
+                        },
+                        "lastDirection": {
+                          "type": "string"
+                        },
+                        "lastStatus": {
+                          "type": "string"
+                        },
+                        "lastSummary": {
+                          "type": "string"
+                        },
+                        "lastScore": {
+                          "type": "number"
+                        },
+                        "lastSentiment": {
+                          "type": "string"
+                        },
+                        "lastDealStage": {
+                          "type": "string"
+                        },
+                        "recentSummaries": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "at": {
+                                "type": "string"
+                              },
+                              "text": {
+                                "type": "string"
+                              },
+                              "kind": {
+                                "type": "string"
+                              },
+                              "status": {
+                                "type": "string"
+                              },
+                              "direction": {
+                                "type": "string"
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No prior calls with this number"
+          }
+        }
+      }
+    },
+    "/api/v1/callbacks": {
+      "post": {
+        "summary": "Schedule an AI voice-agent callback (callbacks scope required)",
+        "description": "Schedules the team's Canarics AI agent to call a customer back. Only numbers the team already has call history with are accepted (consent gate, never cold calls). Max 20 per day per team; repeats to the same number are deduplicated. The call is placed by the outbound loop during 09:00-20:00 in the given timezone, up to 2 attempts; the analyzed result arrives as a call.analyzed webhook event.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "number",
+                  "reason"
+                ],
+                "properties": {
+                  "number": {
+                    "type": "string",
+                    "description": "Customer number, E.164, with prior call history"
+                  },
+                  "reason": {
+                    "type": "string",
+                    "minLength": 5,
+                    "maxLength": 500,
+                    "description": "Why the customer is called back, grounded in their own request, becomes the agent's briefing"
+                  },
+                  "agentId": {
+                    "type": "string",
+                    "description": "Which voice agent calls, needed only when the team has several"
+                  },
+                  "timezone": {
+                    "type": "string",
+                    "description": "IANA timezone for the calling window, default Europe/Riga"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Callback scheduled",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "callbackId": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string"
+                    },
+                    "fromNumber": {
+                      "type": "string"
+                    },
+                    "note": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid number/reason, disallowed destination, or agentId needed"
+          },
+          "403": {
+            "description": "Key lacks the callbacks scope, the team is not on the outbound plan, or the number has no call history with the team"
+          },
+          "409": {
+            "description": "A recent callback to this number already exists"
+          },
+          "429": {
+            "description": "Daily callback limit reached"
+          }
+        }
+      }
+    },
+    "/api/v1/calls/daily-stats": {
+      "get": {
+        "summary": "Per-day call statistics (max 90 days)",
+        "parameters": [
+          {
+            "name": "from",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
+          },
+          {
+            "name": "days",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "maximum": 90,
+              "default": 7
+            },
+            "description": "Used when from is omitted: last N days"
+          },
+          {
+            "name": "tz",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "default": "Europe/Riga"
+            },
+            "description": "IANA timezone for day boundaries"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Daily rollups",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "days": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "stats": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/DailyStat"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/campaigns": {
+      "get": {
+        "summary": "List outbound campaigns with live state (campaigns scope required)",
+        "description": "The team's outbound calling campaign templates: enabled or draft, calls made today vs the daily limit, leads remaining, last feed error. Call outcomes come from GET /api/v1/conversations with direction=outbound.",
+        "responses": {
+          "200": {
+            "description": "Campaign list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "campaigns": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "enabled": {
+                            "type": "boolean"
+                          },
+                          "draft": {
+                            "type": "boolean"
+                          },
+                          "createdVia": {
+                            "type": "string",
+                            "enum": [
+                              "ai_assistant",
+                              "dashboard"
+                            ]
+                          },
+                          "agentId": {
+                            "type": "string"
+                          },
+                          "poolId": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "callsPerDay": {
+                            "type": "integer",
+                            "nullable": true
+                          },
+                          "calledToday": {
+                            "type": "integer"
+                          },
+                          "poolRemaining": {
+                            "type": "integer",
+                            "nullable": true
+                          },
+                          "lastFedAt": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "lastError": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "createdAt": {
+                            "type": "string",
+                            "nullable": true
+                          }
+                        }
+                      }
+                    },
+                    "manageUrl": {
+                      "type": "string"
+                    },
+                    "note": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Key lacks the campaigns scope"
+          }
+        }
+      },
+      "post": {
+        "summary": "Draft an outbound calling campaign (campaigns scope required). Never places calls.",
+        "description": "Creates a DISABLED campaign draft that a human team manager must review and launch in the Canarics dashboard (Outbound tab); no calls are placed by this endpoint. The brief becomes the calling agent's only context, so ground it in what the company actually wants from these calls. Audience is either an existing lead pool (poolId) or up to 200 numbers the company already has a lawful basis to call. Once launched by the manager, calls run through the normal outbound loop: daily limit, local calling window, retries, spacing.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "name",
+                  "brief"
+                ],
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 80,
+                    "description": "Short campaign name the manager will recognize in the dashboard"
+                  },
+                  "brief": {
+                    "type": "string",
+                    "minLength": 20,
+                    "maxLength": 800,
+                    "description": "Why these people are being called and what a good call achieves, in plain words grounded in the company's own request"
+                  },
+                  "agentId": {
+                    "type": "string",
+                    "description": "Which voice agent places the calls, needed only when the team has several"
+                  },
+                  "poolId": {
+                    "type": "string",
+                    "description": "Existing lead pool to call from. Pass either this or numbers, not both"
+                  },
+                  "numbers": {
+                    "type": "array",
+                    "maxItems": 200,
+                    "description": "Ad-hoc audience. Only numbers the company may lawfully call",
+                    "items": {
+                      "type": "object",
+                      "required": [
+                        "number"
+                      ],
+                      "properties": {
+                        "number": {
+                          "type": "string",
+                          "description": "E.164"
+                        },
+                        "name": {
+                          "type": "string"
+                        },
+                        "note": {
+                          "type": "string",
+                          "description": "Short per-person context, e.g. what they asked about"
+                        }
+                      }
+                    }
+                  },
+                  "language": {
+                    "type": "string",
+                    "description": "Opening language, defaults to the agent's language"
+                  },
+                  "timezone": {
+                    "type": "string",
+                    "description": "IANA timezone for the calling window, default Europe/Riga"
+                  },
+                  "callsPerDay": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 100,
+                    "description": "Daily call limit once launched, default 20"
+                  },
+                  "allowedHours": {
+                    "type": "object",
+                    "properties": {
+                      "startHour": {
+                        "type": "integer"
+                      },
+                      "endHour": {
+                        "type": "integer"
+                      }
+                    },
+                    "description": "Local calling window, default 9-20"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Draft created, waiting for a manager to launch",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "campaignId": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "draft"
+                      ]
+                    },
+                    "poolId": {
+                      "type": "string"
+                    },
+                    "audience": {
+                      "type": "object",
+                      "properties": {
+                        "added": {
+                          "type": "integer"
+                        },
+                        "poolRemaining": {
+                          "type": "integer"
+                        },
+                        "rejected": {
+                          "type": "array",
+                          "items": {
+                            "type": "object"
+                          }
+                        }
+                      }
+                    },
+                    "callsPerDay": {
+                      "type": "integer"
+                    },
+                    "reviewUrl": {
+                      "type": "string"
+                    },
+                    "note": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Missing name/brief, no valid audience, or invalid settings"
+          },
+          "403": {
+            "description": "Key lacks the campaigns scope, team not on the outbound plan, or pool dial policy blocks calling"
+          },
+          "404": {
+            "description": "Pool not found on this team"
+          },
+          "429": {
+            "description": "Daily draft limit reached (10 per team)"
+          }
+        }
+      }
+    },
+    "/api/v1/tools": {
+      "get": {
+        "summary": "List team-defined HTTP tools on the voice agents (tools scope required)",
+        "description": "Custom mid-call tools created via POST /api/v1/tools or the MCP create_agent_tool. Header values are masked. Built-in Canarics tools are not listed.",
+        "responses": {
+          "200": {
+            "description": "Tools per agent",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "agents": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "agentId": {
+                            "type": "string"
+                          },
+                          "agentName": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "tools": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "name": {
+                                  "type": "string"
+                                },
+                                "description": {
+                                  "type": "string"
+                                },
+                                "params": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "object"
+                                  }
+                                },
+                                "method": {
+                                  "type": "string"
+                                },
+                                "url": {
+                                  "type": "string"
+                                },
+                                "headers": {
+                                  "type": "object",
+                                  "description": "Values masked."
+                                },
+                                "responseFields": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string"
+                                  }
+                                },
+                                "timeoutMs": {
+                                  "type": "integer"
+                                },
+                                "enabled": {
+                                  "type": "boolean"
+                                },
+                                "createdAt": {
+                                  "type": "string",
+                                  "nullable": true
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "note": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Key lacks the tools scope"
+          }
+        }
+      },
+      "post": {
+        "summary": "Create a custom mid-call tool on a voice agent (tools scope required)",
+        "description": "Wires the company's OWN HTTPS API into the voice agent as a mid-call tool (e.g. order lookup, booking check). The URL host is pinned at creation; caller-supplied values only fill {param} placeholders in path/query/body. Always verify with POST /api/v1/tools/test afterwards. Grounding rules (param values must come from the caller's own words) are enforced automatically.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "name",
+                  "description",
+                  "method",
+                  "url"
+                ],
+                "properties": {
+                  "agentId": {
+                    "type": "string",
+                    "description": "Which voice agent gets the tool - required only when the team has several (ids from GET /api/v1/agents)."
+                  },
+                  "name": {
+                    "type": "string",
+                    "description": "snake_case tool name, 3-41 chars, e.g. check_order_status."
+                  },
+                  "description": {
+                    "type": "string",
+                    "description": "For the voice AI: when to call this tool and what it returns."
+                  },
+                  "params": {
+                    "type": "array",
+                    "description": "Values the voice AI extracts from the caller's words.",
+                    "items": {
+                      "type": "object",
+                      "required": [
+                        "name",
+                        "type",
+                        "description"
+                      ],
+                      "properties": {
+                        "name": {
+                          "type": "string"
+                        },
+                        "type": {
+                          "type": "string",
+                          "enum": [
+                            "string",
+                            "number",
+                            "boolean"
+                          ]
+                        },
+                        "description": {
+                          "type": "string"
+                        },
+                        "required": {
+                          "type": "boolean",
+                          "default": true
+                        }
+                      }
+                    }
+                  },
+                  "method": {
+                    "type": "string",
+                    "enum": [
+                      "GET",
+                      "POST"
+                    ]
+                  },
+                  "url": {
+                    "type": "string",
+                    "description": "HTTPS endpoint; {param} placeholders allowed in path/query, never in the host. Host must be publicly reachable (no private/internal addresses)."
+                  },
+                  "headers": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": "string"
+                    },
+                    "description": "Static headers, e.g. an Authorization header. Stored server-side, masked in listings."
+                  },
+                  "body": {
+                    "type": "object",
+                    "description": "POST only: JSON body template; string values may contain {param} placeholders."
+                  },
+                  "responseFields": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "Allowlist of response fields (dot paths) the voice AI is shown. Strongly recommended."
+                  },
+                  "timeoutMs": {
+                    "type": "integer",
+                    "minimum": 1000,
+                    "maximum": 10000,
+                    "default": 6000
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Tool created (live on new calls immediately)"
+          },
+          "400": {
+            "description": "Invalid tool spec, unresolvable/private host, agentId needed, or tool limit reached"
+          },
+          "403": {
+            "description": "Key lacks the tools scope"
+          },
+          "409": {
+            "description": "A tool with that name already exists on the agent"
+          }
+        }
+      }
+    },
+    "/api/v1/tools/test": {
+      "post": {
+        "summary": "Dry-run a team-defined tool through the exact live-call executor (tools scope required)",
+        "description": "Runs the tool with sample args and returns the interpolated request URL plus the response the voice AI would see. Do this after every create and confirm the data is correct and safe to speak aloud.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "name"
+                ],
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "agentId": {
+                    "type": "string"
+                  },
+                  "args": {
+                    "type": "object",
+                    "description": "Sample param values, e.g. {\"order_number\": \"LV-10293\"}."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Executor result with debug info (requestUrl, response data or failure reason)"
+          },
+          "403": {
+            "description": "Key lacks the tools scope"
+          },
+          "404": {
+            "description": "No tool with that name"
+          }
+        }
+      }
+    },
+    "/api/v1/tools/{name}": {
+      "delete": {
+        "summary": "Remove a team-defined tool (tools scope required)",
+        "description": "Takes effect on new calls immediately. To replace a misconfigured tool: delete, then create again, then test.",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "agentId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Needed only when several agents have a tool with the same name."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Deleted"
+          },
+          "403": {
+            "description": "Key lacks the tools scope"
+          },
+          "404": {
+            "description": "No tool with that name"
+          }
+        }
+      }
+    },
+    "/api/v1/demo-call": {
+      "post": {
+        "summary": "Trial teams: trigger a live demo call to the trial owner's own verified number, right now",
+        "description": "The wow moment: the AI voice agent, briefed from the company's own website, calls the trial owner's phone within seconds. The destination is always the number verified by SMS at signup; no other destination is possible. Capped by the trial's free call limit, one call in flight at a time. Non-trial teams receive 403. No request body.",
+        "responses": {
+          "200": {
+            "description": "Call triggered",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "callId": {
+                      "type": "string"
+                    },
+                    "remaining": {
+                      "type": "integer"
+                    },
+                    "dialedNow": {
+                      "type": "boolean"
+                    },
+                    "toNumber": {
+                      "type": "string"
+                    },
+                    "note": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not a trial team, or the trial is suspended"
+          },
+          "409": {
+            "description": "A demo call is already in flight, or the trial call limit is used up"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerKey": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "Authorization: Bearer cnr_..."
+      },
+      "apiKeyHeader": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "x-api-key"
+      }
+    },
+    "schemas": {
+      "Error": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "string"
+          },
+          "hint": {
+            "type": "string"
+          }
+        }
+      },
+      "Agent": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "phoneNumber": {
+            "type": "string",
+            "description": "E.164 number the agent answers on"
+          },
+          "languageCode": {
+            "type": "string"
+          },
+          "summaryLanguage": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          },
+          "voice": {
+            "type": "string"
+          },
+          "transferNumber": {
+            "type": "string"
+          },
+          "minutesUsedThisCycle": {
+            "type": "number"
+          },
+          "manageUrl": {
+            "type": "string",
+            "description": "Dashboard deep link to this agent's conversations (manager login required). Hand it to the person, do not fetch it yourself."
+          },
+          "settingsUrl": {
+            "type": "string",
+            "description": "Dashboard deep link to this agent's settings, where a human edits the system prompt, voice, tools, Pipedrive token, Telegram, and calendar. Hand it to the person, do not fetch it yourself."
+          }
+        }
+      },
+      "Call": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "number": {
+            "type": "string",
+            "description": "Counterparty phone number, E.164"
+          },
+          "direction": {
+            "type": "string",
+            "enum": [
+              "inbound",
+              "outbound"
+            ]
+          },
+          "status": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "summary": {
+            "type": "string",
+            "description": "AI-written call summary"
+          },
+          "score": {
+            "type": "number",
+            "description": "AI quality score 1-10"
+          },
+          "sentiment": {
+            "type": "string"
+          },
+          "isMissed": {
+            "type": "boolean"
+          },
+          "recoveredAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When a missed call was called back"
+          },
+          "manualName": {
+            "type": "string"
+          },
+          "userId": {
+            "type": "string",
+            "description": "Id of the team member (or AI agent) on the call"
+          }
+        }
+      },
+      "Conversation": {
+        "type": "object",
+        "description": "One conversation handled by an AI voice agent",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "number": {
+            "type": "string",
+            "description": "Caller/callee phone number as delivered by the carrier"
+          },
+          "agentId": {
+            "type": "string"
+          },
+          "direction": {
+            "type": "string",
+            "enum": [
+              "inbound",
+              "outbound"
+            ]
+          },
+          "status": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "summary": {
+            "type": "string",
+            "description": "AI-written conversation summary"
+          },
+          "sentiment": {
+            "type": "string"
+          },
+          "score": {
+            "type": "number",
+            "description": "AI quality score"
+          },
+          "durationSeconds": {
+            "type": "number"
+          },
+          "actionTaken": {
+            "type": "string",
+            "description": "What the agent did, e.g. booked_appointment"
+          },
+          "needsCallback": {
+            "type": "string",
+            "description": "Yes when the customer still needs a human follow-up"
+          },
+          "clientName": {
+            "type": "string"
+          }
+        }
+      },
+      "DailyStat": {
+        "type": "object",
+        "properties": {
+          "date": {
+            "type": "string",
+            "example": "2026-09-01"
+          },
+          "total": {
+            "type": "number"
+          },
+          "inbound": {
+            "type": "number"
+          },
+          "outbound": {
+            "type": "number"
+          },
+          "missed": {
+            "type": "number"
+          },
+          "missedInbound": {
+            "type": "number"
+          },
+          "recovered": {
+            "type": "number"
+          },
+          "scored": {
+            "type": "number",
+            "description": "Calls that received an AI score"
+          },
+          "scoreSum": {
+            "type": "number",
+            "description": "Sum of scores; average = scoreSum / scored"
+          },
+          "durationSum": {
+            "type": "number",
+            "description": "Total call seconds that day"
+          }
+        }
+      }
+    }
+  },
+  "security": [
+    {
+      "bearerKey": []
+    },
+    {
+      "apiKeyHeader": []
+    }
+  ]
+}
