@@ -1,0 +1,3350 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "StackScan API Reference",
+    "version": "1.0.0",
+    "description": "The StackScan API gives you programmatic access to the same technology and company\nintelligence that powers the StackScan dashboard: look up the tech stack behind any\ndomain, search for websites running a given technology, and pull firmographic data\nfor a company - all from your own scripts and integrations.\n\n## Getting started\n\n1. Sign in to your StackScan dashboard and open **My Accounts → API Tokens** to generate\n   a Sanctum bearer token.\n2. Find your workspace UUID on the same page - it's sent as the `X-Tenant-Id` header on\n   every request.\n3. Send both on each request as described in the **Security** section (Bearer Auth +\n   `X-Tenant-Id`, shown above), then try an endpoint with the **Try it** panel on the\n   right of each operation.\n\nBuilding an integration rather than a one-off script? Call **`GET /v1/me`** first. It is\nthe only endpoint that needs no `X-Tenant-Id`, and it returns every workspace your token\ncan reach - so a connection screen can offer them as a list instead of asking someone to\npaste a UUID. It is free and deducts no credits.\n\nEvery successful lookup deducts from your Bulk Lookup Credit balance. You do not\nhave to poll for it: **every response carries your balance in headers**, so a\nclient can pace itself without spending a request.\n\n| Header | Meaning |\n| --- | --- |\n| `X-Credits-Used` | credits this request consumed (0 for a miss) |\n| `X-Credits-Remaining` | wallet balance after this request |\n| `X-Credits-Cost` | cost of one successful lookup |\n\n`GET /v1/tech-lookup/credits` is still there, and is free.\n\n## Errors\n\nEvery failing response carries an `error_code` alongside the human-readable `message`.\nBranch on the code, not on the sentence - the wording may be improved, the codes will\nnot change.\n\n| `error_code` | Status | What to do |\n| --- | --- | --- |\n| `unauthenticated` | 401 | The token is missing, wrong, or revoked. Ask for it again. |\n| `workspace_required` | 422 | Add the `X-Tenant-Id` header. `GET /v1/me` lists the options. |\n| `workspace_not_found` | 404 | That UUID is not a workspace. |\n| `workspace_forbidden` | 403 | Real workspace, but this token cannot reach it. |\n| `insufficient_credits` | 402 | The wallet is empty. Do **not** retry - top up first. |\n| `rate_limited` | 429 | Back off. `retry_after` and the `Retry-After` header say how long. |\n| `invalid_request` | 4xx | The request itself is wrong. Retrying it unchanged will not help. |\n| `server_error` | 5xx | Our side. Safe to retry with backoff. |\n\nNote that `error` is a different field with a different job: it appears on **successful**\nlookups that simply found nothing (`{\"success\": false, \"error\": \"No data available\"}`),\nincluding per-domain inside batch results. A 200 with `error` is not a failure.\n\n## Other formats\n\nThe batch endpoints also return **CSV** for spreadsheet workflows: add\n`?format=csv` or send `Accept: text/csv`. `POST /v1/tech-lookup/domains/batch`\nflattens to one row per technology so the file pivots cleanly.\n\nBuilding against this from an AI agent? There is a plain-text summary at\n[`/llms.txt`](/llms.txt) and a full field-level reference at\n[`/llms-full.txt`](/llms-full.txt).",
+    "x-jentic-source-url": "https://api.stackscan.com/docs/openapi.json"
+  },
+  "servers": [
+    {
+      "url": "https://api.stackscan.com",
+      "description": "Production"
+    }
+  ],
+  "paths": {
+    "/v1/me": {
+      "get": {
+        "operationId": "v1.me",
+        "description": "Returns the account this API token belongs to and every workspace it can\nact on. This is the only endpoint that does not require an `X-Tenant-Id`\nheader. It is where you get the values to put in one.\n\nEach `workspaces[].id` is the UUID to send as `X-Tenant-Id` on the\nlookup endpoints. A token can reach more than one workspace, and each\nworkspace has its own credits, so which one you send changes both the\ndata you can see and the wallet you spend from.\n\nFree, and safe to call on a schedule: it makes no lookup and deducts no\ncredits.\n\n`credits` reports BOTH wallets, because they are not interchangeable and\nwhich one you need depends on the endpoint:\n\n- `bulk_lookup` pays for the lookup endpoints, charged per resolved\n  domain.\n- `standard` pays for technology lists (`POST /v1/tech-lookup/lists`),\n  charged 1 flat per technology per billing period however large the\n  list turns out to be.\n\nThese are the token holder's OWN balances. On a shared enterprise plan\nthe wallet that actually pays belongs to the subscription owner, so for\nthe figure a request will really draw down, read `X-Credits-Remaining`\ntogether with `X-Credits-Type` off any workspace-scoped response, or\ncall `GET /v1/tech-lookup/credits` with an `X-Tenant-Id`.\n\nAn empty `workspaces` array means the token is valid but the account is\nnot a member of any workspace, so no lookup will succeed yet.\n\nRate limit: 60 requests per minute, counted per API token. Going over returns 429 with `error_code: rate_limited` and a `Retry-After` header in seconds. A 429 costs no credits. Traffic is also subject to a higher shared ceiling per network address, applied before authentication.",
+        "summary": "Identify the token and list its workspaces",
+        "tags": [
+          "Account"
+        ],
+        "responses": {
+          "200": {
+            "description": "The token holder and the workspaces it can reach.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "examples": [
+                    {
+                      "success": true,
+                      "user": {
+                        "id": 42,
+                        "name": "Dana Reyes",
+                        "email": "dana@acme.com"
+                      },
+                      "workspaces": [
+                        {
+                          "id": "9f1c2d84-7b3e-4a10-9c55-1e7a6b0f2d31",
+                          "name": "Acme Inc"
+                        },
+                        {
+                          "id": "2b7e5a09-4c61-4f88-b0d2-33ac91e4f7aa",
+                          "name": "Acme Labs"
+                        }
+                      ]
+                    },
+                    {
+                      "success": true,
+                      "user": {
+                        "id": 42,
+                        "name": "Dana Reyes",
+                        "email": "dana@acme.com"
+                      },
+                      "workspaces": [
+                        {
+                          "id": "9f1c2d84-7b3e-4a10-9c55-1e7a6b0f2d31",
+                          "name": "Acme Inc"
+                        },
+                        {
+                          "id": "2b7e5a09-4c61-4f88-b0d2-33ac91e4f7aa",
+                          "name": "Acme Labs"
+                        }
+                      ]
+                    }
+                  ],
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "user": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "integer"
+                        },
+                        "name": {
+                          "type": "string"
+                        },
+                        "email": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "name",
+                        "email"
+                      ]
+                    },
+                    "workspaces": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "name"
+                        ]
+                      }
+                    },
+                    "credits": {
+                      "type": "object",
+                      "properties": {
+                        "bulk_lookup": {
+                          "type": "number"
+                        },
+                        "standard": {
+                          "type": "number"
+                        }
+                      },
+                      "required": [
+                        "bulk_lookup",
+                        "standard"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "user",
+                    "workspaces",
+                    "credits"
+                  ]
+                }
+              }
+            },
+            "headers": {
+              "X-RateLimit-Limit": {
+                "description": "Requests allowed per minute for this token on this endpoint.",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "X-RateLimit-Remaining": {
+                "description": "Requests left in the current minute.",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthenticationException"
+          },
+          "429": {
+            "description": "Rate limit exceeded. Costs no credits. Back off for the number of seconds in Retry-After.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "description": "Always false."
+                    },
+                    "error_code": {
+                      "type": "string",
+                      "enum": [
+                        "rate_limited"
+                      ]
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds to wait before retrying.",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      },
+      "servers": [
+        {
+          "url": "https://api.stackscan.com/api"
+        }
+      ]
+    },
+    "/v1/tech-lookup/credits": {
+      "get": {
+        "operationId": "v1.tech-lookup.credits",
+        "description": "Returns your current Bulk Lookup Credit balance, the cost per successful\nrequest, and how many credits you've used this month. Call this before a\nbatch of lookups if you want to avoid a 402 response. Checking your\nbalance does not consume a credit.\n\nRate limit: 500 requests per minute, counted per API token. Going over returns 429 with `error_code: rate_limited` and a `Retry-After` header in seconds. A 429 costs no credits. Traffic is also subject to a higher shared ceiling per network address, applied before authentication.",
+        "summary": "Get Bulk Lookup Credit balance",
+        "tags": [
+          "TechLookup"
+        ],
+        "responses": {
+          "200": {
+            "description": "Bulk Lookup Credits balance for the authenticated user.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "examples": [
+                    {
+                      "success": true,
+                      "credit_type": "bulk_lookup",
+                      "balance": 150,
+                      "cost_per_successful_request": 1,
+                      "monthly": {
+                        "available": 200,
+                        "used": 50,
+                        "remaining": 150
+                      }
+                    },
+                    {
+                      "success": true,
+                      "credit_type": "bulk_lookup",
+                      "balance": 150,
+                      "cost_per_successful_request": 1,
+                      "monthly": {
+                        "available": 200,
+                        "used": 50,
+                        "remaining": 150
+                      }
+                    }
+                  ],
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "credit_type": {
+                      "type": "string"
+                    },
+                    "balance": {
+                      "type": "number"
+                    },
+                    "cost_per_successful_request": {
+                      "type": "number"
+                    },
+                    "monthly": {
+                      "type": "object",
+                      "properties": {
+                        "available": {
+                          "type": "number"
+                        },
+                        "used": {
+                          "type": "number"
+                        },
+                        "remaining": {
+                          "type": "number"
+                        }
+                      },
+                      "required": [
+                        "available",
+                        "used",
+                        "remaining"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "credit_type",
+                    "balance",
+                    "cost_per_successful_request",
+                    "monthly"
+                  ]
+                }
+              }
+            },
+            "headers": {
+              "X-RateLimit-Limit": {
+                "description": "Requests allowed per minute for this token on this endpoint.",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "X-RateLimit-Remaining": {
+                "description": "Requests left in the current minute.",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "X-Credits-Used": {
+                "description": "Credits this request consumed. 0 when nothing was charged.",
+                "schema": {
+                  "type": "number"
+                }
+              },
+              "X-Credits-Remaining": {
+                "description": "Balance in the bulk_lookup wallet after this request.",
+                "schema": {
+                  "type": "number"
+                }
+              },
+              "X-Credits-Cost": {
+                "description": "What one successful request costs on this endpoint.",
+                "schema": {
+                  "type": "number"
+                }
+              },
+              "X-Credits-Type": {
+                "description": "Which wallet pays. This endpoint always bills bulk_lookup.",
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "bulk_lookup"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthenticationException"
+          },
+          "429": {
+            "description": "Rate limit exceeded. Costs no credits. Back off for the number of seconds in Retry-After.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "description": "Always false."
+                    },
+                    "error_code": {
+                      "type": "string",
+                      "enum": [
+                        "rate_limited"
+                      ]
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds to wait before retrying.",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            }
+          }
+        }
+      },
+      "servers": [
+        {
+          "url": "https://api.stackscan.com/api"
+        }
+      ]
+    },
+    "/v1/tech-lookup/domains/lookup": {
+      "get": {
+        "operationId": "v1.tech-lookup.domains.lookup",
+        "description": "Given a domain, returns the technologies detected on that site (name,\ncategory, and how many other sites run it), paginated. Deducts 1 Bulk\nLookup Credit only when the lookup finds data.\n\nNote `category` here is a RESPONSE FIELD toggle. Pass `category=false`\nto leave the field out. To filter to one category across many domains,\nuse `POST domains/batch`, whose `category` is a filter.\n\nReturns up to 50 technologies per page by default, which is the full\nstack for over 99.9% of domains. Raise it with `per_page` (max 500,\nmore than the busiest domain we track) or page through with `page`.\nAlways check `pagination.has_more` before assuming you have them all.\n\nRate limit: 500 requests per minute, counted per API token. Going over returns 429 with `error_code: rate_limited` and a `Retry-After` header in seconds. A 429 costs no credits. Traffic is also subject to a higher shared ceiling per network address, applied before authentication.",
+        "summary": "Look up the tech stack behind a domain",
+        "tags": [
+          "TechLookup"
+        ],
+        "parameters": [
+          {
+            "name": "domain",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z]{2,}$",
+              "minLength": 3,
+              "maxLength": 253
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          {
+            "name": "per_page",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 500
+            }
+          },
+          {
+            "name": "technologies_limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 500
+            }
+          },
+          {
+            "name": "technology",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "technologies_list",
+            "in": "query",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "category",
+            "in": "query",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "sub_category",
+            "in": "query",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "total_sites",
+            "in": "query",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "fresh",
+            "in": "query",
+            "schema": {
+              "type": "boolean",
+              "default": false
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Domain technologies (success). No data: `{success: false, error: \"No data available\"}`. Deducts 1 Bulk Lookup Credit when success is true.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "examples": [
+                    {
+                      "success": true,
+                      "domain": "google.com",
+                      "last_updated": "2026-05-22T14:30:00Z",
+                      "premium_technologies": 9,
+                      "monthly_tech_spend_usd": 4182.75,
+                      "technologies": [
+                        {
+                          "techapi_id": "wordpress-118620",
+                          "name": "WordPress",
+                          "website": "https://www.wordpress.com",
+                          "slug": "wordpress",
+                          "parent_category": "CMS",
+                          "child_category": "PHP",
+                          "total_sites": 3261474
+                        },
+                        {
+                          "techapi_id": "laravel-204118",
+                          "name": "Laravel",
+                          "website": "https://www.laravel.com",
+                          "slug": "laravel",
+                          "parent_category": "Framework",
+                          "child_category": "PHP",
+                          "total_sites": 125430
+                        }
+                      ],
+                      "pagination": {
+                        "current_page": 1,
+                        "per_page": 10,
+                        "total": 5,
+                        "last_page": 1,
+                        "has_more": false
+                      }
+                    },
+                    {
+                      "success": true,
+                      "domain": "google.com",
+                      "last_updated": "2026-05-22T14:30:00Z",
+                      "premium_technologies": 9,
+                      "monthly_tech_spend_usd": 4182.75,
+                      "technologies": [
+                        {
+                          "techapi_id": "wordpress-118620",
+                          "name": "WordPress",
+                          "website": "https://www.wordpress.com",
+                          "slug": "wordpress",
+                          "parent_category": "CMS",
+                          "child_category": "PHP",
+                          "total_sites": 3261474
+                        },
+                        {
+                          "techapi_id": "laravel-204118",
+                          "name": "Laravel",
+                          "website": "https://www.laravel.com",
+                          "slug": "laravel",
+                          "parent_category": "Framework",
+                          "child_category": "PHP",
+                          "total_sites": 125430
+                        }
+                      ],
+                      "pagination": {
+                        "current_page": 1,
+                        "per_page": 10,
+                        "total": 5,
+                        "last_page": 1,
+                        "has_more": false
+                      }
+                    }
+                  ],
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "domain": {
+                      "type": "string"
+                    },
+                    "last_updated": {
+                      "type": "string"
+                    },
+                    "premium_technologies": {
+                      "type": "integer"
+                    },
+                    "monthly_tech_spend_usd": {
+                      "type": "number"
+                    },
+                    "technologies": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "techapi_id": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "website": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "slug": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "parent_category": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "child_category": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "total_sites": {
+                            "type": "integer"
+                          }
+                        },
+                        "required": [
+                          "techapi_id",
+                          "name",
+                          "website",
+                          "slug",
+                          "parent_category",
+                          "child_category",
+                          "total_sites"
+                        ]
+                      }
+                    },
+                    "pagination": {
+                      "type": "object",
+                      "properties": {
+                        "current_page": {
+                          "type": "integer"
+                        },
+                        "per_page": {
+                          "type": "integer"
+                        },
+                        "total": {
+                          "type": "integer"
+                        },
+                        "last_page": {
+                          "type": "integer"
+                        },
+                        "has_more": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "current_page",
+                        "per_page",
+                        "total",
+                        "last_page",
+                        "has_more"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "domain",
+                    "last_updated",
+                    "premium_technologies",
+                    "monthly_tech_spend_usd",
+                    "technologies",
+                    "pagination"
+                  ]
+                }
+              }
+            },
+            "headers": {
+              "X-RateLimit-Limit": {
+                "description": "Requests allowed per minute for this token on this endpoint.",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "X-RateLimit-Remaining": {
+                "description": "Requests left in the current minute.",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "X-Credits-Used": {
+                "description": "Credits this request consumed. 0 when nothing was charged.",
+                "schema": {
+                  "type": "number"
+                }
+              },
+              "X-Credits-Remaining": {
+                "description": "Balance in the bulk_lookup wallet after this request.",
+                "schema": {
+                  "type": "number"
+                }
+              },
+              "X-Credits-Cost": {
+                "description": "What one successful request costs on this endpoint.",
+                "schema": {
+                  "type": "number"
+                }
+              },
+              "X-Credits-Type": {
+                "description": "Which wallet pays. This endpoint always bills bulk_lookup.",
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "bulk_lookup"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthenticationException"
+          },
+          "402": {
+            "description": "Insufficient Bulk Lookup Credits.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "examples": [
+                    {
+                      "message": "Insufficient Bulk Lookup Credits. You need 1 credit for this API request."
+                    },
+                    {
+                      "message": "Insufficient Bulk Lookup Credits. You need 1 credit for this API request."
+                    }
+                  ],
+                  "properties": {
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "message"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/AuthorizationException"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationException"
+          },
+          "429": {
+            "description": "Rate limit exceeded. Costs no credits. Back off for the number of seconds in Retry-After.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "description": "Always false."
+                    },
+                    "error_code": {
+                      "type": "string",
+                      "enum": [
+                        "rate_limited"
+                      ]
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds to wait before retrying.",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            }
+          }
+        }
+      },
+      "servers": [
+        {
+          "url": "https://api.stackscan.com/api"
+        }
+      ]
+    },
+    "/v1/tech-lookup/technologies/lookup": {
+      "get": {
+        "operationId": "v1.tech-lookup.technologies.lookup",
+        "description": "Given a technology name, returns how many sites run it worldwide, its\ncategory, and its top countries by site count. Optionally include the\nmatching website list with `websites=true`. Deducts 1 Bulk Lookup\nCredit only when the lookup finds data.\n\nRate limit: 500 requests per minute, counted per API token. Going over returns 429 with `error_code: rate_limited` and a `Retry-After` header in seconds. A 429 costs no credits. Traffic is also subject to a higher shared ceiling per network address, applied before authentication.",
+        "summary": "Find websites using a technology",
+        "tags": [
+          "TechLookup"
+        ],
+        "parameters": [
+          {
+            "name": "technology",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 255
+            }
+          },
+          {
+            "name": "name",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 255
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          {
+            "name": "per_page",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            }
+          },
+          {
+            "name": "websites_limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            }
+          },
+          {
+            "name": "show_technology",
+            "in": "query",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "category",
+            "in": "query",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "sub_category",
+            "in": "query",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "total_sites",
+            "in": "query",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "websites",
+            "in": "query",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "fresh",
+            "in": "query",
+            "schema": {
+              "type": "boolean",
+              "default": false
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Technology / stack statistics (success). No data: `{success: false, error: \"No data available\"}`. Deducts 1 Bulk Lookup Credit when success is true.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "examples": [
+                    {
+                      "success": true,
+                      "techapi_id": "shopify-971069",
+                      "stack": "Shopify",
+                      "total_websites": 4322963,
+                      "top_countries": [
+                        {
+                          "country": "Canada",
+                          "country_code": "ca",
+                          "websites": 2910721
+                        },
+                        {
+                          "country": "United States",
+                          "country_code": "us",
+                          "websites": 371385
+                        },
+                        {
+                          "country": "Germany",
+                          "country_code": "de",
+                          "websites": 134449
+                        }
+                      ],
+                      "parent_category": "E-commerce & Sales",
+                      "child_category": "eCommerce Software"
+                    },
+                    {
+                      "success": true,
+                      "techapi_id": "shopify-971069",
+                      "stack": "Shopify",
+                      "total_websites": 4322963,
+                      "top_countries": [
+                        {
+                          "country": "Canada",
+                          "country_code": "ca",
+                          "websites": 2910721
+                        },
+                        {
+                          "country": "United States",
+                          "country_code": "us",
+                          "websites": 371385
+                        },
+                        {
+                          "country": "Germany",
+                          "country_code": "de",
+                          "websites": 134449
+                        }
+                      ],
+                      "parent_category": "E-commerce & Sales",
+                      "child_category": "eCommerce Software"
+                    }
+                  ],
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "techapi_id": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "stack": {
+                      "type": "string"
+                    },
+                    "parent_category": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "child_category": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "total_websites": {
+                      "type": "integer"
+                    },
+                    "top_countries": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "country": {
+                            "type": "string"
+                          },
+                          "country_code": {
+                            "type": "string"
+                          },
+                          "websites": {
+                            "type": "integer"
+                          }
+                        },
+                        "required": [
+                          "country",
+                          "country_code",
+                          "websites"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "techapi_id",
+                    "stack",
+                    "parent_category",
+                    "child_category",
+                    "total_websites",
+                    "top_countries"
+                  ]
+                }
+              }
+            },
+            "headers": {
+              "X-RateLimit-Limit": {
+                "description": "Requests allowed per minute for this token on this endpoint.",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "X-RateLimit-Remaining": {
+                "description": "Requests left in the current minute.",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "X-Credits-Used": {
+                "description": "Credits this request consumed. 0 when nothing was charged.",
+                "schema": {
+                  "type": "number"
+                }
+              },
+              "X-Credits-Remaining": {
+                "description": "Balance in the bulk_lookup wallet after this request.",
+                "schema": {
+                  "type": "number"
+                }
+              },
+              "X-Credits-Cost": {
+                "description": "What one successful request costs on this endpoint.",
+                "schema": {
+                  "type": "number"
+                }
+              },
+              "X-Credits-Type": {
+                "description": "Which wallet pays. This endpoint always bills bulk_lookup.",
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "bulk_lookup"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthenticationException"
+          },
+          "402": {
+            "description": "Insufficient Bulk Lookup Credits.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "examples": [
+                    {
+                      "message": "Insufficient Bulk Lookup Credits. You need 1 credit for this API request."
+                    },
+                    {
+                      "message": "Insufficient Bulk Lookup Credits. You need 1 credit for this API request."
+                    }
+                  ],
+                  "properties": {
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "message"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/AuthorizationException"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationException"
+          },
+          "429": {
+            "description": "Rate limit exceeded. Costs no credits. Back off for the number of seconds in Retry-After.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "description": "Always false."
+                    },
+                    "error_code": {
+                      "type": "string",
+                      "enum": [
+                        "rate_limited"
+                      ]
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds to wait before retrying.",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            }
+          }
+        }
+      },
+      "servers": [
+        {
+          "url": "https://api.stackscan.com/api"
+        }
+      ]
+    },
+    "/v1/tech-lookup/companies/lookup": {
+      "get": {
+        "operationId": "v1.tech-lookup.companies.lookup",
+        "description": "Given a domain, returns the company behind it: name, industry, city,\ncountry, address, LinkedIn URL, and how many technologies StackScan\ntracks for that site. Deducts 1 Bulk Lookup Credit only when the\nlookup finds data.\n\nRate limit: 500 requests per minute, counted per API token. Going over returns 429 with `error_code: rate_limited` and a `Retry-After` header in seconds. A 429 costs no credits. Traffic is also subject to a higher shared ceiling per network address, applied before authentication.",
+        "summary": "Look up company profile by domain",
+        "tags": [
+          "TechLookup"
+        ],
+        "parameters": [
+          {
+            "name": "domain",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z]{2,}$",
+              "minLength": 3,
+              "maxLength": 253
+            }
+          },
+          {
+            "name": "fresh",
+            "in": "query",
+            "schema": {
+              "type": "boolean",
+              "default": false
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Company profile for a domain (success). Returns Company Name, Industry, City, Country, Address, LinkedIn URL and total technologies tracked. No data: `{success: false, error: \"No data available\"}`. Deducts 1 Bulk Lookup Credit when success is true.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "examples": [
+                    {
+                      "success": true,
+                      "domain": "google.com",
+                      "last_updated": "2026-05-22T14:30:00Z",
+                      "company": {
+                        "name": "Google LLC",
+                        "industry": "Internet",
+                        "city": "Mountain View",
+                        "country": "United States",
+                        "address": "Mountain View, CA",
+                        "linkedin_url": "https://www.linkedin.com/company/google",
+                        "estimated_revenue_band": "1b_plus"
+                      },
+                      "total_technologies_tracked": 142
+                    },
+                    {
+                      "success": true,
+                      "domain": "google.com",
+                      "last_updated": "2026-05-22T14:30:00Z",
+                      "company": {
+                        "name": "Google LLC",
+                        "industry": "Internet",
+                        "city": "Mountain View",
+                        "country": "United States",
+                        "address": "Mountain View, CA",
+                        "linkedin_url": "https://www.linkedin.com/company/google",
+                        "estimated_revenue_band": "1b_plus"
+                      },
+                      "total_technologies_tracked": 142
+                    }
+                  ],
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "domain": {
+                      "type": "string"
+                    },
+                    "last_updated": {
+                      "type": "string"
+                    },
+                    "company": {
+                      "type": "object",
+                      "properties": {
+                        "name": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "industry": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "city": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "country": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "address": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "estimated_revenue_band": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "linkedin_url": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "name",
+                        "industry",
+                        "city",
+                        "country",
+                        "address",
+                        "estimated_revenue_band",
+                        "linkedin_url"
+                      ]
+                    },
+                    "total_technologies_tracked": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "domain",
+                    "last_updated",
+                    "company",
+                    "total_technologies_tracked"
+                  ]
+                }
+              }
+            },
+            "headers": {
+              "X-RateLimit-Limit": {
+                "description": "Requests allowed per minute for this token on this endpoint.",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "X-RateLimit-Remaining": {
+                "description": "Requests left in the current minute.",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "X-Credits-Used": {
+                "description": "Credits this request consumed. 0 when nothing was charged.",
+                "schema": {
+                  "type": "number"
+                }
+              },
+              "X-Credits-Remaining": {
+                "description": "Balance in the bulk_lookup wallet after this request.",
+                "schema": {
+                  "type": "number"
+                }
+              },
+              "X-Credits-Cost": {
+                "description": "What one successful request costs on this endpoint.",
+                "schema": {
+                  "type": "number"
+                }
+              },
+              "X-Credits-Type": {
+                "description": "Which wallet pays. This endpoint always bills bulk_lookup.",
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "bulk_lookup"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthenticationException"
+          },
+          "402": {
+            "description": "Insufficient Bulk Lookup Credits.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "examples": [
+                    {
+                      "message": "Insufficient Bulk Lookup Credits. You need 1 credit for this API request."
+                    },
+                    {
+                      "message": "Insufficient Bulk Lookup Credits. You need 1 credit for this API request."
+                    }
+                  ],
+                  "properties": {
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "message"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/AuthorizationException"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationException"
+          },
+          "429": {
+            "description": "Rate limit exceeded. Costs no credits. Back off for the number of seconds in Retry-After.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "description": "Always false."
+                    },
+                    "error_code": {
+                      "type": "string",
+                      "enum": [
+                        "rate_limited"
+                      ]
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds to wait before retrying.",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            }
+          }
+        }
+      },
+      "servers": [
+        {
+          "url": "https://api.stackscan.com/api"
+        }
+      ]
+    },
+    "/v1/tech-lookup/companies/batch": {
+      "post": {
+        "operationId": "v1.tech-lookup.companies.batch",
+        "description": "Takes up to 100 domains and returns the company behind each one, in a\nsingle request. Built for enriching a CRM: one call replaces one call\nper record.\n\nCosts 1 Bulk Lookup Credit per domain that RESOLVES. Domains with no\ndata cost nothing, and malformed domains are reported in `invalid`\nrather than failing the batch, because real CRM exports always contain\nsome junk. If the balance runs out partway through, the domains that\ncould not be paid for are listed in `skipped_insufficient_credits` and\nreturned without data. You are never charged for data you did not get,\nand never given data you did not pay for.\n\nDuplicate and equivalent domains (`stripe.com`, `www.stripe.com`,\n`https://stripe.com/pricing`) collapse to one entry and are charged once.\n\nRate limit: 30 requests per minute, counted per API token. Going over returns 429 with `error_code: rate_limited` and a `Retry-After` header in seconds. A 429 costs no credits. Traffic is also subject to a higher shared ceiling per network address, applied before authentication.",
+        "summary": "Look up company profiles for many domains",
+        "tags": [
+          "TechLookup"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/CompanyBatchLookupRequest"
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "fresh": {
+                        "type": "boolean",
+                        "default": false
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Per-domain company profiles. Always 200 on a well-formed request, including partial success. Deducts 1 Bulk Lookup Credit per RESOLVED domain; domains with no data, malformed domains, and domains skipped for lack of credits are free.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "examples": [
+                    {
+                      "success": true,
+                      "requested": 4,
+                      "resolved": 2,
+                      "served": 2,
+                      "credits_charged": 2,
+                      "results": [
+                        {
+                          "success": true,
+                          "domain": "google.com",
+                          "last_updated": "2026-05-22T14:30:00Z",
+                          "company": {
+                            "name": "Google LLC",
+                            "industry": "Internet",
+                            "city": "Mountain View",
+                            "country": "United States",
+                            "address": "Mountain View, CA",
+                            "linkedin_url": "https://www.linkedin.com/company/google",
+                            "estimated_revenue_band": "1b_plus"
+                          },
+                          "total_technologies_tracked": 142
+                        },
+                        {
+                          "success": true,
+                          "domain": "shopify.com",
+                          "last_updated": "2026-05-22T14:30:00Z",
+                          "company": {
+                            "name": "Shopify",
+                            "industry": "Software Development",
+                            "city": "Ottawa",
+                            "country": "Canada",
+                            "address": "Ottawa, Ontario",
+                            "linkedin_url": "https://www.linkedin.com/company/shopify",
+                            "estimated_revenue_band": "1b_plus"
+                          },
+                          "total_technologies_tracked": 88
+                        },
+                        {
+                          "success": false,
+                          "domain": "example-with-no-data.com",
+                          "error": "No data available"
+                        },
+                        {
+                          "success": false,
+                          "domain": "not a domain",
+                          "error": "Invalid domain"
+                        }
+                      ],
+                      "not_found": [
+                        "example-with-no-data.com"
+                      ],
+                      "invalid": [
+                        "not a domain"
+                      ],
+                      "skipped_insufficient_credits": []
+                    },
+                    {
+                      "success": true,
+                      "requested": 4,
+                      "resolved": 2,
+                      "served": 2,
+                      "credits_charged": 2,
+                      "results": [
+                        {
+                          "success": true,
+                          "domain": "google.com",
+                          "last_updated": "2026-05-22T14:30:00Z",
+                          "company": {
+                            "name": "Google LLC",
+                            "industry": "Internet",
+                            "city": "Mountain View",
+                            "country": "United States",
+                            "address": "Mountain View, CA",
+                            "linkedin_url": "https://www.linkedin.com/company/google",
+                            "estimated_revenue_band": "1b_plus"
+                          },
+                          "total_technologies_tracked": 142
+                        },
+                        {
+                          "success": true,
+                          "domain": "shopify.com",
+                          "last_updated": "2026-05-22T14:30:00Z",
+                          "company": {
+                            "name": "Shopify",
+                            "industry": "Software Development",
+                            "city": "Ottawa",
+                            "country": "Canada",
+                            "address": "Ottawa, Ontario",
+                            "linkedin_url": "https://www.linkedin.com/company/shopify",
+                            "estimated_revenue_band": "1b_plus"
+                          },
+                          "total_technologies_tracked": 88
+                        },
+                        {
+                          "success": false,
+                          "domain": "example-with-no-data.com",
+                          "error": "No data available"
+                        },
+                        {
+                          "success": false,
+                          "domain": "not a domain",
+                          "error": "Invalid domain"
+                        }
+                      ],
+                      "not_found": [
+                        "example-with-no-data.com"
+                      ],
+                      "invalid": [
+                        "not a domain"
+                      ],
+                      "skipped_insufficient_credits": []
+                    }
+                  ],
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "requested": {
+                      "type": "integer"
+                    },
+                    "resolved": {
+                      "type": "integer"
+                    },
+                    "served": {
+                      "type": "integer"
+                    },
+                    "credits_charged": {
+                      "type": "number"
+                    },
+                    "results": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "success": {
+                            "type": "boolean"
+                          },
+                          "domain": {
+                            "type": "string"
+                          },
+                          "last_updated": {
+                            "type": "string"
+                          },
+                          "company": {
+                            "type": "object",
+                            "properties": {
+                              "name": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              },
+                              "industry": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              },
+                              "city": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              },
+                              "country": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              },
+                              "address": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              },
+                              "estimated_revenue_band": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              },
+                              "linkedin_url": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "name",
+                              "industry",
+                              "city",
+                              "country",
+                              "address",
+                              "estimated_revenue_band",
+                              "linkedin_url"
+                            ]
+                          },
+                          "total_technologies_tracked": {
+                            "type": "integer"
+                          },
+                          "error": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "success",
+                          "domain"
+                        ]
+                      }
+                    },
+                    "not_found": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "invalid": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "skipped_insufficient_credits": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "requested",
+                    "resolved",
+                    "served",
+                    "credits_charged",
+                    "results",
+                    "not_found",
+                    "invalid",
+                    "skipped_insufficient_credits"
+                  ]
+                }
+              }
+            },
+            "headers": {
+              "X-RateLimit-Limit": {
+                "description": "Requests allowed per minute for this token on this endpoint.",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "X-RateLimit-Remaining": {
+                "description": "Requests left in the current minute.",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "X-Credits-Used": {
+                "description": "Credits this request consumed. 0 when nothing was charged.",
+                "schema": {
+                  "type": "number"
+                }
+              },
+              "X-Credits-Remaining": {
+                "description": "Balance in the bulk_lookup wallet after this request.",
+                "schema": {
+                  "type": "number"
+                }
+              },
+              "X-Credits-Cost": {
+                "description": "What one successful request costs on this endpoint.",
+                "schema": {
+                  "type": "number"
+                }
+              },
+              "X-Credits-Type": {
+                "description": "Which wallet pays. This endpoint always bills bulk_lookup.",
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "bulk_lookup"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthenticationException"
+          },
+          "402": {
+            "description": "Insufficient Bulk Lookup Credits - returned only when the balance is empty before the batch starts. A balance that runs out partway through returns 200 with the remainder listed in `skipped_insufficient_credits`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "examples": [
+                    {
+                      "message": "Insufficient Bulk Lookup Credits. You need 1 credit for this API request."
+                    },
+                    {
+                      "message": "Insufficient Bulk Lookup Credits. You need 1 credit for this API request."
+                    }
+                  ],
+                  "properties": {
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "message"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/AuthorizationException"
+          },
+          "422": {
+            "description": "Malformed payload (missing `domains`, not an array, empty, or over the per-batch limit).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded. Costs no credits. Back off for the number of seconds in Retry-After.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "description": "Always false."
+                    },
+                    "error_code": {
+                      "type": "string",
+                      "enum": [
+                        "rate_limited"
+                      ]
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds to wait before retrying.",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            }
+          }
+        }
+      },
+      "servers": [
+        {
+          "url": "https://api.stackscan.com/api"
+        }
+      ]
+    },
+    "/v1/tech-lookup/domains/batch": {
+      "post": {
+        "operationId": "v1.tech-lookup.domains.batch",
+        "description": "Post up to 100 domains and get each one's technologies back in a single\nrequest. This is the batch form of `GET domains/lookup` and costs the\nsame: **1 credit per domain that resolves**, regardless of how many\ntechnologies come back for it. Domains with no data, and malformed\nentries, are never charged.\n\nReturns up to 10 technologies per domain by default; raise it with\n`per_domain` (max 50). That ceiling is lower than the single-domain\nendpoint's on purpose, because 100 domains x 50 technologies is a very\nlarge response. Use `GET domains/lookup` when you want one domain's\ncomplete stack. Each result carries `total_technologies` and `has_more`\nso truncation is never silent.\n\nEvery resolved result also carries `premium_technologies`, the count of\npaid products in the stack, and `monthly_tech_spend_usd`, the modelled\nmonthly cost of it. A `premium_technologies` of 0 is an answer rather\nthan a gap: 83.3% of domains run nothing paid that we price.\n\nPass `category` to return only technologies in one TOP-LEVEL group, e.g.\n`\"category\": \"E-commerce & Sales\"` or `\"Hosting & Infrastructure\"`. It is\n     * matched case-insensitively against `parent_category` ONLY. A\n     * `child_category` such as `\"Payment Processing\"` matches nothing, returns\nan empty result and charges no credits, which is indistinguishable from a\ndomain having no data. Note this FILTERS, whereas the `category` query\nparameter on `GET domains/lookup` toggles whether the category field\nappears in the response.\n\nEach technology is shaped exactly as `GET domains/lookup` shapes it,\n`techapi_id`, `name`, `website`, `parent_category`, `child_category`,\n`total_sites`, so code written against one endpoint reads the other\nunchanged. Until 2026-08-06 this endpoint returned the same data under\n`technology`, `category` and `sub_category`; those names are gone.\n\n`techapi_id` replaced the internal `stack_id` on 2026-08-10. The `fields`\ntoggle names are unchanged, so `fields=stack_id` still works and now\nyields `techapi_id`.\n\nRate limit: 30 requests per minute, counted per API token. Going over returns 429 with `error_code: rate_limited` and a `Retry-After` header in seconds. A 429 costs no credits. Traffic is also subject to a higher shared ceiling per network address, applied before authentication.",
+        "summary": "Look up the tech stack behind many domains",
+        "tags": [
+          "TechLookup"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/DomainTechBatchLookupRequest"
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "fresh": {
+                        "type": "boolean",
+                        "default": false
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Technologies for many domains at once. Charges 1 Bulk Lookup Credit per domain that resolves; misses and malformed entries are free.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "requested": {
+                      "type": "integer"
+                    },
+                    "resolved": {
+                      "type": "integer"
+                    },
+                    "served": {
+                      "type": "integer"
+                    },
+                    "credits_charged": {
+                      "type": "number"
+                    },
+                    "per_domain": {
+                      "type": "integer"
+                    },
+                    "category": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "results": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "success": {
+                            "type": "boolean"
+                          },
+                          "domain": {
+                            "type": "string"
+                          },
+                          "technologies": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "techapi_id": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                },
+                                "name": {
+                                  "type": "string"
+                                },
+                                "website": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                },
+                                "slug": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                },
+                                "parent_category": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                },
+                                "child_category": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                },
+                                "total_sites": {
+                                  "type": "integer"
+                                }
+                              },
+                              "required": [
+                                "techapi_id",
+                                "name"
+                              ]
+                            }
+                          },
+                          "total_technologies": {
+                            "type": "integer"
+                          },
+                          "premium_technologies": {
+                            "type": "integer"
+                          },
+                          "monthly_tech_spend_usd": {
+                            "type": "number"
+                          },
+                          "has_more": {
+                            "type": "boolean"
+                          },
+                          "error": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "success",
+                          "domain"
+                        ]
+                      }
+                    },
+                    "not_found": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "invalid": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "skipped_insufficient_credits": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "requested",
+                    "resolved",
+                    "served",
+                    "credits_charged",
+                    "per_domain",
+                    "category",
+                    "results",
+                    "not_found",
+                    "invalid",
+                    "skipped_insufficient_credits"
+                  ]
+                }
+              }
+            },
+            "headers": {
+              "X-RateLimit-Limit": {
+                "description": "Requests allowed per minute for this token on this endpoint.",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "X-RateLimit-Remaining": {
+                "description": "Requests left in the current minute.",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "X-Credits-Used": {
+                "description": "Credits this request consumed. 0 when nothing was charged.",
+                "schema": {
+                  "type": "number"
+                }
+              },
+              "X-Credits-Remaining": {
+                "description": "Balance in the bulk_lookup wallet after this request.",
+                "schema": {
+                  "type": "number"
+                }
+              },
+              "X-Credits-Cost": {
+                "description": "What one successful request costs on this endpoint.",
+                "schema": {
+                  "type": "number"
+                }
+              },
+              "X-Credits-Type": {
+                "description": "Which wallet pays. This endpoint always bills bulk_lookup.",
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "bulk_lookup"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthenticationException"
+          },
+          "402": {
+            "description": "Insufficient Bulk Lookup Credits.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "examples": [
+                    {
+                      "message": "Insufficient Bulk Lookup Credits. You need 1 credit for this API request."
+                    },
+                    {
+                      "message": "Insufficient Bulk Lookup Credits. You need 1 credit for this API request."
+                    }
+                  ],
+                  "properties": {
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "message"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/AuthorizationException"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationException"
+          },
+          "429": {
+            "description": "Rate limit exceeded. Costs no credits. Back off for the number of seconds in Retry-After.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "description": "Always false."
+                    },
+                    "error_code": {
+                      "type": "string",
+                      "enum": [
+                        "rate_limited"
+                      ]
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds to wait before retrying.",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            }
+          }
+        }
+      },
+      "servers": [
+        {
+          "url": "https://api.stackscan.com/api"
+        }
+      ]
+    },
+    "/v1/tech-lookup/lists": {
+      "post": {
+        "operationId": "v1.tech-lookup.lists.store",
+        "description": "Queues a full export of every website running one technology and returns\nstraight away with a `report_id`. Generation takes minutes, so nothing\nuseful could be returned synchronously. Poll\n`GET /v1/tech-lookup/lists/{id}` until `status` is `ready`, then follow\n`download_url`.\n\nCosts **1 standard credit**, flat, no matter how large the list. Asking\nfor the same technology again inside the same billing period is free.\nOne credit buys that technology for the period, so a nightly refresh\ncosts one credit a month, not one a night.\n\nThis spends STANDARD credits, not the bulk-lookup credits the other\nendpoints use. `GET /v1/me` reports both balances.\n\nNothing is charged when the request is refused: an unknown technology,\nor a filter combination that matches no websites, both return an error\nwith the wallet untouched.\n\nRate limit: 6 requests per minute, counted per API token. Going over returns 429 with `error_code: rate_limited` and a `Retry-After` header in seconds. A 429 costs no credits. Traffic is also subject to a higher shared ceiling per network address, applied before authentication.",
+        "summary": "Start a technology list",
+        "tags": [
+          "Technology Lists"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/TechLookupListRequest"
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "technology": {
+                        "type": "string",
+                        "description": "Any one identifies the technology. techapi_id is exact and is what\nresponses now return; stack_id keeps working for integrations\nwritten before the change; technology resolves by name the same\nway GET technologies/lookup does.",
+                        "examples": [
+                          "Shopify"
+                        ],
+                        "minLength": 1,
+                        "maxLength": 255
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "202: accepted, not done. The file does not exist yet.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "report_id": {
+                      "type": "integer"
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "ready",
+                        "queued",
+                        "failed"
+                      ]
+                    },
+                    "technology": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "techapi_id": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "credits_charged": {
+                      "type": "number"
+                    },
+                    "credit_type": {
+                      "type": "string",
+                      "const": "standard"
+                    },
+                    "reused_billing_period": {
+                      "type": "boolean",
+                      "description": "Free because already paid for this period, not free because it failed."
+                    },
+                    "estimated_rows": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ],
+                      "description": "Estimate. The final figure is result_count on the status endpoint."
+                    },
+                    "status_url": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "report_id",
+                    "status",
+                    "technology",
+                    "techapi_id",
+                    "credits_charged",
+                    "credit_type",
+                    "reused_billing_period",
+                    "estimated_rows",
+                    "status_url"
+                  ]
+                }
+              }
+            },
+            "headers": {
+              "X-RateLimit-Limit": {
+                "description": "Requests allowed per minute for this token on this endpoint.",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "X-RateLimit-Remaining": {
+                "description": "Requests left in the current minute.",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "X-Credits-Used": {
+                "description": "Credits this request consumed. 0 when nothing was charged.",
+                "schema": {
+                  "type": "number"
+                }
+              },
+              "X-Credits-Remaining": {
+                "description": "Balance in the standard wallet after this request.",
+                "schema": {
+                  "type": "number"
+                }
+              },
+              "X-Credits-Cost": {
+                "description": "What one successful request costs on this endpoint.",
+                "schema": {
+                  "type": "number"
+                }
+              },
+              "X-Credits-Type": {
+                "description": "Which wallet pays. This endpoint always bills standard.",
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "standard"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthenticationException"
+          },
+          "402": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "error_code": {
+                      "type": "string",
+                      "const": "insufficient_credits"
+                    },
+                    "message": {
+                      "type": "string",
+                      "enum": [
+                        "This workspace has no active subscription and no standard credits.",
+                        "Not enough standard credits to start this list. Nothing was charged."
+                      ]
+                    },
+                    "error": {
+                      "type": "string",
+                      "enum": [
+                        "This workspace has no active subscription and no standard credits.",
+                        "Not enough standard credits to start this list. Nothing was charged."
+                      ]
+                    },
+                    "credit_type": {
+                      "type": "string",
+                      "const": "standard"
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "error_code",
+                    "message",
+                    "error",
+                    "credit_type"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/AuthorizationException"
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "error_code": {
+                      "type": "string",
+                      "const": "not_found"
+                    },
+                    "message": {
+                      "type": "string",
+                      "const": "No technology matches that name."
+                    },
+                    "error": {
+                      "type": "string",
+                      "const": "No technology matches that name."
+                    },
+                    "": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "error_code",
+                    "message",
+                    "error",
+                    null
+                  ]
+                }
+              }
+            }
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationException"
+          },
+          "429": {
+            "description": "Rate limit exceeded. Costs no credits. Back off for the number of seconds in Retry-After.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "description": "Always false."
+                    },
+                    "error_code": {
+                      "type": "string",
+                      "enum": [
+                        "rate_limited"
+                      ]
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds to wait before retrying.",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            }
+          }
+        }
+      },
+      "servers": [
+        {
+          "url": "https://api.stackscan.com/api"
+        }
+      ],
+      "get": {
+        "operationId": "v1.tech-lookup.lists.index",
+        "description": "Every list this workspace has requested, newest first. These are the same\nrows the dashboard shows on its Reports page.\n\nFree. Poll this to discover lists that have finished since you last\nlooked.\n\nRate limit: 120 requests per minute, counted per API token. Going over returns 429 with `error_code: rate_limited` and a `Retry-After` header in seconds. A 429 costs no credits. Traffic is also subject to a higher shared ceiling per network address, applied before authentication.",
+        "summary": "List your technology lists",
+        "tags": [
+          "Technology Lists"
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "page": {
+                      "type": "integer"
+                    },
+                    "per_page": {
+                      "type": "integer"
+                    },
+                    "total": {
+                      "type": "integer"
+                    },
+                    "results": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "report_id": {
+                            "type": "integer"
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": [
+                              "ready",
+                              "queued",
+                              "failed"
+                            ]
+                          },
+                          "technology": {
+                            "type": "string"
+                          },
+                          "techapi_id": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "description": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "credits_charged": {
+                            "type": "number"
+                          },
+                          "credit_type": {
+                            "type": "string",
+                            "const": "standard"
+                          },
+                          "result_count": {
+                            "type": [
+                              "integer",
+                              "null"
+                            ],
+                            "description": "These differ when a plan's export cap bites. Read `truncated`."
+                          },
+                          "exported_rows": {
+                            "type": [
+                              "integer",
+                              "null"
+                            ]
+                          },
+                          "truncated": {
+                            "type": "boolean"
+                          },
+                          "withheld_rows": {
+                            "type": "integer"
+                          },
+                          "created_at": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "failed_at": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "download_count": {
+                            "type": "integer",
+                            "description": "So the 403 ceiling never arrives as a surprise."
+                          },
+                          "download_limit": {
+                            "type": [
+                              "integer",
+                              "null"
+                            ]
+                          },
+                          "downloads_remaining": {
+                            "type": [
+                              "object",
+                              "null"
+                            ]
+                          },
+                          "download_url": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "report_id",
+                          "status",
+                          "technology",
+                          "techapi_id",
+                          "description",
+                          "credits_charged",
+                          "credit_type",
+                          "result_count",
+                          "exported_rows",
+                          "truncated",
+                          "withheld_rows",
+                          "created_at",
+                          "failed_at",
+                          "download_count",
+                          "download_limit",
+                          "downloads_remaining",
+                          "download_url"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "page",
+                    "per_page",
+                    "total",
+                    "results"
+                  ]
+                }
+              }
+            },
+            "headers": {
+              "X-RateLimit-Limit": {
+                "description": "Requests allowed per minute for this token on this endpoint.",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "X-RateLimit-Remaining": {
+                "description": "Requests left in the current minute.",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "X-Credits-Used": {
+                "description": "Credits this request consumed. 0 when nothing was charged.",
+                "schema": {
+                  "type": "number"
+                }
+              },
+              "X-Credits-Remaining": {
+                "description": "Balance in the standard wallet after this request.",
+                "schema": {
+                  "type": "number"
+                }
+              },
+              "X-Credits-Cost": {
+                "description": "What one successful request costs on this endpoint.",
+                "schema": {
+                  "type": "number"
+                }
+              },
+              "X-Credits-Type": {
+                "description": "Which wallet pays. This endpoint always bills standard.",
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "standard"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthenticationException"
+          },
+          "429": {
+            "description": "Rate limit exceeded. Costs no credits. Back off for the number of seconds in Retry-After.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "description": "Always false."
+                    },
+                    "error_code": {
+                      "type": "string",
+                      "enum": [
+                        "rate_limited"
+                      ]
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds to wait before retrying.",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/tech-lookup/lists/{id}": {
+      "get": {
+        "operationId": "v1.tech-lookup.lists.show",
+        "description": "Tells you whether the export is `queued`, `ready` or `failed`, and once\nready gives you `download_url` plus the row counts.\n\nFree, so polling is fine. Check every few seconds early on, then back off.\n\n**Read `truncated` before you trust the file as complete.** Plans cap how\nmany rows an export may contain, and the ceiling is 1,000,000 even on\nunlimited plans. When `truncated` is true, `result_count` is how many\nwebsites matched and `exported_rows` is how many the file actually holds;\n`withheld_rows` is the difference.\n\nA `failed` list has already had its credit refunded automatically.\n\nRate limit: 120 requests per minute, counted per API token. Going over returns 429 with `error_code: rate_limited` and a `Retry-After` header in seconds. A 429 costs no credits. Traffic is also subject to a higher shared ceiling per network address, applied before authentication.",
+        "summary": "Check a technology list",
+        "tags": [
+          "Technology Lists"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The list and, once ready, its download link and row counts. Free.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "report_id": {
+                      "type": "integer"
+                    },
+                    "status": {
+                      "type": "string"
+                    },
+                    "technology": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "techapi_id": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "description": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "credits_charged": {
+                      "type": "number"
+                    },
+                    "credit_type": {
+                      "type": "string"
+                    },
+                    "result_count": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ]
+                    },
+                    "exported_rows": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ]
+                    },
+                    "truncated": {
+                      "type": "boolean"
+                    },
+                    "withheld_rows": {
+                      "type": "integer"
+                    },
+                    "created_at": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "failed_at": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "download_count": {
+                      "type": "integer"
+                    },
+                    "download_limit": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ]
+                    },
+                    "downloads_remaining": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ]
+                    },
+                    "download_url": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "report_id",
+                    "status",
+                    "technology",
+                    "techapi_id",
+                    "description",
+                    "credits_charged",
+                    "credit_type",
+                    "result_count",
+                    "exported_rows",
+                    "truncated",
+                    "withheld_rows",
+                    "created_at",
+                    "failed_at",
+                    "download_count",
+                    "download_limit",
+                    "downloads_remaining",
+                    "download_url"
+                  ]
+                }
+              }
+            },
+            "headers": {
+              "X-RateLimit-Limit": {
+                "description": "Requests allowed per minute for this token on this endpoint.",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "X-RateLimit-Remaining": {
+                "description": "Requests left in the current minute.",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "X-Credits-Used": {
+                "description": "Credits this request consumed. 0 when nothing was charged.",
+                "schema": {
+                  "type": "number"
+                }
+              },
+              "X-Credits-Remaining": {
+                "description": "Balance in the standard wallet after this request.",
+                "schema": {
+                  "type": "number"
+                }
+              },
+              "X-Credits-Cost": {
+                "description": "What one successful request costs on this endpoint.",
+                "schema": {
+                  "type": "number"
+                }
+              },
+              "X-Credits-Type": {
+                "description": "Which wallet pays. This endpoint always bills standard.",
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "standard"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthenticationException"
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "error_code": {
+                      "type": "string",
+                      "const": "not_found"
+                    },
+                    "message": {
+                      "type": "string",
+                      "const": "No such list in this workspace."
+                    },
+                    "error": {
+                      "type": "string",
+                      "const": "No such list in this workspace."
+                    },
+                    "": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "error_code",
+                    "message",
+                    "error",
+                    null
+                  ]
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded. Costs no credits. Back off for the number of seconds in Retry-After.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "description": "Always false."
+                    },
+                    "error_code": {
+                      "type": "string",
+                      "enum": [
+                        "rate_limited"
+                      ]
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds to wait before retrying.",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            }
+          }
+        }
+      },
+      "servers": [
+        {
+          "url": "https://api.stackscan.com/api"
+        }
+      ]
+    },
+    "/v1/tech-lookup/lists/{id}/download": {
+      "get": {
+        "operationId": "v1.tech-lookup.lists.download",
+        "description": "Rate limited well below the polling endpoints, because these files reach\n1.2 GiB. Each list may also be fetched a limited number of times in\ntotal; the status endpoint reports `downloads_remaining` so you can see\nit coming, and a list past its ceiling returns `403\ndownload_limit_reached` rather than a 429, because retrying will not\nhelp.\n\nAttempts are counted, not completed transfers, so a dropped connection\nstill spends one. An expired file (`410`) does not.\n\nStreams the finished file. Large lists come back as CSV and small ones as\nXLSX, whichever survives the row count. Returns 409 while the list is\nstill `queued`, so a client that polls correctly never sees it.\n\nFree and repeatable for as long as the file is retained.\n\nRate limit: 10 requests per minute, counted per API token. Going over returns 429 with `error_code: rate_limited` and a `Retry-After` header in seconds. A 429 costs no credits. Traffic is also subject to a higher shared ceiling per network address, applied before authentication.",
+        "summary": "Download a technology list",
+        "tags": [
+          "Technology Lists"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            },
+            "headers": {
+              "Content-Disposition": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-Accel-Redirect": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-RateLimit-Limit": {
+                "description": "Requests allowed per minute for this token on this endpoint.",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "X-RateLimit-Remaining": {
+                "description": "Requests left in the current minute.",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "X-Credits-Used": {
+                "description": "Credits this request consumed. 0 when nothing was charged.",
+                "schema": {
+                  "type": "number"
+                }
+              },
+              "X-Credits-Remaining": {
+                "description": "Balance in the standard wallet after this request.",
+                "schema": {
+                  "type": "number"
+                }
+              },
+              "X-Credits-Cost": {
+                "description": "What one successful request costs on this endpoint.",
+                "schema": {
+                  "type": "number"
+                }
+              },
+              "X-Credits-Type": {
+                "description": "Which wallet pays. This endpoint always bills standard.",
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "standard"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthenticationException"
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "error_code": {
+                      "type": "string",
+                      "const": "download_limit_reached"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "download_count": {
+                      "type": "integer"
+                    },
+                    "download_limit": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "error_code",
+                    "message",
+                    "error",
+                    "download_count",
+                    "download_limit"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "error_code": {
+                      "type": "string",
+                      "const": "not_found"
+                    },
+                    "message": {
+                      "type": "string",
+                      "const": "No such list in this workspace."
+                    },
+                    "error": {
+                      "type": "string",
+                      "const": "No such list in this workspace."
+                    },
+                    "": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "error_code",
+                    "message",
+                    "error",
+                    null
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "error_code": {
+                      "type": "string",
+                      "const": "invalid_request"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "ready",
+                        "queued",
+                        "failed"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "error_code",
+                    "message",
+                    "error",
+                    "status"
+                  ]
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "Row is real, bytes are gone. Not counted against the limit.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "error_code": {
+                      "type": "string",
+                      "const": "not_found"
+                    },
+                    "message": {
+                      "type": "string",
+                      "const": "This list has expired and its file has been removed. Request it again."
+                    },
+                    "error": {
+                      "type": "string",
+                      "const": "This list has expired and its file has been removed. Request it again."
+                    },
+                    "": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "error_code",
+                    "message",
+                    "error",
+                    null
+                  ]
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded. Costs no credits. Back off for the number of seconds in Retry-After.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "description": "Always false."
+                    },
+                    "error_code": {
+                      "type": "string",
+                      "enum": [
+                        "rate_limited"
+                      ]
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds to wait before retrying.",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            }
+          }
+        }
+      },
+      "servers": [
+        {
+          "url": "https://api.stackscan.com/api"
+        }
+      ]
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearer": {
+        "type": "http",
+        "description": "Sanctum token from Dashboard → API Tokens",
+        "scheme": "bearer"
+      },
+      "tenant": {
+        "type": "apiKey",
+        "description": "Workspace tenant UUID from Dashboard → API Tokens",
+        "in": "header",
+        "name": "X-Tenant-Id"
+      }
+    },
+    "schemas": {
+      "CompanyBatchLookupRequest": {
+        "type": "object",
+        "properties": {
+          "domains": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 253
+            },
+            "minItems": 1,
+            "maxItems": 100
+          }
+        },
+        "required": [
+          "domains"
+        ],
+        "title": "CompanyBatchLookupRequest"
+      },
+      "DomainTechBatchLookupRequest": {
+        "type": "object",
+        "properties": {
+          "domains": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 253
+            },
+            "minItems": 1,
+            "maxItems": 100
+          },
+          "per_domain": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50
+          },
+          "category": {
+            "type": "string",
+            "description": "Return only technologies in this top-level group, e.g.\n\"E-commerce & Sales\". Matched against parent_category only.\nCase-insensitive. Omit to return every category.",
+            "maxLength": 120
+          },
+          "fields": {
+            "type": "array",
+            "description": "Which per-technology fields to include. Omit for all of them.\nUse this to cut response size on large batches.",
+            "items": {
+              "type": "string",
+              "enum": [
+                "techapi_id",
+                "website",
+                "category",
+                "sub_category",
+                "total_sites",
+                "stack_id"
+              ]
+            }
+          }
+        },
+        "required": [
+          "domains"
+        ],
+        "title": "DomainTechBatchLookupRequest"
+      },
+      "TechLookupListRequest": {
+        "type": "object",
+        "properties": {
+          "technology": {
+            "type": "string",
+            "description": "Any one identifies the technology. techapi_id is exact and is what\nresponses now return; stack_id keeps working for integrations\nwritten before the change; technology resolves by name the same\nway GET technologies/lookup does.",
+            "minLength": 1,
+            "maxLength": 255
+          },
+          "techapi_id": {
+            "type": "string",
+            "maxLength": 80
+          },
+          "stack_id": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "country": {
+            "type": "array",
+            "description": "Filters, mirroring the dashboard's own filter set. Anything\nomitted means \"no filter\", which is the full list.",
+            "items": {
+              "type": "integer"
+            }
+          },
+          "country_condition": {
+            "type": "string",
+            "enum": [
+              "include",
+              "exclude"
+            ]
+          },
+          "tld": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 32
+            }
+          },
+          "tld_condition": {
+            "type": "string",
+            "enum": [
+              "include",
+              "exclude"
+            ]
+          },
+          "company_size": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 64
+            }
+          },
+          "only_with_company_info": {
+            "type": "boolean"
+          }
+        },
+        "title": "TechLookupListRequest"
+      }
+    },
+    "responses": {
+      "AuthenticationException": {
+        "description": "Unauthenticated",
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "properties": {
+                "message": {
+                  "type": "string",
+                  "description": "Error overview."
+                }
+              },
+              "required": [
+                "message"
+              ]
+            }
+          }
+        }
+      },
+      "ValidationException": {
+        "description": "Validation error",
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "properties": {
+                "message": {
+                  "type": "string",
+                  "description": "Errors overview."
+                },
+                "errors": {
+                  "type": "object",
+                  "description": "A detailed description of each field that failed validation.",
+                  "additionalProperties": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                }
+              },
+              "required": [
+                "message",
+                "errors"
+              ]
+            }
+          }
+        }
+      },
+      "AuthorizationException": {
+        "description": "Authorization error",
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "properties": {
+                "message": {
+                  "type": "string",
+                  "description": "Error overview."
+                }
+              },
+              "required": [
+                "message"
+              ]
+            }
+          }
+        }
+      }
+    }
+  },
+  "security": [
+    {
+      "bearer": [],
+      "tenant": []
+    }
+  ],
+  "tags": [
+    {
+      "name": "Account"
+    },
+    {
+      "name": "TechLookup"
+    },
+    {
+      "name": "Technology Lists"
+    }
+  ]
+}
