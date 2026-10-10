@@ -1,0 +1,4076 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "NameGender API",
+    "version": "1.0.0",
+    "summary": "Infer gender from names, emails and usernames, with the evidence behind each answer.",
+    "description": "Every lookup endpoint accepts both GET and POST so it can be called from a browser, a shell or a server. All paths live under `/api/v1`; a future breaking change will get a new version prefix instead of altering these.\n\n**Success and failure.** The HTTP status code is the only success signal: a 200 carries the result, anything else carries the error body described below. There is no separate success flag in the JSON.\n\n**Credits.** One credit per resolved name, not per request: a bulk call for 100 names costs 100 credits. Credits are checked before any work starts, so a request is never half-processed. Free accounts get 100 credits per day.\n\n**Rate limit.** 1200 requests per minute per API key by default, counted per key rather than per IP so that several customers behind one address do not share a bucket. Every response carries `X-RateLimit-Remaining`; a 429 carries `Retry-After`.\n\n**Errors.** Every failure, at every status code, returns the same body shape. Branch on the machine-readable `error` field, never on `message`: messages are translated into 22 languages and their wording can change.\n\n**Support.** Each response carries a `request_id`, also sent as the `X-Request-Id` header. Quote it in any support request and we can find the exact call in our logs. You may send your own `X-Request-Id` to correlate with your tracing system.\n\n**Data version.** Responses include `data_version`, the name-dataset snapshot that produced the answer. If a result changes between two calls, comparing this field is the first thing to check.",
+    "contact": {
+      "url": "https://namegender.com/docs"
+    },
+    "x-jentic-source-url": "https://namegender.com/openapi.json"
+  },
+  "servers": [
+    {
+      "url": "https://namegender.com",
+      "description": "Production"
+    }
+  ],
+  "paths": {
+    "/api/v1/batches": {
+      "post": {
+        "tags": [
+          "Batches"
+        ],
+        "summary": "Upload a file and start processing it",
+        "description": "Uploads a CSV or XLSX file (up to 100 MB, 1,000,000 rows) and, by default, queues it. One credit per row, reserved when processing begins; a job that fails is not charged.\n\n`name_column` is required unless `start=false`: a guessed column that turns out to be wrong would spend credits on the wrong data. Send `start=false` to get the columns, a preview and the credit cost first, then call `/start`.\n\nIf starting fails (no credits, unknown column, AI consent), nothing is left behind: no job, no stored file.\n\nSend an `Idempotency-Key` header to retry safely: a repeat with the same key returns the first job with `200` and `Idempotent-Replayed: true` instead of opening a second one.",
+        "operationId": "createBatch",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Up to 80 printable ASCII characters, unique per upload. SDKs generate one for you.",
+            "schema": {
+              "type": "string",
+              "maxLength": 80
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "file"
+                ],
+                "properties": {
+                  "file": {
+                    "type": "string",
+                    "format": "binary",
+                    "description": "CSV, TSV or XLSX with a header row."
+                  },
+                  "start": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "false: upload and inspect only."
+                  },
+                  "name_column": {
+                    "type": "string",
+                    "description": "Header of the column holding the names, exactly as written in the file. Required unless `start=false`."
+                  },
+                  "country_column": {
+                    "type": "string",
+                    "description": "Header of a column holding a country code per row, ISO 3166-1 alpha-2 or alpha-3 (`FR` or `FRA`, any case). Unrecognised values fall back to `country`."
+                  },
+                  "country": {
+                    "type": "string",
+                    "minLength": 2,
+                    "maxLength": 3,
+                    "description": "Default country (ISO 3166-1 alpha-2, or alpha-3) for rows without one."
+                  },
+                  "ai_fallback": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "Ask an AI model for names not in the dataset. Requires AI consent on the account, exactly as on /gender/bulk."
+                  },
+                  "best_guess": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "Return the more likely gender even when the evidence is weak."
+                  },
+                  "delete_after_download": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "The result can be downloaded once, then it is deleted."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Queued (or, for a small file, possibly already finished).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BatchJob"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "Uploaded, not started (`start=false`). See `inspection`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BatchJob"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "Replay of an earlier request with the same `Idempotency-Key`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BatchJob"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "402": {
+            "$ref": "#/components/responses/402"
+          },
+          "413": {
+            "$ref": "#/components/responses/413"
+          },
+          "422": {
+            "$ref": "#/components/responses/422"
+          },
+          "429": {
+            "$ref": "#/components/responses/429"
+          },
+          "500": {
+            "$ref": "#/components/responses/500"
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "Batches"
+        ],
+        "summary": "List file jobs",
+        "description": "Newest first. Jobs belong to the account, so this includes jobs started from the dashboard and by other keys.",
+        "operationId": "listBatches",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of jobs.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BatchList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "422": {
+            "$ref": "#/components/responses/422"
+          },
+          "429": {
+            "$ref": "#/components/responses/429"
+          },
+          "500": {
+            "$ref": "#/components/responses/500"
+          }
+        }
+      }
+    },
+    "/api/v1/batches/{batch}": {
+      "get": {
+        "tags": [
+          "Batches"
+        ],
+        "summary": "Status of a file job",
+        "description": "Poll this until `status` is `completed`, `failed` or `cancelled`. `poll_after_seconds` suggests how long to wait between calls.",
+        "operationId": "getBatch",
+        "parameters": [
+          {
+            "name": "batch",
+            "in": "path",
+            "required": true,
+            "description": "Job ID, as returned when the job was created (B-XXXXXXXXXX).",
+            "schema": {
+              "type": "string",
+              "example": "B-7K2M9QX4TA"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The job.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BatchJob"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "429": {
+            "$ref": "#/components/responses/429"
+          },
+          "500": {
+            "$ref": "#/components/responses/500"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Batches"
+        ],
+        "summary": "Cancel or delete a file job",
+        "description": "A job that has not started is cancelled; any reserved credit is returned. A finished job is deleted with its files. A job being processed cannot be stopped (`409 batch_in_progress`).",
+        "operationId": "deleteBatch",
+        "parameters": [
+          {
+            "name": "batch",
+            "in": "path",
+            "required": true,
+            "description": "Job ID, as returned when the job was created (B-XXXXXXXXXX).",
+            "schema": {
+              "type": "string",
+              "example": "B-7K2M9QX4TA"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Cancelled or deleted."
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "409": {
+            "$ref": "#/components/responses/409"
+          },
+          "429": {
+            "$ref": "#/components/responses/429"
+          },
+          "500": {
+            "$ref": "#/components/responses/500"
+          }
+        }
+      }
+    },
+    "/api/v1/batches/{batch}/result": {
+      "get": {
+        "tags": [
+          "Batches"
+        ],
+        "summary": "Download the result file",
+        "description": "The uploaded file with these columns appended: `gender`, `probability`, `sample_size`, `country`, `source`, `matched_as`, `first_name`, `middle_name`, `last_name`, `name_type`. Same format as the upload.",
+        "operationId": "downloadBatchResult",
+        "parameters": [
+          {
+            "name": "batch",
+            "in": "path",
+            "required": true,
+            "description": "Job ID, as returned when the job was created (B-XXXXXXXXXX).",
+            "schema": {
+              "type": "string",
+              "example": "B-7K2M9QX4TA"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The result file.",
+            "content": {
+              "text/csv": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "409": {
+            "$ref": "#/components/responses/409"
+          },
+          "410": {
+            "$ref": "#/components/responses/410"
+          },
+          "429": {
+            "$ref": "#/components/responses/429"
+          },
+          "500": {
+            "$ref": "#/components/responses/500"
+          }
+        }
+      }
+    },
+    "/api/v1/batches/{batch}/start": {
+      "post": {
+        "tags": [
+          "Batches"
+        ],
+        "summary": "Start a job uploaded with start=false",
+        "operationId": "startBatch",
+        "parameters": [
+          {
+            "name": "batch",
+            "in": "path",
+            "required": true,
+            "description": "Job ID, as returned when the job was created (B-XXXXXXXXXX).",
+            "schema": {
+              "type": "string",
+              "example": "B-7K2M9QX4TA"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "name_column"
+                ],
+                "properties": {
+                  "name_column": {
+                    "type": "string",
+                    "description": "Header of the column holding the names, exactly as written in the file."
+                  },
+                  "country_column": {
+                    "type": "string",
+                    "description": "Header of a column holding a country code per row, ISO 3166-1 alpha-2 or alpha-3 (`FR` or `FRA`, any case). Unrecognised values fall back to `country`."
+                  },
+                  "country": {
+                    "type": "string",
+                    "minLength": 2,
+                    "maxLength": 3,
+                    "description": "Default country (ISO 3166-1 alpha-2, or alpha-3) for rows without one."
+                  },
+                  "ai_fallback": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "Ask an AI model for names not in the dataset. Requires AI consent on the account, exactly as on /gender/bulk."
+                  },
+                  "best_guess": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "Return the more likely gender even when the evidence is weak."
+                  },
+                  "delete_after_download": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "The result can be downloaded once, then it is deleted."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Queued.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BatchJob"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "402": {
+            "$ref": "#/components/responses/402"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "409": {
+            "$ref": "#/components/responses/409"
+          },
+          "422": {
+            "$ref": "#/components/responses/422"
+          },
+          "429": {
+            "$ref": "#/components/responses/429"
+          },
+          "500": {
+            "$ref": "#/components/responses/500"
+          }
+        }
+      }
+    },
+    "/api/v1/gender": {
+      "get": {
+        "tags": [
+          "Gender"
+        ],
+        "summary": "Gender from a name",
+        "description": "Pass a full name or a first name. Titles, punctuation and surnames are stripped before lookup; `name` in the response shows what was actually looked up.",
+        "operationId": "getName",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 200
+            },
+            "description": "The value to resolve.",
+            "example": "Ayşe Yılmaz"
+          },
+          {
+            "name": "country",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 2,
+              "maxLength": 3
+            },
+            "description": "ISO-3166 alpha-2 code (alpha-3 such as `ITA` is also accepted and converted). Narrows the lookup to one country, which matters for names that flip gender across borders: Andrea is male in Italy and female in Germany. Omit it and the answer is the worldwide aggregate.",
+            "example": "TR"
+          },
+          {
+            "name": "locale",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 35
+            },
+            "description": "A language tag such as `de-DE`, `en_US` or `pt_BR.UTF-8`, typically the browser's `navigator.language` or the `Accept-Language` header of your sign-up form. Its region becomes the country when `country` is not sent. A tag without a region (`en`, `de`) sets no country: a language alone does not say which country it is spoken in. `country_source` in the response tells you which one was used.",
+            "example": "it-IT"
+          },
+          {
+            "name": "ip",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 45
+            },
+            "description": "The end user's IP address (IPv4 or IPv6), for example from your sign-up request. Its country is used when neither `country` nor a `locale` with a region is sent. Private and reserved ranges are ignored. The address is used for this lookup only and is not stored. IP geolocation by DB-IP (db-ip.com), CC BY 4.0.",
+            "example": "93.42.0.1"
+          },
+          {
+            "name": "ai_fallback",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false
+            },
+            "description": "Ask a language model when the dataset has no answer. Slower and less certain; the response reports `source: \"llm\"` so you can tell these apart. Requires AI lookups to be enabled in account settings; otherwise the call fails with `ai_consent_required`."
+          },
+          {
+            "name": "best_guess",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false
+            },
+            "description": "Return the most likely gender even below the confidence threshold, instead of null. Check `probability` before trusting the result."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Resolved. `gender` is null when the name is not recognised — that is a successful answer of \"we do not know\", not an error, and it still costs one credit.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SingleResponse"
+                },
+                "examples": {
+                  "known": {
+                    "$ref": "#/components/examples/known"
+                  },
+                  "unknown": {
+                    "$ref": "#/components/examples/unknown"
+                  },
+                  "fuzzy": {
+                    "$ref": "#/components/examples/fuzzy"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "402": {
+            "$ref": "#/components/responses/402"
+          },
+          "422": {
+            "$ref": "#/components/responses/422"
+          },
+          "429": {
+            "$ref": "#/components/responses/429"
+          },
+          "500": {
+            "$ref": "#/components/responses/500"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Gender"
+        ],
+        "summary": "Gender from a name",
+        "description": "Pass a full name or a first name. Titles, punctuation and surnames are stripped before lookup; `name` in the response shows what was actually looked up.",
+        "operationId": "postName",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "name"
+                ],
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "maxLength": 200
+                  },
+                  "country": {
+                    "type": "string",
+                    "minLength": 2,
+                    "maxLength": 2
+                  },
+                  "locale": {
+                    "type": "string",
+                    "maxLength": 35
+                  },
+                  "ip": {
+                    "type": "string",
+                    "maxLength": 45
+                  },
+                  "ai_fallback": {
+                    "type": "boolean",
+                    "default": false
+                  },
+                  "best_guess": {
+                    "type": "boolean",
+                    "default": false
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Resolved. `gender` is null when the name is not recognised — that is a successful answer of \"we do not know\", not an error, and it still costs one credit.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SingleResponse"
+                },
+                "examples": {
+                  "known": {
+                    "$ref": "#/components/examples/known"
+                  },
+                  "unknown": {
+                    "$ref": "#/components/examples/unknown"
+                  },
+                  "fuzzy": {
+                    "$ref": "#/components/examples/fuzzy"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "402": {
+            "$ref": "#/components/responses/402"
+          },
+          "422": {
+            "$ref": "#/components/responses/422"
+          },
+          "429": {
+            "$ref": "#/components/responses/429"
+          },
+          "500": {
+            "$ref": "#/components/responses/500"
+          }
+        }
+      }
+    },
+    "/api/v1/gender/bulk": {
+      "post": {
+        "tags": [
+          "Gender"
+        ],
+        "summary": "Resolve many names in one request",
+        "description": "Exists so that 100 names do not cost 100 HTTP round trips. Names are resolved in a single batch lookup. Credits are checked for the whole batch up front: either every name is processed or none is.",
+        "operationId": "bulkGender",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BulkRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Every name resolved. Results are returned in the order they were sent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BulkResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "402": {
+            "$ref": "#/components/responses/402"
+          },
+          "422": {
+            "$ref": "#/components/responses/422"
+          },
+          "429": {
+            "$ref": "#/components/responses/429"
+          },
+          "500": {
+            "$ref": "#/components/responses/500"
+          }
+        }
+      }
+    },
+    "/api/v1/gender/countries": {
+      "get": {
+        "tags": [
+          "Gender"
+        ],
+        "summary": "Which countries a name is recorded in",
+        "description": "This is not a \"country of origin\" lookup, and it is deliberately not named like one: the data cannot support that claim, and the difference is measurable.\n\nCounted name statistics exist for eleven countries only: birth registrations in the US, UK, France, Canada, Spain, Ireland, Norway, Austria and Israel, and living-resident counts in Poland and Switzerland. Everything else is presence data — it says a name occurs in a country, not how many people carry it. So a query for `Mehmet` ranks Switzerland and France first, at about 29% each, and Turkey does not appear in the ranking at all, because Turkey publishes no counts.\n\nThe response therefore keeps the two apart. `registrations` is measured volume and is comparable, but only among the counting countries. `attested_in` is presence, and that is where Turkey, Japan and India show up. Neither field is a claim about any person's origin or ethnicity.\n\n**Credits.** One credit per request. `ai_fallback` and `best_guess` do not apply here and are ignored.",
+        "operationId": "getCountries",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "query",
+            "required": true,
+            "description": "The first name to look up.",
+            "schema": {
+              "type": "string",
+              "maxLength": 200
+            },
+            "example": "Mehmet"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "How many counted countries to list in `registrations`. Shares and `basis.counted_countries` are not affected, and `attested_in` is never cut.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 25
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Country distribution, with the basis of the numbers stated in the response itself.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CountriesResponse"
+                },
+                "example": {
+                  "credits_charged": 1,
+                  "credits_remaining": 49999,
+                  "data_version": "2026.10",
+                  "request_id": "req_6b2d90e14fa37c58",
+                  "took_ms": 3,
+                  "name": "Mehmet",
+                  "basis": {
+                    "counted_sources": [
+                      "ssa",
+                      "ons",
+                      "nrs",
+                      "nisra",
+                      "insee",
+                      "statcan",
+                      "ine",
+                      "cso",
+                      "ssb",
+                      "statat",
+                      "cbs",
+                      "pesel",
+                      "bfs"
+                    ],
+                    "counted_countries": 8,
+                    "attested_countries": 16,
+                    "note": "Shares are calculated only across countries that publish counted name statistics…"
+                  },
+                  "registrations": [
+                    {
+                      "country": "CH",
+                      "count": 3890,
+                      "share": 29.45,
+                      "gender": "male",
+                      "probability": 100,
+                      "source": "bfs"
+                    },
+                    {
+                      "country": "FR",
+                      "count": 3775,
+                      "share": 28.58,
+                      "gender": "male",
+                      "probability": 100,
+                      "source": "insee"
+                    }
+                  ],
+                  "attested_in": [
+                    "AL",
+                    "AT",
+                    "AU",
+                    "BE",
+                    "CA",
+                    "CH",
+                    "ES",
+                    "FR",
+                    "GB",
+                    "KS",
+                    "MK",
+                    "NO",
+                    "PL",
+                    "SE",
+                    "TR",
+                    "US"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "402": {
+            "$ref": "#/components/responses/402"
+          },
+          "429": {
+            "$ref": "#/components/responses/429"
+          },
+          "500": {
+            "$ref": "#/components/responses/500"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Gender"
+        ],
+        "summary": "Which countries a name is recorded in",
+        "description": "This is not a \"country of origin\" lookup, and it is deliberately not named like one: the data cannot support that claim, and the difference is measurable.\n\nCounted name statistics exist for eleven countries only: birth registrations in the US, UK, France, Canada, Spain, Ireland, Norway, Austria and Israel, and living-resident counts in Poland and Switzerland. Everything else is presence data — it says a name occurs in a country, not how many people carry it. So a query for `Mehmet` ranks Switzerland and France first, at about 29% each, and Turkey does not appear in the ranking at all, because Turkey publishes no counts.\n\nThe response therefore keeps the two apart. `registrations` is measured volume and is comparable, but only among the counting countries. `attested_in` is presence, and that is where Turkey, Japan and India show up. Neither field is a claim about any person's origin or ethnicity.\n\n**Credits.** One credit per request. `ai_fallback` and `best_guess` do not apply here and are ignored.",
+        "operationId": "postCountries",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "name"
+                ],
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "maxLength": 200,
+                    "example": "Mehmet",
+                    "description": "The first name to look up."
+                  },
+                  "limit": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 100,
+                    "default": 25,
+                    "description": "How many counted countries to list in `registrations`. Shares and `basis.counted_countries` are not affected, and `attested_in` is never cut."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Country distribution, with the basis of the numbers stated in the response itself.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CountriesResponse"
+                },
+                "example": {
+                  "credits_charged": 1,
+                  "credits_remaining": 49999,
+                  "data_version": "2026.10",
+                  "request_id": "req_6b2d90e14fa37c58",
+                  "took_ms": 3,
+                  "name": "Mehmet",
+                  "basis": {
+                    "counted_sources": [
+                      "ssa",
+                      "ons",
+                      "nrs",
+                      "nisra",
+                      "insee",
+                      "statcan",
+                      "ine",
+                      "cso",
+                      "ssb",
+                      "statat",
+                      "cbs",
+                      "pesel",
+                      "bfs"
+                    ],
+                    "counted_countries": 8,
+                    "attested_countries": 16,
+                    "note": "Shares are calculated only across countries that publish counted name statistics…"
+                  },
+                  "registrations": [
+                    {
+                      "country": "CH",
+                      "count": 3890,
+                      "share": 29.45,
+                      "gender": "male",
+                      "probability": 100,
+                      "source": "bfs"
+                    },
+                    {
+                      "country": "FR",
+                      "count": 3775,
+                      "share": 28.58,
+                      "gender": "male",
+                      "probability": 100,
+                      "source": "insee"
+                    }
+                  ],
+                  "attested_in": [
+                    "AL",
+                    "AT",
+                    "AU",
+                    "BE",
+                    "CA",
+                    "CH",
+                    "ES",
+                    "FR",
+                    "GB",
+                    "KS",
+                    "MK",
+                    "NO",
+                    "PL",
+                    "SE",
+                    "TR",
+                    "US"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "402": {
+            "$ref": "#/components/responses/402"
+          },
+          "429": {
+            "$ref": "#/components/responses/429"
+          },
+          "500": {
+            "$ref": "#/components/responses/500"
+          }
+        }
+      }
+    },
+    "/api/v1/gender/email": {
+      "get": {
+        "tags": [
+          "Gender"
+        ],
+        "summary": "Gender from an email address",
+        "description": "The local part is split on separators and digits, then resolved as a name. `john.doe@example.com` resolves as \"John\".",
+        "operationId": "getEmail",
+        "parameters": [
+          {
+            "name": "email",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 200
+            },
+            "description": "The value to resolve.",
+            "example": "john.doe@example.com"
+          },
+          {
+            "name": "country",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 2,
+              "maxLength": 3
+            },
+            "description": "ISO-3166 alpha-2 code (alpha-3 such as `ITA` is also accepted and converted). Narrows the lookup to one country, which matters for names that flip gender across borders: Andrea is male in Italy and female in Germany. Omit it and the answer is the worldwide aggregate.",
+            "example": "TR"
+          },
+          {
+            "name": "locale",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 35
+            },
+            "description": "A language tag such as `de-DE`, `en_US` or `pt_BR.UTF-8`, typically the browser's `navigator.language` or the `Accept-Language` header of your sign-up form. Its region becomes the country when `country` is not sent. A tag without a region (`en`, `de`) sets no country: a language alone does not say which country it is spoken in. `country_source` in the response tells you which one was used.",
+            "example": "it-IT"
+          },
+          {
+            "name": "ip",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 45
+            },
+            "description": "The end user's IP address (IPv4 or IPv6), for example from your sign-up request. Its country is used when neither `country` nor a `locale` with a region is sent. Private and reserved ranges are ignored. The address is used for this lookup only and is not stored. IP geolocation by DB-IP (db-ip.com), CC BY 4.0.",
+            "example": "93.42.0.1"
+          },
+          {
+            "name": "ai_fallback",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false
+            },
+            "description": "Ask a language model when the dataset has no answer. Slower and less certain; the response reports `source: \"llm\"` so you can tell these apart. Requires AI lookups to be enabled in account settings; otherwise the call fails with `ai_consent_required`."
+          },
+          {
+            "name": "best_guess",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false
+            },
+            "description": "Applied to the first name extracted from the email: return its most likely gender even below the confidence threshold, instead of null. Check `probability` before trusting the result."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Resolved. `gender` is null when the name is not recognised — that is a successful answer of \"we do not know\", not an error, and it still costs one credit.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SingleResponse"
+                },
+                "examples": {
+                  "known": {
+                    "$ref": "#/components/examples/known"
+                  },
+                  "unknown": {
+                    "$ref": "#/components/examples/unknown"
+                  },
+                  "fuzzy": {
+                    "$ref": "#/components/examples/fuzzy"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "402": {
+            "$ref": "#/components/responses/402"
+          },
+          "422": {
+            "$ref": "#/components/responses/422"
+          },
+          "429": {
+            "$ref": "#/components/responses/429"
+          },
+          "500": {
+            "$ref": "#/components/responses/500"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Gender"
+        ],
+        "summary": "Gender from an email address",
+        "description": "The local part is split on separators and digits, then resolved as a name. `john.doe@example.com` resolves as \"John\".",
+        "operationId": "postEmail",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "email"
+                ],
+                "properties": {
+                  "email": {
+                    "type": "string",
+                    "maxLength": 200
+                  },
+                  "country": {
+                    "type": "string",
+                    "minLength": 2,
+                    "maxLength": 2
+                  },
+                  "locale": {
+                    "type": "string",
+                    "maxLength": 35
+                  },
+                  "ip": {
+                    "type": "string",
+                    "maxLength": 45
+                  },
+                  "ai_fallback": {
+                    "type": "boolean",
+                    "default": false
+                  },
+                  "best_guess": {
+                    "type": "boolean",
+                    "default": false
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Resolved. `gender` is null when the name is not recognised — that is a successful answer of \"we do not know\", not an error, and it still costs one credit.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SingleResponse"
+                },
+                "examples": {
+                  "known": {
+                    "$ref": "#/components/examples/known"
+                  },
+                  "unknown": {
+                    "$ref": "#/components/examples/unknown"
+                  },
+                  "fuzzy": {
+                    "$ref": "#/components/examples/fuzzy"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "402": {
+            "$ref": "#/components/responses/402"
+          },
+          "422": {
+            "$ref": "#/components/responses/422"
+          },
+          "429": {
+            "$ref": "#/components/responses/429"
+          },
+          "500": {
+            "$ref": "#/components/responses/500"
+          }
+        }
+      }
+    },
+    "/api/v1/gender/username": {
+      "get": {
+        "tags": [
+          "Gender"
+        ],
+        "summary": "Gender from a username",
+        "description": "Digits, separators and common suffixes are stripped before lookup.",
+        "operationId": "getUsername",
+        "parameters": [
+          {
+            "name": "username",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 200
+            },
+            "description": "The value to resolve.",
+            "example": "jane_doe_92"
+          },
+          {
+            "name": "country",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 2,
+              "maxLength": 3
+            },
+            "description": "ISO-3166 alpha-2 code (alpha-3 such as `ITA` is also accepted and converted). Narrows the lookup to one country, which matters for names that flip gender across borders: Andrea is male in Italy and female in Germany. Omit it and the answer is the worldwide aggregate.",
+            "example": "TR"
+          },
+          {
+            "name": "locale",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 35
+            },
+            "description": "A language tag such as `de-DE`, `en_US` or `pt_BR.UTF-8`, typically the browser's `navigator.language` or the `Accept-Language` header of your sign-up form. Its region becomes the country when `country` is not sent. A tag without a region (`en`, `de`) sets no country: a language alone does not say which country it is spoken in. `country_source` in the response tells you which one was used.",
+            "example": "it-IT"
+          },
+          {
+            "name": "ip",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 45
+            },
+            "description": "The end user's IP address (IPv4 or IPv6), for example from your sign-up request. Its country is used when neither `country` nor a `locale` with a region is sent. Private and reserved ranges are ignored. The address is used for this lookup only and is not stored. IP geolocation by DB-IP (db-ip.com), CC BY 4.0.",
+            "example": "93.42.0.1"
+          },
+          {
+            "name": "ai_fallback",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false
+            },
+            "description": "Ask a language model when the dataset has no answer. Slower and less certain; the response reports `source: \"llm\"` so you can tell these apart. Requires AI lookups to be enabled in account settings; otherwise the call fails with `ai_consent_required`."
+          },
+          {
+            "name": "best_guess",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false
+            },
+            "description": "Applied to the first name extracted from the username: return its most likely gender even below the confidence threshold, instead of null. Check `probability` before trusting the result."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Resolved. `gender` is null when the name is not recognised — that is a successful answer of \"we do not know\", not an error, and it still costs one credit.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SingleResponse"
+                },
+                "examples": {
+                  "known": {
+                    "$ref": "#/components/examples/known"
+                  },
+                  "unknown": {
+                    "$ref": "#/components/examples/unknown"
+                  },
+                  "fuzzy": {
+                    "$ref": "#/components/examples/fuzzy"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "402": {
+            "$ref": "#/components/responses/402"
+          },
+          "422": {
+            "$ref": "#/components/responses/422"
+          },
+          "429": {
+            "$ref": "#/components/responses/429"
+          },
+          "500": {
+            "$ref": "#/components/responses/500"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Gender"
+        ],
+        "summary": "Gender from a username",
+        "description": "Digits, separators and common suffixes are stripped before lookup.",
+        "operationId": "postUsername",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "username"
+                ],
+                "properties": {
+                  "username": {
+                    "type": "string",
+                    "maxLength": 200
+                  },
+                  "country": {
+                    "type": "string",
+                    "minLength": 2,
+                    "maxLength": 2
+                  },
+                  "locale": {
+                    "type": "string",
+                    "maxLength": 35
+                  },
+                  "ip": {
+                    "type": "string",
+                    "maxLength": 45
+                  },
+                  "ai_fallback": {
+                    "type": "boolean",
+                    "default": false
+                  },
+                  "best_guess": {
+                    "type": "boolean",
+                    "default": false
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Resolved. `gender` is null when the name is not recognised — that is a successful answer of \"we do not know\", not an error, and it still costs one credit.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SingleResponse"
+                },
+                "examples": {
+                  "known": {
+                    "$ref": "#/components/examples/known"
+                  },
+                  "unknown": {
+                    "$ref": "#/components/examples/unknown"
+                  },
+                  "fuzzy": {
+                    "$ref": "#/components/examples/fuzzy"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "402": {
+            "$ref": "#/components/responses/402"
+          },
+          "422": {
+            "$ref": "#/components/responses/422"
+          },
+          "429": {
+            "$ref": "#/components/responses/429"
+          },
+          "500": {
+            "$ref": "#/components/responses/500"
+          }
+        }
+      }
+    },
+    "/api/v1/me": {
+      "get": {
+        "tags": [
+          "Account"
+        ],
+        "summary": "Credit balance and account status",
+        "description": "Costs no credits. Use it to show remaining balance in your own dashboard, or to check a key is live before a large batch.",
+        "operationId": "getAccount",
+        "responses": {
+          "200": {
+            "description": "Account status.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "429": {
+            "$ref": "#/components/responses/429"
+          },
+          "500": {
+            "$ref": "#/components/responses/500"
+          }
+        }
+      }
+    },
+    "/api/v1/name-check": {
+      "get": {
+        "tags": [
+          "Name check"
+        ],
+        "summary": "Check one name",
+        "description": "Says whether a name typed into a sign-up or lead form looks like a real person's name, and why. It catches keyboard mashing (\"asdf qwerty\"), placeholders (\"Test Test\", \"John Doe\", \"n/a\"), fictional characters (\"Mickey Mouse\"), profanity, digits, symbols and email addresses in the name field. One credit per name.\n\n**It never calls a name fake.** The answer is an `assessment` (`plausible`, `suspicious` or `implausible`), a `score` from 0 to 100 and the `signals` behind it. Use it to flag a record or ask for more information, not to reject people automatically.\n\nReal names that trip simpler filters are left alone: surnames such as Null, Test or Cockburn, two-letter names such as Ng, single names, and every script we cannot read. A first name found in official birth records raises the score; a name we have never seen does not lower it on its own. Surnames are judged by their shape only, because there is no surname dataset behind this endpoint.",
+        "operationId": "getNameCheck",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "query",
+            "required": false,
+            "description": "The name as typed into the form. Send this or `first_name`/`last_name`.",
+            "schema": {
+              "type": "string",
+              "maxLength": 200
+            },
+            "example": "asdf qwerty"
+          },
+          {
+            "name": "first_name",
+            "in": "query",
+            "required": false,
+            "description": null,
+            "schema": {
+              "type": "string",
+              "maxLength": 100
+            }
+          },
+          {
+            "name": "last_name",
+            "in": "query",
+            "required": false,
+            "description": null,
+            "schema": {
+              "type": "string",
+              "maxLength": 100
+            }
+          },
+          {
+            "name": "country",
+            "in": "query",
+            "required": false,
+            "description": "Country hint, as on the gender endpoints. Used for name parsing and for the record lookup.",
+            "schema": {
+              "type": "string",
+              "minLength": 2,
+              "maxLength": 2
+            }
+          },
+          {
+            "name": "locale",
+            "in": "query",
+            "required": false,
+            "description": null,
+            "schema": {
+              "type": "string",
+              "maxLength": 35
+            }
+          },
+          {
+            "name": "ip",
+            "in": "query",
+            "required": false,
+            "description": null,
+            "schema": {
+              "type": "string",
+              "maxLength": 45
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Checked.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NameCheckResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "402": {
+            "$ref": "#/components/responses/402"
+          },
+          "422": {
+            "$ref": "#/components/responses/422"
+          },
+          "429": {
+            "$ref": "#/components/responses/429"
+          },
+          "500": {
+            "$ref": "#/components/responses/500"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Name check"
+        ],
+        "summary": "Check one name",
+        "description": "Says whether a name typed into a sign-up or lead form looks like a real person's name, and why. It catches keyboard mashing (\"asdf qwerty\"), placeholders (\"Test Test\", \"John Doe\", \"n/a\"), fictional characters (\"Mickey Mouse\"), profanity, digits, symbols and email addresses in the name field. One credit per name.\n\n**It never calls a name fake.** The answer is an `assessment` (`plausible`, `suspicious` or `implausible`), a `score` from 0 to 100 and the `signals` behind it. Use it to flag a record or ask for more information, not to reject people automatically.\n\nReal names that trip simpler filters are left alone: surnames such as Null, Test or Cockburn, two-letter names such as Ng, single names, and every script we cannot read. A first name found in official birth records raises the score; a name we have never seen does not lower it on its own. Surnames are judged by their shape only, because there is no surname dataset behind this endpoint.",
+        "operationId": "postNameCheck",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "maxLength": 200,
+                    "example": "asdf qwerty",
+                    "description": "The name as typed into the form. Send this or `first_name`/`last_name`."
+                  },
+                  "first_name": {
+                    "type": "string",
+                    "maxLength": 100
+                  },
+                  "last_name": {
+                    "type": "string",
+                    "maxLength": 100
+                  },
+                  "country": {
+                    "type": "string",
+                    "minLength": 2,
+                    "maxLength": 2,
+                    "description": "Country hint, as on the gender endpoints. Used for name parsing and for the record lookup."
+                  },
+                  "locale": {
+                    "type": "string",
+                    "maxLength": 35
+                  },
+                  "ip": {
+                    "type": "string",
+                    "maxLength": 45
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Checked.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NameCheckResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "402": {
+            "$ref": "#/components/responses/402"
+          },
+          "422": {
+            "$ref": "#/components/responses/422"
+          },
+          "429": {
+            "$ref": "#/components/responses/429"
+          },
+          "500": {
+            "$ref": "#/components/responses/500"
+          }
+        }
+      }
+    },
+    "/api/v1/name-check/bulk": {
+      "post": {
+        "tags": [
+          "Name check"
+        ],
+        "summary": "Check many names in one request",
+        "description": "Up to 100 names, one credit each, results in the order sent.",
+        "operationId": "bulkNameCheck",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "names"
+                ],
+                "properties": {
+                  "names": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 100,
+                    "items": {
+                      "type": "string",
+                      "maxLength": 200
+                    }
+                  },
+                  "country": {
+                    "type": "string",
+                    "minLength": 2,
+                    "maxLength": 2,
+                    "description": "Country hint, as on the gender endpoints. Used for name parsing and for the record lookup."
+                  },
+                  "locale": {
+                    "type": "string",
+                    "maxLength": 35
+                  },
+                  "ip": {
+                    "type": "string",
+                    "maxLength": 45
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Every name checked, in the order sent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NameCheckBulkResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "402": {
+            "$ref": "#/components/responses/402"
+          },
+          "422": {
+            "$ref": "#/components/responses/422"
+          },
+          "429": {
+            "$ref": "#/components/responses/429"
+          },
+          "500": {
+            "$ref": "#/components/responses/500"
+          }
+        }
+      }
+    },
+    "/api/v1/salutation": {
+      "get": {
+        "tags": [
+          "Salutation"
+        ],
+        "summary": "Salutation for one name",
+        "description": "Turns a name into a salutation line ready for a letter or email: \"Sehr geehrte Frau Dr. Müller,\", \"Sayın Ahmet Bey,\", \"Madame,\", \"山田様\". The gender lookup is included and the price is the same: one credit per name.\n\n**When the gender is not certain, the salutation is neutral.** A wrong gender is worse than none, so the gendered form is used only when the gender is known with at least `min_probability` (default 90), and the language has what it needs (a surname for \"Herr Müller\", a given name for \"Ahmet Bey\"). `form` and `reason` say which form was chosen and why. `best_guess` and `ai_fallback` do not apply here. Companies and role addresses get the language's form for organisations.",
+        "operationId": "getSalutation",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "query",
+            "required": false,
+            "description": "Full name, titles included. Send this or `first_name`/`last_name`.",
+            "schema": {
+              "type": "string",
+              "maxLength": 200
+            },
+            "example": "Dr. Anna Müller"
+          },
+          {
+            "name": "first_name",
+            "in": "query",
+            "required": false,
+            "description": "Given name, when your CRM keeps names in separate fields. No parsing is done.",
+            "schema": {
+              "type": "string",
+              "maxLength": 100
+            }
+          },
+          {
+            "name": "last_name",
+            "in": "query",
+            "required": false,
+            "description": null,
+            "schema": {
+              "type": "string",
+              "maxLength": 100
+            }
+          },
+          {
+            "name": "email",
+            "in": "query",
+            "required": false,
+            "description": "Email address, used when neither `name` nor `first_name`/`last_name` is sent. The name is read from the part before the @; role addresses such as info@ get the form for organisations. Addresses carry no accents, so anna.mueller@ greets Frau Mueller, not Müller.",
+            "schema": {
+              "type": "string",
+              "maxLength": 200
+            },
+            "example": "anna.mueller@example.de"
+          },
+          {
+            "name": "language",
+            "in": "query",
+            "required": false,
+            "description": "The language the salutation is written in: `en`, `en-US`, `en-GB`, `de`, `de-AT`, `de-CH`, `fr`, `es`, `it`, `pt`, `pt-PT`, `pt-BR`, `nl`, `tr`, `pl`, `ja`. When omitted, the language of `locale`, then the main language of the country, then `en`. An unsupported language is an error, never a silent fall back to English.",
+            "schema": {
+              "type": "string",
+              "maxLength": 35
+            },
+            "example": "de"
+          },
+          {
+            "name": "country",
+            "in": "query",
+            "required": false,
+            "description": "Country hint for the gender lookup, as on the gender endpoints. It does not set the language when `language` is sent: write to Mr Müller in the US in English.",
+            "schema": {
+              "type": "string",
+              "minLength": 2,
+              "maxLength": 2
+            }
+          },
+          {
+            "name": "locale",
+            "in": "query",
+            "required": false,
+            "description": null,
+            "schema": {
+              "type": "string",
+              "maxLength": 35
+            }
+          },
+          {
+            "name": "ip",
+            "in": "query",
+            "required": false,
+            "description": null,
+            "schema": {
+              "type": "string",
+              "maxLength": 45
+            }
+          },
+          {
+            "name": "gender",
+            "in": "query",
+            "required": false,
+            "description": "Gender you already know. Overrides the lookup; `neutral` always gives the neutral form.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "male",
+                "female",
+                "neutral"
+              ]
+            }
+          },
+          {
+            "name": "min_probability",
+            "in": "query",
+            "required": false,
+            "description": "Lowest probability for a gendered salutation. Below it the neutral form is used.",
+            "schema": {
+              "type": "integer",
+              "minimum": 50,
+              "maximum": 100,
+              "default": 90
+            }
+          },
+          {
+            "name": "title",
+            "in": "query",
+            "required": false,
+            "description": "Academic title kept in a separate field. Used in German and English salutations.",
+            "schema": {
+              "type": "string",
+              "maxLength": 40
+            },
+            "example": "Dr."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Salutation built.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SalutationResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "402": {
+            "$ref": "#/components/responses/402"
+          },
+          "422": {
+            "$ref": "#/components/responses/422"
+          },
+          "429": {
+            "$ref": "#/components/responses/429"
+          },
+          "500": {
+            "$ref": "#/components/responses/500"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Salutation"
+        ],
+        "summary": "Salutation for one name",
+        "description": "Turns a name into a salutation line ready for a letter or email: \"Sehr geehrte Frau Dr. Müller,\", \"Sayın Ahmet Bey,\", \"Madame,\", \"山田様\". The gender lookup is included and the price is the same: one credit per name.\n\n**When the gender is not certain, the salutation is neutral.** A wrong gender is worse than none, so the gendered form is used only when the gender is known with at least `min_probability` (default 90), and the language has what it needs (a surname for \"Herr Müller\", a given name for \"Ahmet Bey\"). `form` and `reason` say which form was chosen and why. `best_guess` and `ai_fallback` do not apply here. Companies and role addresses get the language's form for organisations.",
+        "operationId": "postSalutation",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "maxLength": 200,
+                    "example": "Dr. Anna Müller",
+                    "description": "Full name, titles included. Send this or `first_name`/`last_name`."
+                  },
+                  "first_name": {
+                    "type": "string",
+                    "maxLength": 100,
+                    "description": "Given name, when your CRM keeps names in separate fields. No parsing is done."
+                  },
+                  "last_name": {
+                    "type": "string",
+                    "maxLength": 100
+                  },
+                  "email": {
+                    "type": "string",
+                    "maxLength": 200,
+                    "example": "anna.mueller@example.de",
+                    "description": "Email address, used when neither `name` nor `first_name`/`last_name` is sent. The name is read from the part before the @; role addresses such as info@ get the form for organisations. Addresses carry no accents, so anna.mueller@ greets Frau Mueller, not Müller."
+                  },
+                  "language": {
+                    "type": "string",
+                    "maxLength": 35,
+                    "example": "de",
+                    "description": "The language the salutation is written in: `en`, `en-US`, `en-GB`, `de`, `de-AT`, `de-CH`, `fr`, `es`, `it`, `pt`, `pt-PT`, `pt-BR`, `nl`, `tr`, `pl`, `ja`. When omitted, the language of `locale`, then the main language of the country, then `en`. An unsupported language is an error, never a silent fall back to English."
+                  },
+                  "country": {
+                    "type": "string",
+                    "minLength": 2,
+                    "maxLength": 2,
+                    "description": "Country hint for the gender lookup, as on the gender endpoints. It does not set the language when `language` is sent: write to Mr Müller in the US in English."
+                  },
+                  "locale": {
+                    "type": "string",
+                    "maxLength": 35
+                  },
+                  "ip": {
+                    "type": "string",
+                    "maxLength": 45
+                  },
+                  "gender": {
+                    "type": "string",
+                    "enum": [
+                      "male",
+                      "female",
+                      "neutral"
+                    ],
+                    "description": "Gender you already know. Overrides the lookup; `neutral` always gives the neutral form."
+                  },
+                  "min_probability": {
+                    "type": "integer",
+                    "minimum": 50,
+                    "maximum": 100,
+                    "default": 90,
+                    "description": "Lowest probability for a gendered salutation. Below it the neutral form is used."
+                  },
+                  "title": {
+                    "type": "string",
+                    "maxLength": 40,
+                    "example": "Dr.",
+                    "description": "Academic title kept in a separate field. Used in German and English salutations."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Salutation built.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SalutationResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "402": {
+            "$ref": "#/components/responses/402"
+          },
+          "422": {
+            "$ref": "#/components/responses/422"
+          },
+          "429": {
+            "$ref": "#/components/responses/429"
+          },
+          "500": {
+            "$ref": "#/components/responses/500"
+          }
+        }
+      }
+    },
+    "/api/v1/salutation/bulk": {
+      "post": {
+        "tags": [
+          "Salutation"
+        ],
+        "summary": "Salutations for many names in one request",
+        "description": "Up to 100 names, one credit each. `language`, the country hint, `gender` and `min_probability` apply to every name. Results come back in the order sent.",
+        "operationId": "bulkSalutation",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "names"
+                ],
+                "properties": {
+                  "names": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 100,
+                    "items": {
+                      "type": "string",
+                      "maxLength": 200
+                    }
+                  },
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "name",
+                      "email"
+                    ],
+                    "default": "name",
+                    "description": "`email` reads every value as an email address."
+                  },
+                  "language": {
+                    "type": "string",
+                    "maxLength": 35,
+                    "example": "de",
+                    "description": "The language the salutation is written in: `en`, `en-US`, `en-GB`, `de`, `de-AT`, `de-CH`, `fr`, `es`, `it`, `pt`, `pt-PT`, `pt-BR`, `nl`, `tr`, `pl`, `ja`. When omitted, the language of `locale`, then the main language of the country, then `en`. An unsupported language is an error, never a silent fall back to English."
+                  },
+                  "country": {
+                    "type": "string",
+                    "minLength": 2,
+                    "maxLength": 2,
+                    "description": "Country hint for the gender lookup, as on the gender endpoints. It does not set the language when `language` is sent: write to Mr Müller in the US in English."
+                  },
+                  "locale": {
+                    "type": "string",
+                    "maxLength": 35
+                  },
+                  "ip": {
+                    "type": "string",
+                    "maxLength": 45
+                  },
+                  "gender": {
+                    "type": "string",
+                    "enum": [
+                      "male",
+                      "female",
+                      "neutral"
+                    ],
+                    "description": "Gender you already know. Overrides the lookup; `neutral` always gives the neutral form."
+                  },
+                  "min_probability": {
+                    "type": "integer",
+                    "minimum": 50,
+                    "maximum": 100,
+                    "default": 90,
+                    "description": "Lowest probability for a gendered salutation. Below it the neutral form is used."
+                  },
+                  "title": {
+                    "type": "string",
+                    "maxLength": 40,
+                    "example": "Dr.",
+                    "description": "Academic title kept in a separate field. Used in German and English salutations."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Every name processed, in the order sent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SalutationBulkResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "402": {
+            "$ref": "#/components/responses/402"
+          },
+          "422": {
+            "$ref": "#/components/responses/422"
+          },
+          "429": {
+            "$ref": "#/components/responses/429"
+          },
+          "500": {
+            "$ref": "#/components/responses/500"
+          }
+        }
+      }
+    }
+  },
+  "webhooks": {
+    "batch.completed": {
+      "post": {
+        "tags": [
+          "Webhooks"
+        ],
+        "summary": "A file job completed",
+        "description": "`data.object` is the job, exactly as `GET /api/v1/batches/{id}` returns it. `result.url` needs your API key to download.\n\nAnswer with any 2xx within 10 seconds, then do the work. Anything else (including a redirect) is retried after 1 min, 5 min, 30 min, 2 h, 6 h, 12 h, 24 h; after 8 attempts the event is given up. Order is not guaranteed.",
+        "operationId": "webhookBatchCompleted",
+        "parameters": [
+          {
+            "name": "NameGender-Signature",
+            "in": "header",
+            "required": true,
+            "description": "`t=<unix seconds>,v1=<hex>`. `v1` is HMAC-SHA256 of `\"<t>.<raw body>\"` with the endpoint secret. During a secret rotation a second `v1` is present for 24 hours; accept the request if any `v1` matches. Reject a `t` more than 5 minutes from your clock.",
+            "schema": {
+              "type": "string",
+              "example": "t=1727172264,v1=857fcddfea47617c448b7a8e6537bbd59c9922a37c5273b2709812fbadb29e50"
+            }
+          },
+          {
+            "name": "NameGender-Event-Id",
+            "in": "header",
+            "required": true,
+            "description": "Same as `id` in the body, and the same on every retry. Deduplicate on it.",
+            "schema": {
+              "type": "string",
+              "example": "evt_16f7c01502fda5436e8b7c4e"
+            }
+          },
+          {
+            "name": "NameGender-Delivery-Attempt",
+            "in": "header",
+            "required": true,
+            "description": "1 on the first try, then 2, 3… up to 8.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/WebhookEvent"
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "type": {
+                        "const": "batch.completed"
+                      },
+                      "data": {
+                        "type": "object",
+                        "properties": {
+                          "object": {
+                            "$ref": "#/components/schemas/BatchJob"
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "2XX": {
+            "description": "Received. Any 2xx status counts; the body is ignored."
+          }
+        }
+      }
+    },
+    "batch.failed": {
+      "post": {
+        "tags": [
+          "Webhooks"
+        ],
+        "summary": "A file job failed",
+        "description": "`data.object` is the job with `status: failed`; branch on `error.code`. A failed job is not charged.\n\nAnswer with any 2xx within 10 seconds, then do the work. Anything else (including a redirect) is retried after 1 min, 5 min, 30 min, 2 h, 6 h, 12 h, 24 h; after 8 attempts the event is given up. Order is not guaranteed.",
+        "operationId": "webhookBatchFailed",
+        "parameters": [
+          {
+            "name": "NameGender-Signature",
+            "in": "header",
+            "required": true,
+            "description": "`t=<unix seconds>,v1=<hex>`. `v1` is HMAC-SHA256 of `\"<t>.<raw body>\"` with the endpoint secret. During a secret rotation a second `v1` is present for 24 hours; accept the request if any `v1` matches. Reject a `t` more than 5 minutes from your clock.",
+            "schema": {
+              "type": "string",
+              "example": "t=1727172264,v1=857fcddfea47617c448b7a8e6537bbd59c9922a37c5273b2709812fbadb29e50"
+            }
+          },
+          {
+            "name": "NameGender-Event-Id",
+            "in": "header",
+            "required": true,
+            "description": "Same as `id` in the body, and the same on every retry. Deduplicate on it.",
+            "schema": {
+              "type": "string",
+              "example": "evt_16f7c01502fda5436e8b7c4e"
+            }
+          },
+          {
+            "name": "NameGender-Delivery-Attempt",
+            "in": "header",
+            "required": true,
+            "description": "1 on the first try, then 2, 3… up to 8.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/WebhookEvent"
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "type": {
+                        "const": "batch.failed"
+                      },
+                      "data": {
+                        "type": "object",
+                        "properties": {
+                          "object": {
+                            "$ref": "#/components/schemas/BatchJob"
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "2XX": {
+            "description": "Received. Any 2xx status counts; the body is ignored."
+          }
+        }
+      }
+    },
+    "credits.low": {
+      "post": {
+        "tags": [
+          "Webhooks"
+        ],
+        "summary": "Credits will run out within a week",
+        "description": "Sent once when the balance, at the average paid usage of the last 14 days, will last 7 days or less. Subscription credits and an upcoming renewal are taken into account. Checked hourly, so it can arrive up to an hour after the threshold is crossed; for an exact balance use `credits_remaining` on any API response.\n\nAnswer with any 2xx within 10 seconds, then do the work. Anything else (including a redirect) is retried after 1 min, 5 min, 30 min, 2 h, 6 h, 12 h, 24 h; after 8 attempts the event is given up. Order is not guaranteed.",
+        "operationId": "webhookCreditsLow",
+        "parameters": [
+          {
+            "name": "NameGender-Signature",
+            "in": "header",
+            "required": true,
+            "description": "`t=<unix seconds>,v1=<hex>`. `v1` is HMAC-SHA256 of `\"<t>.<raw body>\"` with the endpoint secret. During a secret rotation a second `v1` is present for 24 hours; accept the request if any `v1` matches. Reject a `t` more than 5 minutes from your clock.",
+            "schema": {
+              "type": "string",
+              "example": "t=1727172264,v1=857fcddfea47617c448b7a8e6537bbd59c9922a37c5273b2709812fbadb29e50"
+            }
+          },
+          {
+            "name": "NameGender-Event-Id",
+            "in": "header",
+            "required": true,
+            "description": "Same as `id` in the body, and the same on every retry. Deduplicate on it.",
+            "schema": {
+              "type": "string",
+              "example": "evt_16f7c01502fda5436e8b7c4e"
+            }
+          },
+          {
+            "name": "NameGender-Delivery-Attempt",
+            "in": "header",
+            "required": true,
+            "description": "1 on the first try, then 2, 3… up to 8.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/WebhookEvent"
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "type": {
+                        "const": "credits.low"
+                      },
+                      "data": {
+                        "type": "object",
+                        "properties": {
+                          "object": {
+                            "$ref": "#/components/schemas/CreditsAlert"
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "2XX": {
+            "description": "Received. Any 2xx status counts; the body is ignored."
+          }
+        }
+      }
+    },
+    "credits.depleted": {
+      "post": {
+        "tags": [
+          "Webhooks"
+        ],
+        "summary": "Credits ran out",
+        "description": "Sent once when the balance reaches zero and requests are being refused with `402 no_credits`. Checked hourly.\n\nAnswer with any 2xx within 10 seconds, then do the work. Anything else (including a redirect) is retried after 1 min, 5 min, 30 min, 2 h, 6 h, 12 h, 24 h; after 8 attempts the event is given up. Order is not guaranteed.",
+        "operationId": "webhookCreditsDepleted",
+        "parameters": [
+          {
+            "name": "NameGender-Signature",
+            "in": "header",
+            "required": true,
+            "description": "`t=<unix seconds>,v1=<hex>`. `v1` is HMAC-SHA256 of `\"<t>.<raw body>\"` with the endpoint secret. During a secret rotation a second `v1` is present for 24 hours; accept the request if any `v1` matches. Reject a `t` more than 5 minutes from your clock.",
+            "schema": {
+              "type": "string",
+              "example": "t=1727172264,v1=857fcddfea47617c448b7a8e6537bbd59c9922a37c5273b2709812fbadb29e50"
+            }
+          },
+          {
+            "name": "NameGender-Event-Id",
+            "in": "header",
+            "required": true,
+            "description": "Same as `id` in the body, and the same on every retry. Deduplicate on it.",
+            "schema": {
+              "type": "string",
+              "example": "evt_16f7c01502fda5436e8b7c4e"
+            }
+          },
+          {
+            "name": "NameGender-Delivery-Attempt",
+            "in": "header",
+            "required": true,
+            "description": "1 on the first try, then 2, 3… up to 8.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/WebhookEvent"
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "type": {
+                        "const": "credits.depleted"
+                      },
+                      "data": {
+                        "type": "object",
+                        "properties": {
+                          "object": {
+                            "$ref": "#/components/schemas/CreditsAlert"
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "2XX": {
+            "description": "Received. Any 2xx status counts; the body is ignored."
+          }
+        }
+      }
+    },
+    "webhook.test": {
+      "post": {
+        "tags": [
+          "Webhooks"
+        ],
+        "summary": "Test event from the dashboard",
+        "description": "Sent only by \"Send test event\" in the dashboard, only to that endpoint.\n\nAnswer with any 2xx within 10 seconds, then do the work. Anything else (including a redirect) is retried after 1 min, 5 min, 30 min, 2 h, 6 h, 12 h, 24 h; after 8 attempts the event is given up. Order is not guaranteed.",
+        "operationId": "webhookWebhookTest",
+        "parameters": [
+          {
+            "name": "NameGender-Signature",
+            "in": "header",
+            "required": true,
+            "description": "`t=<unix seconds>,v1=<hex>`. `v1` is HMAC-SHA256 of `\"<t>.<raw body>\"` with the endpoint secret. During a secret rotation a second `v1` is present for 24 hours; accept the request if any `v1` matches. Reject a `t` more than 5 minutes from your clock.",
+            "schema": {
+              "type": "string",
+              "example": "t=1727172264,v1=857fcddfea47617c448b7a8e6537bbd59c9922a37c5273b2709812fbadb29e50"
+            }
+          },
+          {
+            "name": "NameGender-Event-Id",
+            "in": "header",
+            "required": true,
+            "description": "Same as `id` in the body, and the same on every retry. Deduplicate on it.",
+            "schema": {
+              "type": "string",
+              "example": "evt_16f7c01502fda5436e8b7c4e"
+            }
+          },
+          {
+            "name": "NameGender-Delivery-Attempt",
+            "in": "header",
+            "required": true,
+            "description": "1 on the first try, then 2, 3… up to 8.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/WebhookEvent"
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "type": {
+                        "const": "webhook.test"
+                      },
+                      "data": {
+                        "type": "object",
+                        "properties": {
+                          "object": {
+                            "$ref": "#/components/schemas/WebhookTestObject"
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "2XX": {
+            "description": "Received. Any 2xx status counts; the body is ignored."
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "Recommended: `Authorization: Bearer <key>`."
+      },
+      "apiKeyHeader": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-Api-Key",
+        "description": "Alternative header form, for clients that cannot set `Authorization`. Keys are never read from the query string or the request body."
+      }
+    },
+    "schemas": {
+      "Error": {
+        "type": "object",
+        "description": "The one error shape. Returned by every endpoint at every failing status code.",
+        "required": [
+          "error",
+          "message",
+          "docs"
+        ],
+        "properties": {
+          "error": {
+            "type": "string",
+            "description": "Machine-readable and stable. **Branch on this.** New codes may be added over time, so treat an unrecognised value as a generic failure rather than crashing.",
+            "enum": [
+              "missing_key",
+              "invalid_key",
+              "revoked_key",
+              "blocked",
+              "email_not_verified",
+              "ip_not_allowed",
+              "proxy_secret_required",
+              "forbidden",
+              "no_credits",
+              "missing_input",
+              "invalid_input",
+              "too_many_items",
+              "ai_consent_required",
+              "unknown_endpoint",
+              "method_not_allowed",
+              "payload_too_large",
+              "rate_limited",
+              "batch_not_found",
+              "batch_not_startable",
+              "batch_not_finished",
+              "batch_in_progress",
+              "result_gone",
+              "too_many_batches",
+              "not_ready",
+              "server_error"
+            ]
+          },
+          "message": {
+            "type": "string",
+            "description": "Human-readable, translated into the caller's language. Wording can change; never parse or compare it."
+          },
+          "request_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Quote this in support requests.",
+            "example": "req_9c1f5b2a7e0d4a13"
+          },
+          "docs": {
+            "type": "string",
+            "format": "uri",
+            "description": "Link to this error in the documentation."
+          },
+          "errors": {
+            "type": "object",
+            "description": "Field-level detail. Present on validation failures only.",
+            "additionalProperties": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "retry_after": {
+            "type": "integer",
+            "description": "Seconds to wait. Present on 429 only, and mirrored in the `Retry-After` header."
+          }
+        }
+      },
+      "GenderResult": {
+        "type": "object",
+        "required": [
+          "query",
+          "name",
+          "gender",
+          "probability",
+          "sample_size",
+          "source"
+        ],
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "The input exactly as you sent it."
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The first name actually looked up, after stripping titles and surnames."
+          },
+          "first_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Given name parsed from the input. Present even when `gender` is null, and not charged separately. Titles and initials are never returned. For Chinese, Korean and Japanese script the surname comes first in the input and is returned in `last_name`."
+          },
+          "middle_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Any further given names between the first name and the surname, for example \"Fitzgerald\" in \"John Fitzgerald Kennedy\". Initials are dropped."
+          },
+          "last_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Surname parsed from the input, including particles such as \"van\" or \"de la\". \"Smith, John\" is read as surname first. With a Spanish-speaking `country` the last two words are both surnames (Pérez García). Always null for usernames, where a surname cannot be told apart from any other word."
+          },
+          "name_type": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "personal",
+              "organization",
+              "role",
+              null
+            ],
+            "description": "`organization` when the input carries a company marker (Acme LLC, Müller GmbH, Stanford University); `role` for shared mailboxes and placeholder accounts (info@, Customer Service, guest). Both return `gender: null` and no name parts. `personal` means no such marker was found; it does not confirm the input is a real name. null when the input is not a name at all."
+          },
+          "gender": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "male",
+              "female",
+              null
+            ],
+            "description": "null means the dataset has no confident answer. This is not an error."
+          },
+          "probability": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100,
+            "description": "Share of people with this name who have the reported gender. 0 when unknown. Measured against held-out data, answers at 80+ come true about 95% of the time, so this number runs slightly conservative rather than optimistic."
+          },
+          "sample_size": {
+            "type": "integer",
+            "description": "How many real people the answer is based on. A probability of 100 from a sample of 3 is weaker than 85 from a sample of 90,000 — read the two fields together. 0 means the source recorded proportions rather than counts."
+          },
+          "country": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The country the answer came from, when narrowed."
+          },
+          "took_ms": {
+            "type": "integer",
+            "example": 1,
+            "description": "Whole milliseconds spent resolving this value on our side; network time is not included."
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "db",
+              "script",
+              "fuzzy",
+              "llm",
+              "cache",
+              "none"
+            ],
+            "description": "How the answer was reached. `db` exact match; `script` matched after transliterating a non-Latin script; `fuzzy` closest spelling; `llm` language model; `none` no answer. Use it to decide how much to trust a row."
+          },
+          "confidence": {
+            "type": "string",
+            "enum": [
+              "high",
+              "medium",
+              "low",
+              "unverified",
+              "unknown"
+            ],
+            "description": "Sample size bucket: high ≥100 people, medium ≥25, low ≥1, unverified when the source gave proportions instead of counts."
+          },
+          "matched_as": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "For `fuzzy` and `script` sources, the dictionary entry that was actually matched. Always inspect this before accepting a fuzzy result."
+          }
+        }
+      },
+      "Envelope": {
+        "type": "object",
+        "required": [
+          "credits_charged",
+          "credits_remaining"
+        ],
+        "properties": {
+          "credits_charged": {
+            "type": "integer",
+            "description": "How many credits this call took from the balance: one per value resolved."
+          },
+          "credits_remaining": {
+            "type": "integer",
+            "description": "Balance once this call is paid for: purchased credits plus whatever is left of today's free quota."
+          },
+          "data_version": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "example": "2026.10",
+            "description": "Name-dataset snapshot that produced the answer."
+          },
+          "request_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Identifier of this call, also sent as the `X-Request-Id` header. Quote it in support requests."
+          }
+        }
+      },
+      "SingleResponse": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/Envelope"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "country_source": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "enum": [
+                  "country",
+                  "locale",
+                  "ip",
+                  null
+                ],
+                "description": "Where the country came from: the `country` parameter, the region of `locale`, the `ip` address, or none of them (null, worldwide answer)."
+              }
+            }
+          },
+          {
+            "$ref": "#/components/schemas/GenderResult"
+          }
+        ]
+      },
+      "BulkRequest": {
+        "type": "object",
+        "required": [
+          "names"
+        ],
+        "properties": {
+          "names": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 100,
+            "items": {
+              "type": "string",
+              "maxLength": 200
+            },
+            "description": "The values to resolve, each at most 200 characters. Each one costs one credit."
+          },
+          "country": {
+            "type": "string",
+            "minLength": 2,
+            "maxLength": 3,
+            "description": "ISO-3166 alpha-2 code applied to every value in the batch. Alpha-3 is also accepted."
+          },
+          "locale": {
+            "type": "string",
+            "maxLength": 35,
+            "description": "Language tag whose region becomes the batch country when `country` is not sent, for example `it-IT`. A tag without a region sets no country."
+          },
+          "ip": {
+            "type": "string",
+            "maxLength": 45,
+            "description": "End user IP address whose country becomes the batch country when neither `country` nor a regional `locale` is sent. Not stored. IP geolocation by DB-IP (db-ip.com), CC BY 4.0."
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "name",
+              "email",
+              "username"
+            ],
+            "default": "name",
+            "description": "How to read the values in `names`."
+          },
+          "ai_fallback": {
+            "type": "boolean",
+            "default": false,
+            "description": "Ask a language model for values the dataset cannot answer. Requires AI lookups to be enabled in account settings; otherwise the batch fails with `ai_consent_required`."
+          },
+          "best_guess": {
+            "type": "boolean",
+            "default": false,
+            "description": "Return the most likely gender even below the confidence threshold, instead of null. For `email` and `username` batches it applies to the extracted first name."
+          }
+        },
+        "example": {
+          "names": [
+            "Ayşe",
+            "Mehmet",
+            "Andrea"
+          ],
+          "country": "TR"
+        }
+      },
+      "BulkResponse": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/Envelope"
+          },
+          {
+            "type": "object",
+            "required": [
+              "results",
+              "summary"
+            ],
+            "properties": {
+              "took_ms": {
+                "type": "integer",
+                "example": 12,
+                "description": "Whole milliseconds spent resolving the batch on our side, network time excluded."
+              },
+              "country_source": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "enum": [
+                  "country",
+                  "locale",
+                  "ip",
+                  null
+                ],
+                "description": "Where the country came from: the `country` parameter, the region of `locale`, the `ip` address, or none of them (null, worldwide answer)."
+              },
+              "summary": {
+                "type": "object",
+                "description": "Counts for the whole batch.",
+                "properties": {
+                  "total": {
+                    "type": "integer",
+                    "description": "Values sent."
+                  },
+                  "identified": {
+                    "type": "integer",
+                    "description": "Values with a non-null `gender`."
+                  },
+                  "unknown": {
+                    "type": "integer",
+                    "description": "Values with `gender: null`."
+                  },
+                  "match_rate": {
+                    "type": "number",
+                    "description": "Percentage identified."
+                  }
+                }
+              },
+              "results": {
+                "type": "array",
+                "description": "Same order as the names you sent.",
+                "items": {
+                  "$ref": "#/components/schemas/GenderResult"
+                }
+              }
+            }
+          }
+        ]
+      },
+      "CountriesResponse": {
+        "type": "object",
+        "description": "Two lists, deliberately not merged. `registrations` is measured volume and is comparable only among countries that publish counts. `attested_in` is presence, with no weight attached — a country appears there whether or not anyone counted it.",
+        "properties": {
+          "credits_charged": {
+            "type": "integer",
+            "description": "How many credits this call took from the balance: always 1."
+          },
+          "credits_remaining": {
+            "type": "integer",
+            "description": "Balance once this call is paid for."
+          },
+          "data_version": {
+            "type": "string",
+            "nullable": true,
+            "description": "Name-dataset snapshot that produced the answer."
+          },
+          "request_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Identifier of this call, also sent as the `X-Request-Id` header. Quote it in support requests."
+          },
+          "took_ms": {
+            "type": "integer",
+            "example": 3,
+            "description": "Whole milliseconds spent building the distribution on our side, network time excluded."
+          },
+          "name": {
+            "type": "string",
+            "description": "The name that was looked up."
+          },
+          "basis": {
+            "type": "object",
+            "description": "What the numbers rest on. Carried in the response rather than left to the documentation, because the person reading a percentage is not reading the docs.",
+            "properties": {
+              "counted_sources": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "The statistical offices that publish observation counts."
+              },
+              "counted_countries": {
+                "type": "integer",
+                "description": "Countries with counted registrations for this name, before `limit` is applied. Can be larger than the length of `registrations`."
+              },
+              "attested_countries": {
+                "type": "integer",
+                "description": "Countries in `attested_in`, which `limit` never cuts."
+              },
+              "note": {
+                "type": "string",
+                "description": "Plain-language caveat. Show it next to the percentages."
+              }
+            }
+          },
+          "registrations": {
+            "type": "array",
+            "description": "Countries with counted registrations, most first, cut to `limit`. Shares are calculated across every counted country before the cut, so they sum to 100 only when nothing is cut.",
+            "items": {
+              "type": "object",
+              "properties": {
+                "country": {
+                  "type": "string",
+                  "description": "ISO 3166-1 alpha-2."
+                },
+                "count": {
+                  "type": "integer",
+                  "description": "Observed registrations."
+                },
+                "share": {
+                  "type": "number",
+                  "format": "float",
+                  "description": "This country's percentage of the name's registrations across all counting countries, including any that `limit` cut from the list."
+                },
+                "gender": {
+                  "type": "string",
+                  "nullable": true,
+                  "description": "Majority gender for the name in this country."
+                },
+                "probability": {
+                  "type": "integer",
+                  "description": "Share, 0–100, carrying that gender in this country."
+                },
+                "source": {
+                  "type": "string",
+                  "description": "Statistical office the count comes from."
+                }
+              }
+            }
+          },
+          "attested_in": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Every country the name occurs in, counted or not, alphabetically."
+          }
+        }
+      },
+      "AccountResponse": {
+        "type": "object",
+        "properties": {
+          "email": {
+            "type": "string",
+            "format": "email",
+            "description": "Account email address."
+          },
+          "credits_remaining": {
+            "type": "integer",
+            "description": "Purchased credits plus whatever is left of today's free quota."
+          },
+          "purchased_credits": {
+            "type": "integer",
+            "description": "Paid balance. Credits stay on your balance until you spend them."
+          },
+          "free_today": {
+            "type": "integer",
+            "description": "Free credits left today. Resets at midnight UTC."
+          },
+          "free_daily_limit": {
+            "type": "integer",
+            "description": "Free credits granted per day."
+          },
+          "lifetime_requests": {
+            "type": "integer",
+            "description": "Requests made with this account so far."
+          },
+          "data_version": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Current name-dataset snapshot."
+          }
+        }
+      },
+      "SalutationResult": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string"
+          },
+          "language": {
+            "type": "string",
+            "example": "de"
+          },
+          "form": {
+            "type": "string",
+            "enum": [
+              "gendered",
+              "neutral",
+              "organization"
+            ]
+          },
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "gender_unknown",
+              "below_min_probability",
+              "gender_neutral_requested",
+              "no_surname",
+              "no_given_name",
+              "language_ungendered",
+              null
+            ],
+            "description": "Why the neutral form was used. Null for gendered and organisation forms."
+          },
+          "salutation": {
+            "type": "object",
+            "properties": {
+              "formal": {
+                "type": "string",
+                "example": "Sehr geehrte Frau Dr. Müller,"
+              },
+              "informal": {
+                "type": "string",
+                "example": "Liebe Anna,"
+              },
+              "neutral": {
+                "type": "string",
+                "example": "Guten Tag Dr. Anna Müller,",
+                "description": "The gender-free form, always returned, for your own threshold."
+              }
+            }
+          },
+          "parts": {
+            "type": "object",
+            "description": "Pieces of the formal line, for building your own template.",
+            "properties": {
+              "opening": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "courtesy": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "academic": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "name": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            }
+          },
+          "gender": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "male",
+              "female",
+              null
+            ]
+          },
+          "gender_source": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "lookup",
+              "input",
+              "title",
+              null
+            ],
+            "description": "`input`: the `gender` parameter. `title`: a courtesy title in the name (Frau, Mr). `lookup`: our dataset."
+          },
+          "probability": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "confidence": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "first_name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "last_name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "name_type": {
+            "type": "string",
+            "enum": [
+              "personal",
+              "organization",
+              "role"
+            ]
+          },
+          "country": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "SalutationResponse": {
+        "allOf": [
+          {
+            "type": "object",
+            "properties": {
+              "credits_charged": {
+                "type": "integer"
+              },
+              "credits_remaining": {
+                "type": "integer"
+              },
+              "data_version": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "request_id": {
+                "type": "string"
+              },
+              "country_source": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "enum": [
+                  "country",
+                  "locale",
+                  "ip",
+                  null
+                ]
+              }
+            }
+          },
+          {
+            "$ref": "#/components/schemas/SalutationResult"
+          }
+        ]
+      },
+      "SalutationBulkResponse": {
+        "type": "object",
+        "properties": {
+          "credits_charged": {
+            "type": "integer"
+          },
+          "credits_remaining": {
+            "type": "integer"
+          },
+          "data_version": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "request_id": {
+            "type": "string"
+          },
+          "took_ms": {
+            "type": "integer"
+          },
+          "country_source": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "country",
+              "locale",
+              "ip",
+              null
+            ]
+          },
+          "language": {
+            "type": "string"
+          },
+          "summary": {
+            "type": "object",
+            "properties": {
+              "total": {
+                "type": "integer"
+              },
+              "gendered": {
+                "type": "integer"
+              },
+              "neutral": {
+                "type": "integer"
+              },
+              "organization": {
+                "type": "integer"
+              }
+            }
+          },
+          "results": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SalutationResult"
+            }
+          }
+        }
+      },
+      "NameCheckResult": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string"
+          },
+          "assessment": {
+            "type": "string",
+            "enum": [
+              "plausible",
+              "suspicious",
+              "implausible"
+            ],
+            "description": "`implausible`: at least one high-severity signal. `suspicious`: a medium signal or two low ones. Otherwise `plausible`."
+          },
+          "score": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100,
+            "description": "Higher is more like a real name. For your own threshold."
+          },
+          "signals": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "code": {
+                  "type": "string",
+                  "enum": [
+                    "keyboard_pattern",
+                    "repeated_characters",
+                    "placeholder",
+                    "placeholder_pair",
+                    "fictional_character",
+                    "profanity",
+                    "contains_url_or_email",
+                    "contains_digits",
+                    "contains_symbols",
+                    "organization_name",
+                    "too_long",
+                    "no_vowels",
+                    "same_first_and_last",
+                    "initials_only",
+                    "single_name",
+                    "first_name_not_found",
+                    "first_name_attested",
+                    "script_not_covered"
+                  ]
+                },
+                "severity": {
+                  "type": "string",
+                  "enum": [
+                    "high",
+                    "medium",
+                    "low",
+                    "info",
+                    "positive"
+                  ]
+                },
+                "part": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "enum": [
+                    "full",
+                    "first_name",
+                    "last_name",
+                    null
+                  ]
+                },
+                "value": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              }
+            }
+          },
+          "first_name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "last_name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "name_type": {
+            "type": "string",
+            "enum": [
+              "personal",
+              "organization",
+              "role"
+            ]
+          },
+          "evidence": {
+            "type": "object",
+            "properties": {
+              "first_name_status": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "enum": [
+                  "counted",
+                  "attested",
+                  "not_found",
+                  null
+                ],
+                "description": "`counted`: in official birth statistics. `attested`: recorded without counts. `not_found`: not in our data."
+              },
+              "first_name_counted_records": {
+                "type": "integer"
+              }
+            }
+          }
+        }
+      },
+      "NameCheckResponse": {
+        "allOf": [
+          {
+            "type": "object",
+            "properties": {
+              "credits_charged": {
+                "type": "integer"
+              },
+              "credits_remaining": {
+                "type": "integer"
+              },
+              "data_version": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "request_id": {
+                "type": "string"
+              },
+              "country_source": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "enum": [
+                  "country",
+                  "locale",
+                  "ip",
+                  null
+                ]
+              }
+            }
+          },
+          {
+            "$ref": "#/components/schemas/NameCheckResult"
+          }
+        ]
+      },
+      "NameCheckBulkResponse": {
+        "type": "object",
+        "properties": {
+          "credits_charged": {
+            "type": "integer"
+          },
+          "credits_remaining": {
+            "type": "integer"
+          },
+          "data_version": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "request_id": {
+            "type": "string"
+          },
+          "took_ms": {
+            "type": "integer"
+          },
+          "country_source": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "country",
+              "locale",
+              "ip",
+              null
+            ]
+          },
+          "summary": {
+            "type": "object",
+            "properties": {
+              "total": {
+                "type": "integer"
+              },
+              "plausible": {
+                "type": "integer"
+              },
+              "suspicious": {
+                "type": "integer"
+              },
+              "implausible": {
+                "type": "integer"
+              }
+            }
+          },
+          "results": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NameCheckResult"
+            }
+          }
+        }
+      },
+      "BatchJob": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "example": "B-7K2M9QX4TA"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "uploaded",
+              "queued",
+              "processing",
+              "completed",
+              "failed",
+              "cancelled"
+            ]
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "api",
+              "panel"
+            ]
+          },
+          "file": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "format": {
+                "type": "string",
+                "enum": [
+                  "csv",
+                  "xlsx"
+                ]
+              }
+            }
+          },
+          "columns": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "country": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            }
+          },
+          "options": {
+            "type": "object",
+            "properties": {
+              "country": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "ai_fallback": {
+                "type": "boolean"
+              },
+              "best_guess": {
+                "type": "boolean"
+              },
+              "delete_after_download": {
+                "type": "boolean"
+              }
+            }
+          },
+          "rows": {
+            "type": "object",
+            "properties": {
+              "total": {
+                "type": "integer"
+              },
+              "processed": {
+                "type": "integer"
+              },
+              "identified": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "description": "Rows given a gender. Set once completed."
+              }
+            }
+          },
+          "progress": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100
+          },
+          "credits": {
+            "type": "object",
+            "properties": {
+              "reserved": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "description": "Held from the balance when processing began."
+              },
+              "charged": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "description": "Final charge. Null until completed; a failed job is not charged."
+              }
+            }
+          },
+          "summary": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "properties": {
+              "male": {
+                "type": "integer"
+              },
+              "female": {
+                "type": "integer"
+              },
+              "unknown": {
+                "type": "integer"
+              },
+              "from_llm": {
+                "type": "integer"
+              }
+            }
+          },
+          "data_version": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "error": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "Set when `status` is `failed`. Branch on `code`.",
+            "properties": {
+              "code": {
+                "type": "string",
+                "enum": [
+                  "source_missing",
+                  "no_columns",
+                  "name_column_missing",
+                  "empty_file",
+                  "bad_format",
+                  "unreadable",
+                  "no_credits",
+                  "processing_error",
+                  "stalled"
+                ]
+              },
+              "message": {
+                "type": "string"
+              }
+            }
+          },
+          "result": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "properties": {
+              "url": {
+                "type": "string",
+                "format": "uri"
+              },
+              "format": {
+                "type": "string",
+                "enum": [
+                  "csv",
+                  "xlsx"
+                ]
+              },
+              "expires_at": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time"
+              }
+            }
+          },
+          "inspection": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "Only while `status` is `uploaded`.",
+            "properties": {
+              "columns": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "preview": {
+                "type": "array",
+                "items": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "guessed_name_column": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "guessed_country_column": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "credits_needed": {
+                "type": "integer"
+              },
+              "credits_available": {
+                "type": "integer"
+              }
+            }
+          },
+          "poll_after_seconds": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "created_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "started_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "finished_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "expires_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        }
+      },
+      "BatchList": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BatchJob"
+            }
+          },
+          "page": {
+            "type": "integer"
+          },
+          "per_page": {
+            "type": "integer"
+          },
+          "total": {
+            "type": "integer"
+          },
+          "has_more": {
+            "type": "boolean"
+          }
+        }
+      },
+      "WebhookEvent": {
+        "type": "object",
+        "description": "Envelope of every webhook request. The raw body is what the signature covers.",
+        "required": [
+          "id",
+          "type",
+          "created_at",
+          "api_version",
+          "data"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Event id; stable across retries.",
+            "example": "evt_16f7c01502fda5436e8b7c4e"
+          },
+          "type": {
+            "type": "string",
+            "description": "New types can be added. Answer 2xx to a type you do not recognise and ignore it.",
+            "enum": [
+              "batch.completed",
+              "batch.failed",
+              "credits.low",
+              "credits.depleted",
+              "webhook.test"
+            ]
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "api_version": {
+            "type": "string",
+            "const": "v1"
+          },
+          "data": {
+            "type": "object",
+            "properties": {
+              "object": {
+                "type": "object"
+              }
+            }
+          }
+        }
+      },
+      "CreditsAlert": {
+        "type": "object",
+        "required": [
+          "kind",
+          "credits_remaining",
+          "since"
+        ],
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "credits_low",
+              "credits_out"
+            ]
+          },
+          "credits_remaining": {
+            "type": "integer",
+            "description": "Same as `credits_remaining` on `/api/v1/me`: purchased, subscription and today's free credits together."
+          },
+          "purchased": {
+            "type": "integer",
+            "description": "Purchased credits. They stay on the balance until spent."
+          },
+          "subscription": {
+            "type": "integer",
+            "description": "Subscription credits left in the current period."
+          },
+          "daily_burn": {
+            "type": "integer",
+            "description": "Average credits used per day over the last 14 days."
+          },
+          "runway_days": {
+            "type": "integer",
+            "description": "Days the balance lasts at that rate. `credits.low` only."
+          },
+          "since": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the condition was first seen."
+          }
+        }
+      },
+      "WebhookTestObject": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "responses": {
+      "401": {
+        "description": "No usable API key. Codes: `missing_key`, `invalid_key`, `revoked_key`.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "403": {
+        "description": "Key or account is not permitted to make this call. Codes: `blocked`, `email_not_verified`, `ip_not_allowed`, `proxy_secret_required`, `forbidden`.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "402": {
+        "description": "Out of credits. Buy more, or wait for the daily free quota to reset at midnight UTC.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "400": {
+        "description": "Bad request. Codes: `missing_input`.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "422": {
+        "description": "Input failed validation. `errors` names the offending fields. Codes: `invalid_input`, `too_many_items`, `ai_consent_required`.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "404": {
+        "description": "No endpoint at this path, or no such file job on this account. Codes: `unknown_endpoint`, `batch_not_found`.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "405": {
+        "description": "Wrong HTTP method for this endpoint.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "413": {
+        "description": "Request body too large.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "429": {
+        "description": "Rate limit exceeded, or too many file jobs running at once. Wait `retry_after` seconds. Codes: `rate_limited`, `too_many_batches`.",
+        "headers": {
+          "Retry-After": {
+            "schema": {
+              "type": "integer"
+            },
+            "description": "Seconds to wait."
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "409": {
+        "description": "The file job is not in a state that allows this. `status` says what it is. Codes: `batch_not_startable`, `batch_not_finished`, `batch_in_progress`.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "410": {
+        "description": "The file job has no result to download any more: it failed, was cancelled, expired, or was a single-download result already fetched.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "503": {
+        "description": "The name dataset is being rebuilt. Retry shortly; this is brief and expected during a data refresh.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "500": {
+        "description": "Unexpected server error. Nothing was charged. Quote `request_id` if it persists.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      }
+    },
+    "examples": {
+      "known": {
+        "summary": "Recognised name",
+        "value": {
+          "credits_charged": 1,
+          "credits_remaining": 4821,
+          "data_version": "2026.10",
+          "request_id": "req_9c1f5b2a7e0d4a13",
+          "query": "Ayşe Yılmaz",
+          "name": "Ayşe",
+          "first_name": "Ayşe",
+          "middle_name": null,
+          "last_name": "Yılmaz",
+          "name_type": "personal",
+          "gender": "female",
+          "country": null,
+          "sample_size": 655,
+          "probability": 99,
+          "took_ms": 1,
+          "source": "db",
+          "confidence": "high",
+          "matched_as": null
+        }
+      },
+      "unknown": {
+        "summary": "Name not in the dataset — a successful \"we do not know\"",
+        "value": {
+          "credits_charged": 1,
+          "credits_remaining": 4820,
+          "data_version": "2026.10",
+          "request_id": "req_1d7e3c9048ba52f6",
+          "query": "Qzzxvv",
+          "name": "Qzzxvv",
+          "first_name": "Qzzxvv",
+          "middle_name": null,
+          "last_name": null,
+          "name_type": "personal",
+          "gender": null,
+          "country": null,
+          "sample_size": 0,
+          "probability": 0,
+          "took_ms": 1,
+          "source": "none",
+          "confidence": "unknown",
+          "matched_as": null
+        }
+      },
+      "fuzzy": {
+        "summary": "Resolved by closest spelling — note the capped probability",
+        "value": {
+          "credits_charged": 1,
+          "credits_remaining": 4819,
+          "data_version": "2026.10",
+          "request_id": "req_44a0be71c3925fd8",
+          "query": "Micheal",
+          "name": "Micheal",
+          "first_name": "Micheal",
+          "middle_name": null,
+          "last_name": null,
+          "name_type": "personal",
+          "gender": "male",
+          "country": null,
+          "sample_size": 152388,
+          "probability": 86,
+          "took_ms": 2,
+          "source": "fuzzy",
+          "confidence": "high",
+          "matched_as": "michael"
+        }
+      }
+    }
+  },
+  "security": [
+    {
+      "bearerAuth": []
+    },
+    {
+      "apiKeyHeader": []
+    }
+  ],
+  "tags": [
+    {
+      "name": "Gender",
+      "description": "Name, email and username lookups."
+    },
+    {
+      "name": "Salutation",
+      "description": "Ready-to-use letter and email salutations in ten languages."
+    },
+    {
+      "name": "Name check",
+      "description": "Whether a name looks like a real person's name, with the reasons."
+    },
+    {
+      "name": "Account",
+      "description": "Credit balance and key status."
+    },
+    {
+      "name": "Batches",
+      "description": "Upload a CSV or XLSX file and download it back with gender columns added."
+    },
+    {
+      "name": "Webhooks",
+      "description": "Requests NameGender sends to your server when a file job finishes or credits run low."
+    }
+  ]
+}
