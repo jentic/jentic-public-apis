@@ -8,10 +8,125 @@
 >
 > **Quick access API Index:** [0](index/apis/openapi/0) · [1](index/apis/openapi/1) · [2](index/apis/openapi/2) · [3](index/apis/openapi/3) · [4](index/apis/openapi/4) · [5](index/apis/openapi/5) · [6](index/apis/openapi/6) · [7](index/apis/openapi/7) · [8](index/apis/openapi/8) · [9](index/apis/openapi/9) · [A](index/apis/openapi/A) · [B](index/apis/openapi/B) · [C](index/apis/openapi/C) · [D](index/apis/openapi/D) · [E](index/apis/openapi/E) · [F](index/apis/openapi/F) · [G](index/apis/openapi/G) · [H](index/apis/openapi/H) · [I](index/apis/openapi/I) · [J](index/apis/openapi/J) · [K](index/apis/openapi/K) · [L](index/apis/openapi/L) · [M](index/apis/openapi/M) · [N](index/apis/openapi/N) · [O](index/apis/openapi/O) · [P](index/apis/openapi/P) · [Q](index/apis/openapi/Q) · [R](index/apis/openapi/R) · [S](index/apis/openapi/S) · [T](index/apis/openapi/T) · [U](index/apis/openapi/U) · [V](index/apis/openapi/V) · [W](index/apis/openapi/W) · [X](index/apis/openapi/X) · [Y](index/apis/openapi/Y) · [Z](index/apis/openapi/Z)
 
-## Overview
+## Explore the API Directory
 
-[![Contributor Covenant](https://img.shields.io/badge/Contributor%20Covenant-3.0-40c463.svg)](CODE_OF_CONDUCT.md)
-[![License: CC0-1.0](https://img.shields.io/badge/License-CC0_1.0-blue)](LICENSE.md)
+[![Browse the API Directory](https://img.shields.io/badge/🔎_Browse_the_full_API_Directory-jentic.com%2Fapis-6C47FF?style=for-the-badge)](https://jentic.com/apis)
+
+[![Categories](https://img.shields.io/badge/categories-22-6C47FF?style=flat-square)](https://jentic.com/apis)
+[![AI-Readiness scored](https://img.shields.io/badge/AI--readiness-scored-40c463?style=flat-square)](https://github.com/jentic/jentic-api-scorecard)
+[![OpenAPI](https://img.shields.io/badge/format-OpenAPI_%2B_Arazzo-85EA2D?style=flat-square&logo=openapiinitiative&logoColor=black)](https://www.openapis.org/)
+[![License: CC0-1.0](https://img.shields.io/badge/license-CC0_1.0-blue?style=flat-square)](LICENSE.md)
+[![Contributor Covenant](https://img.shields.io/badge/Contributor%20Covenant-3.0-40c463?style=flat-square)](CODE_OF_CONDUCT.md)
+
+Every API has a machine-readable **OpenAPI spec** in this repository, and most carry an **AI-readiness score** right alongside it (a `scorecard.json` next to the spec; see [AI-Readiness Scoring](#ai-readiness-scoring) below).
+
+### Popular APIs
+
+| API | Category | OpenAPI spec |
+|-----|----------|:------------:|
+| <img src="https://icons.duckduckgo.com/ip3/stripe.com.ico" width="16" height="16" align="top" /> **Stripe** | Payments | [📄 OpenAPI](apis/openapi/stripe.com/stripe/2026-03-25.dahlia/openapi.json) |
+| <img src="https://icons.duckduckgo.com/ip3/openai.com.ico" width="16" height="16" align="top" /> **OpenAI** | AI/ML | [📄 OpenAPI](apis/openapi/openai.com/main/2.3.0/openapi.json) |
+| <img src="https://icons.duckduckgo.com/ip3/anthropic.com.ico" width="16" height="16" align="top" /> **Anthropic** (Messages) | AI/ML | [📄 OpenAPI](apis/openapi/anthropic.com/messages/1.0.0/openapi.json) |
+| <img src="https://icons.duckduckgo.com/ip3/github.com.ico" width="16" height="16" align="top" /> **GitHub** REST | Developer Tools | [📄 OpenAPI](apis/openapi/api.github.com/main/1.1.4/openapi.json) |
+| <img src="https://icons.duckduckgo.com/ip3/slack.com.ico" width="16" height="16" align="top" /> **Slack** Web API | Communications | [📄 OpenAPI](apis/openapi/slack.com/main/1.7.0/openapi.json) |
+| <img src="https://icons.duckduckgo.com/ip3/google.com.ico" width="16" height="16" align="top" /> **Gmail** | Productivity | [📄 OpenAPI](apis/openapi/googleapis.com/gmail/v1/openapi.json) |
+| <img src="https://icons.duckduckgo.com/ip3/notion.so.ico" width="16" height="16" align="top" /> **Notion** | Productivity | [📄 OpenAPI](apis/openapi/notion.com/notion-api/2026-03-11/openapi.json) |
+| <img src="https://icons.duckduckgo.com/ip3/shopify.com.ico" width="16" height="16" align="top" /> **Shopify** Admin | E-Commerce | [📄 OpenAPI](apis/openapi/shopify.com/main/2025-01/openapi.json) |
+| <img src="https://icons.duckduckgo.com/ip3/plaid.com.ico" width="16" height="16" align="top" /> **Plaid** | Finance | [📄 OpenAPI](apis/openapi/plaid.com/main/2020-09-14_1.631.0/openapi.json) |
+| <img src="https://icons.duckduckgo.com/ip3/discord.com.ico" width="16" height="16" align="top" /> **Discord** | Communications | [📄 OpenAPI](apis/openapi/discord.com/main/10/openapi.json) |
+| <img src="https://icons.duckduckgo.com/ip3/linear.app.ico" width="16" height="16" align="top" /> **Linear** | Developer Tools | [📄 OpenAPI](apis/openapi/linear.app/main/1.0/openapi.json) |
+
+### Browse by category
+
+The directory is organized into 22 categories. Below is a small sample from a few. Expand a section, then follow **View all** for every API in that category on [jentic.com/apis](https://jentic.com/apis).
+
+<details>
+<summary><b>🛠️ Developer Tools</b></summary>
+
+| API | OpenAPI spec |
+|-----|:------------:|
+| <img src="https://icons.duckduckgo.com/ip3/github.com.ico" width="16" height="16" align="top" /> **GitHub** REST | [📄 OpenAPI](apis/openapi/api.github.com/main/1.1.4/openapi.json) |
+| <img src="https://icons.duckduckgo.com/ip3/linear.app.ico" width="16" height="16" align="top" /> **Linear** | [📄 OpenAPI](apis/openapi/linear.app/main/1.0/openapi.json) |
+| <img src="https://icons.duckduckgo.com/ip3/cloudflare.com.ico" width="16" height="16" align="top" /> **Cloudflare** | [📄 OpenAPI](apis/openapi/cloudflare.com/main/4.0.0/openapi.json) |
+| <img src="https://icons.duckduckgo.com/ip3/digitalocean.com.ico" width="16" height="16" align="top" /> **DigitalOcean** | [📄 OpenAPI](apis/openapi/digitalocean.com/main/2.0/openapi.json) |
+
+➡️ **[View all Developer Tools APIs →](https://jentic.com/apis?category=developer-tools)**
+
+</details>
+
+<details>
+<summary><b>🤖 AI/ML</b></summary>
+
+| API | OpenAPI spec |
+|-----|:------------:|
+| <img src="https://icons.duckduckgo.com/ip3/openai.com.ico" width="16" height="16" align="top" /> **OpenAI** | [📄 OpenAPI](apis/openapi/openai.com/main/2.3.0/openapi.json) |
+| <img src="https://icons.duckduckgo.com/ip3/anthropic.com.ico" width="16" height="16" align="top" /> **Anthropic** (Messages) | [📄 OpenAPI](apis/openapi/anthropic.com/messages/1.0.0/openapi.json) |
+
+➡️ **[View all AI/ML APIs →](https://jentic.com/apis?category=ai-ml)**
+
+</details>
+
+<details>
+<summary><b>💳 Payments &amp; Finance</b></summary>
+
+| API | OpenAPI spec |
+|-----|:------------:|
+| <img src="https://icons.duckduckgo.com/ip3/stripe.com.ico" width="16" height="16" align="top" /> **Stripe** | [📄 OpenAPI](apis/openapi/stripe.com/stripe/2026-03-25.dahlia/openapi.json) |
+| <img src="https://icons.duckduckgo.com/ip3/plaid.com.ico" width="16" height="16" align="top" /> **Plaid** | [📄 OpenAPI](apis/openapi/plaid.com/main/2020-09-14_1.631.0/openapi.json) |
+| <img src="https://icons.duckduckgo.com/ip3/xero.com.ico" width="16" height="16" align="top" /> **Xero** Accounting | [📄 OpenAPI](apis/openapi/xero.com/xero_accounting/7.0.0/openapi.json) |
+
+➡️ **[View all Payments](https://jentic.com/apis?category=payments)** · **[Finance APIs →](https://jentic.com/apis?category=finance)**
+
+</details>
+
+<details>
+<summary><b>💬 Communications</b></summary>
+
+| API | OpenAPI spec |
+|-----|:------------:|
+| <img src="https://icons.duckduckgo.com/ip3/slack.com.ico" width="16" height="16" align="top" /> **Slack** Web API | [📄 OpenAPI](apis/openapi/slack.com/main/1.7.0/openapi.json) |
+| <img src="https://icons.duckduckgo.com/ip3/discord.com.ico" width="16" height="16" align="top" /> **Discord** | [📄 OpenAPI](apis/openapi/discord.com/main/10/openapi.json) |
+| <img src="https://icons.duckduckgo.com/ip3/twilio.com.ico" width="16" height="16" align="top" /> **Twilio** Messaging | [📄 OpenAPI](apis/openapi/twilio.com/twilio_messaging_v1/1.0.0/openapi.json) |
+| <img src="https://icons.duckduckgo.com/ip3/sendgrid.com.ico" width="16" height="16" align="top" /> **SendGrid** Mail | [📄 OpenAPI](apis/openapi/sendgrid.com/mail/1.0.0/openapi.json) |
+
+➡️ **[View all Communications APIs →](https://jentic.com/apis?category=communications)**
+
+</details>
+
+<details>
+<summary><b>📋 Productivity</b></summary>
+
+| API | OpenAPI spec |
+|-----|:------------:|
+| <img src="https://icons.duckduckgo.com/ip3/google.com.ico" width="16" height="16" align="top" /> **Gmail** | [📄 OpenAPI](apis/openapi/googleapis.com/gmail/v1/openapi.json) |
+| <img src="https://icons.duckduckgo.com/ip3/google.com.ico" width="16" height="16" align="top" /> **Google Calendar** | [📄 OpenAPI](apis/openapi/googleapis.com/calendar/v3/openapi.json) |
+| <img src="https://icons.duckduckgo.com/ip3/google.com.ico" width="16" height="16" align="top" /> **Google Sheets** | [📄 OpenAPI](apis/openapi/googleapis.com/sheets/v4/openapi.json) |
+| <img src="https://icons.duckduckgo.com/ip3/notion.so.ico" width="16" height="16" align="top" /> **Notion** | [📄 OpenAPI](apis/openapi/notion.com/notion-api/2026-03-11/openapi.json) |
+
+➡️ **[View all Productivity APIs →](https://jentic.com/apis?category=productivity)**
+
+</details>
+
+### Fun &amp; niche APIs
+
+The directory goes well beyond the usual suspects. Here's a taste of the long tail:
+
+| API | What it's for | OpenAPI spec | jentic.com page |
+|-----|---------------|:------------:|-----------------|
+| <img src="https://icons.duckduckgo.com/ip3/facecheck.id.ico" width="16" height="16" align="top" /> **FaceCheck.ID** | Reverse face search | [📄 OpenAPI](apis/openapi/facecheck.id/main/v1.02/openapi.json) | [🔗 page](https://jentic.com/apis/facecheck.id/main) |
+| <img src="https://icons.duckduckgo.com/ip3/beatport.com.ico" width="16" height="16" align="top" /> **Beatport** | Electronic music catalog | [📄 OpenAPI](apis/openapi/beatport.com/main/4.0.0/openapi.json) | [🔗 page](https://jentic.com/apis/beatport.com/main) |
+| <img src="https://icons.duckduckgo.com/ip3/untappd.com.ico" width="16" height="16" align="top" /> **Untappd** | Beer check-ins &amp; ratings | [📄 OpenAPI](apis/openapi/untappd.com/main/4.0.0/openapi.json) | [🔗 page](https://jentic.com/apis/untappd.com/main) |
+| <img src="https://icons.duckduckgo.com/ip3/pokeapi.co.ico" width="16" height="16" align="top" /> **PokéAPI** | Pokémon data | [📄 OpenAPI](apis/openapi/pokeapi.co/main/2.7.0/openapi.json) | [🔗 page](https://jentic.com/apis/pokeapi.co/main) |
+| <img src="https://icons.duckduckgo.com/ip3/nasa.gov.ico" width="16" height="16" align="top" /> **NASA APOD** | Astronomy Picture of the Day | [📄 OpenAPI](apis/openapi/nasa.gov/apod/1.0.0/openapi.json) | [🔗 page](https://jentic.com/apis/nasa.gov/apod) |
+| <img src="https://icons.duckduckgo.com/ip3/musicbrainz.org.ico" width="16" height="16" align="top" /> **MusicBrainz** | Open music metadata | [📄 OpenAPI](apis/openapi/musicbrainz.org/main/2.0/openapi.json) | [🔗 page](https://jentic.com/apis/musicbrainz.org/main) |
+| <img src="https://icons.duckduckgo.com/ip3/openbrewerydb.org.ico" width="16" height="16" align="top" /> **Open Brewery DB** | Brewery directory | [📄 OpenAPI](apis/openapi/openbrewerydb.org/main/1.0/openapi.json) | [🔗 page](https://jentic.com/apis/openbrewerydb.org/main) |
+| <img src="https://icons.duckduckgo.com/ip3/tvmaze.com.ico" width="16" height="16" align="top" /> **TVmaze** | TV show schedules &amp; data | [📄 OpenAPI](apis/openapi/tvmaze.com/main/1.0/openapi.json) | [🔗 page](https://jentic.com/apis/tvmaze.com/main) |
+| <img src="https://icons.duckduckgo.com/ip3/chess.com.ico" width="16" height="16" align="top" /> **Chess.com** | Players, games &amp; stats | [📄 OpenAPI](apis/openapi/chess.com/main/1.0.0/openapi.json) | [🔗 page](https://jentic.com/apis/chess.com/main) |
+| <img src="https://icons.duckduckgo.com/ip3/lichess.org.ico" width="16" height="16" align="top" /> **Lichess** | Open chess platform | [📄 OpenAPI](apis/openapi/lichess.org/main/2.0.130/openapi.json) | [🔗 page](https://jentic.com/apis/lichess.org/main) |
+
+> Looking for something else? Search the **[full API Directory →](https://jentic.com/apis)**, or jump into the raw specs via the [Quick access API Index](#jentic-public-apis) above.
+
+## Overview
 
 ### The agentic knowledge layer
 
@@ -62,7 +177,15 @@ For detailed information, please refer to the [structure documentation](STRUCTUR
 
 ## AI-Readiness Scoring
 
-OpenAPI documents in this repository can be scored for AI-readiness using the **Jentic API Scorecard CLI** — no signup, no API key, and no configuration needed.
+OpenAPI documents in this repository can be scored for AI-readiness using the **Jentic API Scorecard CLI**, with no signup, no API key, and no configuration needed.
+
+For most APIs the score is already computed and stored in the repository as a `scorecard.json` file sitting next to the spec, so you can read it without running anything:
+
+```
+apis/openapi/{vendor}/{api-name}/{version}/
+├── openapi.json      # the API spec
+└── scorecard.json    # its AI-readiness score
+```
 
 ### URL format
 
