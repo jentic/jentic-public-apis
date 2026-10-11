@@ -1,0 +1,918 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "NudgeHost v1 API",
+    "version": "1.0.0",
+    "summary": "Upload files to NudgeHost, list them, and delete them.",
+    "description": "The public NudgeHost API. Four operations cover the whole surface. Uploading is two steps, listing is a keyset-paginated read, and deleting is a soft delete.\n\n## Base URL\n\nUse `https://www.nudgehost.com`. The apex host `nudgehost.com` answers with a 308 redirect to the `www` host, and that is a cross-origin hop, so both browsers and Node's `fetch` drop the `Authorization` header while following it. Every authenticated call sent to the apex therefore arrives with no credential and is refused as `unauthorized`, which looks exactly like a bad key. Point clients at the `www` host directly.\n\n## Authentication\n\nEvery operation needs an API key sent as a bearer token. Keys begin with `nh_sk_` and are created in the account dashboard. The `Bearer` scheme is matched case-insensitively, so `bearer` also works.\n\nA key carries the full authority of the account that owns it. There are no scopes and no read-only keys.\n\nDo not put a key in browser JavaScript. There is no CORS on this API and preflight requests are refused, so a browser call fails rather than half working.\n\n## Failures\n\nEvery non-success response has the same body shape, an object with a single `error` key holding `code`, `message`, and sometimes `details`. Switch on `code`. It is part of the contract and will not change without a version change. Do not match on `message`, which is prose and gets rewritten freely.\n\n## Rate limits\n\nRequests are counted per key over a fixed one-minute sliding window. The allowance is 20 requests per minute on the free plan, 60 on Pro, and 150 on Studio. Going over returns `rate_limited` with a `Retry-After` header.\n\nThere are no `X-RateLimit-*` headers. Nothing reports remaining quota, so a client that wants to pace itself has to count its own calls.\n\n## Caching\n\nEvery response in this namespace carries `Cache-Control: private, no-store`. Responses are scoped to one account and must not be stored by a shared cache.",
+    "contact": {
+      "name": "NudgeHost",
+      "url": "https://www.nudgehost.com"
+    }
+  },
+  "servers": [
+    {
+      "url": "https://www.nudgehost.com",
+      "description": "Production. Use this host and not the apex, which strips the Authorization header on its redirect."
+    }
+  ],
+  "security": [
+    {
+      "bearerAuth": []
+    }
+  ],
+  "tags": [
+    {
+      "name": "Uploads",
+      "description": "Creating a file, in two steps. Start the upload, PUT the bytes to the signed URL, then complete it."
+    },
+    {
+      "name": "Files",
+      "description": "Reading and deleting files that already exist."
+    }
+  ],
+  "paths": {
+    "/api/v1/uploads": {
+      "post": {
+        "tags": ["Uploads"],
+        "operationId": "startUpload",
+        "summary": "Start an upload",
+        "description": "Step one of two. Creates the file row and returns a presigned URL to PUT the bytes to.\n\nNothing is live yet when this returns. The link does not serve until the bytes have been PUT and the complete step has run, and `kind` is not decided until then either.\n\n### PUTting the bytes\n\nSend the bytes to `upload.url` with the method in `upload.method` and the headers in `upload.headers`. The signature covers `Content-Length` only, so a PUT whose body is not exactly `fileSize` bytes long is refused by storage rather than by this API. `Content-Type` is not covered by the signature, and storage accepts a PUT that sends a different one. Send the value you declared regardless. It is stored as the file's type and decides how the link serves the file, and a file stored as something its bytes are not is served wrongly.\n\nSome HTTP clients set `Content-Length` themselves from the request body and fight an attempt to set it by hand. Where that happens, sending `Content-Type` alone and letting the client compute the length is usually correct.\n\nThe signed URL is valid for the number of seconds in `upload.expiresInSeconds`. If it expires before the bytes land, start a new upload rather than reusing the id.\n\n### Slugs\n\n`desiredSlug` is optional and is never trusted. It is re-sanitized and checked against reserved names on the server. A slug that is already taken, reserved, or empty after sanitizing falls back to a random one rather than failing the request. The `slug` in the response is always the one that exists.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StartUploadRequest"
+              },
+              "examples": {
+                "minimal": {
+                  "summary": "The three required fields",
+                  "value": {
+                    "filename": "q3-report.pdf",
+                    "contentType": "application/pdf",
+                    "fileSize": 184320
+                  }
+                },
+                "withSlug": {
+                  "summary": "Asking for a particular slug",
+                  "value": {
+                    "filename": "handbook.pdf",
+                    "contentType": "application/pdf",
+                    "fileSize": 2097152,
+                    "desiredSlug": "team-handbook"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The row was created and the upload URL is ready. 201 rather than 200, because a resource the caller can act on exists afterwards.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/CacheControl"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StartUploadResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthenticated"
+          },
+          "403": {
+            "description": "The account is at its active-link cap, which only the free plan has. Delete a file or upgrade to add more.\n\n403 rather than 402. An account being told to upgrade or delete something is the shape of failure Payment Required looks written for, but that status is still reserved in the HTTP spec and is handled inconsistently by clients and proxies.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/CacheControl"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "link_limit_reached",
+                    "message": "You have reached 10 active links on the free plan. Delete one or upgrade to add more.",
+                    "details": {
+                      "activeFiles": 10,
+                      "maxActiveFiles": 10
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "`fileSize` is over the per-file ceiling on the account's plan. The ceiling is 25MB on free, 250MB on Pro, and 1GB on Studio.\n\n`details.plan` carries the plan id rather than the display name, and there are three of them: `free`, `pro`, and `team`. `team` is the id of the plan sold as Studio, so a client switching on this value has to expect `team` everywhere the pricing page says Studio. The id was kept when the plan was renamed, because the column it lives in has no constraint and renaming it would have dropped existing subscribers to free entitlements.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/CacheControl"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "file_too_large",
+                    "message": "That file is over the size limit on your plan. See https://www.nudgehost.com/pricing for the ceilings.",
+                    "details": {
+                      "maxBytes": 26214400,
+                      "fileSize": 41943040,
+                      "plan": "free"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      },
+      "get": {
+        "tags": ["Uploads"],
+        "operationId": "startUploadMethodNotAllowed",
+        "summary": "Not supported",
+        "description": "This path accepts POST only. Every other verb, including OPTIONS, returns `method_not_allowed` in the standard error envelope rather than an empty framework 405.",
+        "responses": {
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          }
+        }
+      }
+    },
+    "/api/v1/uploads/{id}/complete": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/FileId"
+        }
+      ],
+      "post": {
+        "tags": ["Uploads"],
+        "operationId": "completeUpload",
+        "summary": "Complete an upload",
+        "description": "Step two of two. Confirms the bytes landed, runs any derived work, and returns the address the file is actually reachable at.\n\nCall this after the PUT has succeeded. Send no request body.\n\n### Why the address can move\n\nThe `url` here is built from what the derived work decided, not from what the row said on the way in. A ZIP that turns out to be a static site is served from its own subdomain and answers with that address. Everything else is served from the viewer path. Use the `url` this endpoint returns rather than the one the start step returned.\n\n### The work is synchronous\n\nThis endpoint can take a while on a large archive. It unpacks in the request rather than deferring, because the response cannot be written until the work has run. `kind` is only decided by the unpack, the address moves only for a site, and the refusals below can only be discovered here.\n\n### Calling it twice\n\nA second call is safe and returns 200.\n\nWhere the first call produced a site or a converted document, the second call returns the stored result without redoing the work. That guard matters. For a site the uploaded archive is deleted the moment the unpack succeeds, so a second pass would find the object missing, conclude the bytes never arrived, and destroy a live site.\n\nWhere the file is a plain file, the checks simply run again and change nothing.\n\n### If the bytes never arrived\n\n`upload_incomplete` means storage has no object at the expected location. The file row is deleted when this happens, so the id is spent. Start a new upload rather than retrying this one.",
+        "responses": {
+          "200": {
+            "description": "The file is live at `url`.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/CacheControl"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CompleteUploadResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthenticated"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "422": {
+            "description": "The bytes could not be turned into a served file. Two codes arrive with this status and they mean different things.\n\n`upload_incomplete` means nothing was found in storage at the expected location, so there was nothing to complete. The row has been deleted and the id is spent.\n\n`upload_rejected` means the bytes arrived and cannot be used. The row and its stored objects have already been removed. The `message` carries the specific reason, written for a person to read. Do not match on it. Branch on the code and show the message.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/CacheControl"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "examples": {
+                  "uploadIncomplete": {
+                    "summary": "The PUT never landed",
+                    "value": {
+                      "error": {
+                        "code": "upload_incomplete",
+                        "message": "Those bytes never arrived. PUT the file to the upload URL, then complete again."
+                      }
+                    }
+                  },
+                  "uploadRejected": {
+                    "summary": "The bytes arrived and cannot be used",
+                    "value": {
+                      "error": {
+                        "code": "upload_rejected",
+                        "message": "The specific reason, written for a person."
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      },
+      "get": {
+        "tags": ["Uploads"],
+        "operationId": "completeUploadMethodNotAllowed",
+        "summary": "Not supported",
+        "description": "There is nothing to read at this path. It accepts POST only, and every other verb, including OPTIONS, returns `method_not_allowed` in the standard error envelope rather than an empty framework 405.",
+        "responses": {
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          }
+        }
+      }
+    },
+    "/api/v1/files": {
+      "get": {
+        "tags": ["Files"],
+        "operationId": "listFiles",
+        "summary": "List files",
+        "description": "The account's files, newest first, sorted by creation time with the id breaking ties.\n\n### Pagination\n\nPagination is keyset, not offset. Read `nextCursor` from the response and send it back as the `cursor` parameter to get the following page. A `nextCursor` of `null` means this is the last page.\n\nThe cursor is opaque. Send back exactly what was issued rather than building one, since the encoding is not part of the contract. A cursor that cannot be decoded is refused with `invalid_request`.\n\nKeyset pagination means files created or deleted while you are paging cannot shift rows across page boundaries, so nothing is silently skipped or repeated.\n\n### What is excluded\n\nSoft-deleted files are left out by default and can be asked for with `includeDeleted`.\n\nBanned files are excluded unconditionally. There is no flag to include them.",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "How many files to return per page.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 50
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "description": "The `nextCursor` from the previous page. Opaque, and only values this API issued are accepted.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "includeDeleted",
+            "in": "query",
+            "required": false,
+            "description": "Set to the exact string `true` to include soft-deleted files, which arrive with `isDeleted` set to true. Any other value, including `1` and `TRUE`, is read as false.",
+            "schema": {
+              "type": "string",
+              "enum": ["true"]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "One page of files.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/CacheControl"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FileListResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "A query parameter is unusable. `details.field` names which one, and is `limit` or `cursor`.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/CacheControl"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "examples": {
+                  "badLimit": {
+                    "summary": "limit outside 1 to 100",
+                    "value": {
+                      "error": {
+                        "code": "invalid_request",
+                        "message": "limit must be a whole number between 1 and 100.",
+                        "details": {
+                          "field": "limit",
+                          "maxLimit": 100
+                        }
+                      }
+                    }
+                  },
+                  "badCursor": {
+                    "summary": "A cursor this API did not issue",
+                    "value": {
+                      "error": {
+                        "code": "invalid_request",
+                        "message": "cursor is not one we issued. Send back the nextCursor from the previous page.",
+                        "details": {
+                          "field": "cursor"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthenticated"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      },
+      "post": {
+        "tags": ["Files"],
+        "operationId": "listFilesMethodNotAllowed",
+        "summary": "Not supported",
+        "description": "This path accepts GET only. Nothing is created here, since an upload starts at `POST /api/v1/uploads`. Every other verb, including OPTIONS, returns `method_not_allowed` in the standard error envelope rather than an empty framework 405.",
+        "responses": {
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          }
+        }
+      }
+    },
+    "/api/v1/files/{id}": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/FileId"
+        }
+      ],
+      "delete": {
+        "tags": ["Files"],
+        "operationId": "deleteFile",
+        "summary": "Delete a file",
+        "description": "Takes the link down. The link stops serving the moment this returns.\n\nThis is a soft delete. The database row survives so the slug stays reserved and can never be handed to somebody else, and so the view count stays readable. The stored objects are removed. A deleted file still appears in the listing when `includeDeleted=true` is set.\n\n### This operation is not idempotent\n\nRead this before writing a retry.\n\nA second DELETE on a file that is already deleted returns 404 with `not_found`, and that answer is indistinguishable from a file that never existed. A client that times out on a call which actually succeeded, then retries, gets a 404 and cannot tell whether its first call worked.\n\nTreat a 404 from a retry as a probable success rather than a failure, or confirm the state with `GET /api/v1/files?includeDeleted=true` before deciding.\n\n### A custom domain on the file is left attached\n\nThe domain stops serving immediately, since the serving path checks the deleted flag on every request. It still counts against the account's domain allowance. Detaching it is a separate call and is not done here.",
+        "responses": {
+          "200": {
+            "description": "The file was deleted by this call.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/CacheControl"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeleteFileResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthenticated"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      },
+      "get": {
+        "tags": ["Files"],
+        "operationId": "getFileMethodNotAllowed",
+        "summary": "Not supported",
+        "description": "There is no endpoint for reading a single file. This path accepts DELETE only, and every other verb returns `method_not_allowed`.\n\nA GET here answers 405 rather than 404, even for an id that does not exist, because the verb is rejected before anything is looked up. Use `GET /api/v1/files` to read file records.",
+          "responses": {
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "An API key from the account dashboard, sent as `Authorization: Bearer nh_sk_...`. The scheme name is matched case-insensitively."
+      }
+    },
+    "headers": {
+      "CacheControl": {
+        "description": "Always `private, no-store`. Responses are scoped to one account and must not be held by a shared cache.",
+        "schema": {
+          "type": "string",
+          "examples": ["private, no-store"]
+        }
+      },
+      "RetryAfter": {
+        "description": "Seconds to wait before retrying. This is the full length of the rate limit window rather than a countdown to the next free slot, so it is an upper bound and never asks for too short a wait.",
+        "schema": {
+          "type": "integer",
+          "examples": [60]
+        }
+      },
+      "WwwAuthenticate": {
+        "description": "The RFC 7235 challenge, sent on every 401. Every one names the `Bearer` scheme and carries a `resource_metadata` parameter holding the URL of this API's RFC 9728 protected-resource document, which names the authorization server that issues access tokens for it. A request that carried no credential at all gets the scheme and that parameter and no error code, which is the split RFC 6750 section 3.1 asks for. A key that did not resolve and an access token that did not verify each add `error=\"invalid_token\"`, with the description naming which of the two was presented.\n\nNo `scope` or `realm` parameter is ever sent. Both credentials grant the whole of one account and neither carries scopes, so there is nothing to name and nothing is checked. The protected-resource document omits `scopes_supported` for the same reason.",
+        "schema": {
+          "type": "string",
+          "examples": [
+            "Bearer resource_metadata=\"https://www.nudgehost.com/.well-known/oauth-protected-resource\"",
+            "Bearer error=\"invalid_token\", error_description=\"The API key is not valid\", resource_metadata=\"https://www.nudgehost.com/.well-known/oauth-protected-resource\"",
+            "Bearer error=\"invalid_token\", error_description=\"The access token is not valid\", resource_metadata=\"https://www.nudgehost.com/.well-known/oauth-protected-resource\""
+          ]
+        }
+      }
+    },
+    "parameters": {
+      "FileId": {
+        "name": "id",
+        "in": "path",
+        "required": true,
+        "description": "The file id returned by `POST /api/v1/uploads`. A value that is not a UUID is answered with `not_found` rather than a validation error.",
+        "schema": {
+          "type": "string",
+          "format": "uuid"
+        }
+      }
+    },
+    "responses": {
+      "Unauthenticated": {
+        "description": "The credential is missing or was refused. Two codes arrive with this status.\n\n`unauthorized` means there was no `Authorization` header, or one that is not a bearer credential.\n\n`invalid_key` means a key was presented and did not resolve. Malformed, unknown, and revoked are deliberately one answer, so a caller cannot use this endpoint to learn which of the three applies.\n\nIf a key that should be good is refused as `unauthorized`, check the host. A request to the apex domain loses its `Authorization` header on the redirect to `www`.",
+        "headers": {
+          "WWW-Authenticate": {
+            "$ref": "#/components/headers/WwwAuthenticate"
+          },
+          "Cache-Control": {
+            "$ref": "#/components/headers/CacheControl"
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            },
+            "examples": {
+              "unauthorized": {
+                "summary": "No credential presented",
+                "value": {
+                  "error": {
+                    "code": "unauthorized",
+                    "message": "Send your API key as a bearer token: Authorization: Bearer nh_sk_..."
+                  }
+                }
+              },
+              "invalidKey": {
+                "summary": "A key that does not resolve",
+                "value": {
+                  "error": {
+                    "code": "invalid_key",
+                    "message": "That API key is not valid."
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "NotFound": {
+        "description": "No such file for this caller.\n\nSeveral different situations arrive as this one answer and a caller cannot tell them apart: a file that never existed, a file belonging to another account, a file that was already deleted, and an id that is not a valid UUID. A malformed id is reported here rather than as a bad request.\n\nA banned file answers this way on the complete step. Deleting one still succeeds, since an owner may take down their own banned file.\n\nThe conflation is the point rather than an oversight. Distinguishing these cases would let anyone holding a key probe for the existence of other accounts' files, and would tell an abuser that a takedown landed. Do not build logic that tries to separate them.",
+        "headers": {
+          "Cache-Control": {
+            "$ref": "#/components/headers/CacheControl"
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            },
+            "example": {
+              "error": {
+                "code": "not_found",
+                "message": "That file is gone or was never on your account."
+              }
+            }
+          }
+        }
+      },
+      "InvalidRequest": {
+        "description": "The request body or a query parameter is missing, malformed, or the wrong type. Where a single field is at fault, `details.field` names it.",
+        "headers": {
+          "Cache-Control": {
+            "$ref": "#/components/headers/CacheControl"
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            },
+            "example": {
+              "error": {
+                "code": "invalid_request",
+                "message": "filename is required.",
+                "details": {
+                  "field": "filename"
+                }
+              }
+            }
+          }
+        }
+      },
+      "RateLimited": {
+        "description": "This key has used up its allowance for the current one-minute window. Wait for the number of seconds in `Retry-After` and try again.\n\nThe allowance is per key and sized by the account's plan, 20 requests per minute on free, 60 on Pro, and 150 on Studio. Keys on the same account are counted separately, so spreading traffic across several keys raises the total an account can send.\n\nThere are no `X-RateLimit-*` headers on any response, so there is no way to read remaining quota before hitting the limit.",
+        "headers": {
+          "Retry-After": {
+            "$ref": "#/components/headers/RetryAfter"
+          },
+          "Cache-Control": {
+            "$ref": "#/components/headers/CacheControl"
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            },
+            "example": {
+              "error": {
+                "code": "rate_limited",
+                "message": "This key has made too many requests. Please slow down and try again shortly.",
+                "details": {
+                  "retryAfterSeconds": 60
+                }
+              }
+            }
+          }
+        }
+      },
+      "MethodNotAllowed": {
+        "description": "Right path, wrong verb. Unsupported methods are answered explicitly so they carry the same error envelope as everything else rather than an empty framework 405.\n\nOPTIONS is refused along with the rest. There is no CORS on this API and no preflight to answer, because an API key in browser JavaScript is a leaked API key.",
+        "headers": {
+          "Cache-Control": {
+            "$ref": "#/components/headers/CacheControl"
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            },
+            "example": {
+              "error": {
+                "code": "method_not_allowed",
+                "message": "That method is not supported on this endpoint."
+              }
+            }
+          }
+        }
+      },
+      "InternalError": {
+        "description": "Something failed on our side. The failure is reported to our error tracking before the response is sent. Retrying after a short pause is reasonable.",
+        "headers": {
+          "Cache-Control": {
+            "$ref": "#/components/headers/CacheControl"
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            },
+            "example": {
+              "error": {
+                "code": "internal_error",
+                "message": "We could not start that upload. Please try again."
+              }
+            }
+          }
+        }
+      }
+    },
+    "schemas": {
+      "Error": {
+        "type": "object",
+        "title": "Error",
+        "description": "The failure envelope, identical across every operation. Nested under `error` rather than flattened, so a success body and a failure body can never collide on a key name.",
+        "required": ["error"],
+        "additionalProperties": false,
+        "properties": {
+          "error": {
+            "type": "object",
+            "required": ["code", "message"],
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "$ref": "#/components/schemas/ErrorCode"
+              },
+              "message": {
+                "type": "string",
+                "description": "A sentence written for a person to read. This is copy and gets rewritten. Never match on it or parse it. Branch on `code`."
+              },
+              "details": {
+                "type": "object",
+                "description": "Present only where a machine would otherwise have to read a number out of the sentence, such as the byte ceiling just exceeded. Absent on most failures. The keys vary by code and more may be added, so read the ones you need and ignore the rest.",
+                "additionalProperties": true
+              }
+            }
+          }
+        }
+      },
+      "ErrorCode": {
+        "type": "string",
+        "title": "ErrorCode",
+        "description": "The stable identifier for a failure. This list is closed. A new code is a breaking change and will not appear without a version change, so a client may treat an unrecognised value as a bug.\n\nEach code maps to exactly one HTTP status, so the same code never arrives as a 400 from one endpoint and a 422 from another.",
+        "enum": [
+          "unauthorized",
+          "invalid_key",
+          "rate_limited",
+          "invalid_request",
+          "not_found",
+          "file_too_large",
+          "link_limit_reached",
+          "upload_incomplete",
+          "upload_rejected",
+          "method_not_allowed",
+          "internal_error"
+        ]
+      },
+      "FileKind": {
+        "type": "string",
+        "title": "FileKind",
+        "description": "How the file is served, decided by the complete step.\n\nThis is not a closed set. The underlying column is unconstrained text, so treat it as a string and handle an unrecognised value rather than switching exhaustively. The three values the code currently produces are `file`, `docx`, and `site`.\n\n`file` covers everything served from the viewer path, and is also what a document whose conversion failed stays as. `docx` is a word processor document that converted successfully, where the original stays downloadable and the viewer renders the converted version. `site` is an archive that unpacked into a static site, which is served from its own subdomain.",
+        "examples": ["file", "docx", "site"]
+      },
+      "StartUploadRequest": {
+        "type": "object",
+        "title": "StartUploadRequest",
+        "required": ["filename", "contentType", "fileSize"],
+        "properties": {
+          "filename": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The name to store the file under. Leading and trailing whitespace is trimmed, and a value that is empty after trimming is refused.",
+            "examples": ["q3-report.pdf"]
+          },
+          "contentType": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The MIME type of the bytes about to be uploaded. This is not signed into the upload URL and storage does not check it, so a PUT that sends a different `Content-Type` is accepted. Send this value anyway. It is stored as the file's type and decides how the link serves the file, and a file stored as something its bytes are not is served wrongly.",
+            "examples": ["application/pdf"]
+          },
+          "fileSize": {
+            "type": "number",
+            "exclusiveMinimum": 0,
+            "description": "The exact number of bytes about to be uploaded. Checked against the plan's per-file ceiling before the upload URL is issued, and signed into that URL, so a PUT whose body length differs is refused by storage.",
+            "examples": [184320]
+          },
+          "desiredSlug": {
+            "type": "string",
+            "description": "An optional preferred slug for the public URL. Sanitized and checked on the server. A slug that is taken, reserved, or empty after sanitizing is quietly replaced with a random one rather than failing the request, so read `slug` from the response to learn what was actually assigned.",
+            "examples": ["team-handbook"]
+          }
+        }
+      },
+      "StartUploadResponse": {
+        "type": "object",
+        "title": "StartUploadResponse",
+        "required": ["id", "slug", "url", "upload"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The file id. Pass it to the complete step and to delete."
+          },
+          "slug": {
+            "type": "string",
+            "description": "The slug that now exists, which may not be the one requested."
+          },
+          "url": {
+            "type": "string",
+            "format": "uri",
+            "description": "The address this file will have once it is complete, for everything other than a site. An archive that unpacks into a site moves to its own subdomain, so use the `url` returned by the complete step as the final answer."
+          },
+          "upload": {
+            "type": "object",
+            "description": "Where and how to send the bytes.",
+            "required": ["url", "method", "expiresInSeconds", "headers"],
+            "properties": {
+              "url": {
+                "type": "string",
+                "format": "uri",
+                "description": "The presigned storage URL to PUT the bytes to. Send no API key with this request, since the credential is in the URL itself. Treat it as a secret."
+              },
+              "method": {
+                "type": "string",
+                "const": "PUT",
+                "description": "The HTTP method to use against `url`."
+              },
+              "expiresInSeconds": {
+                "type": "integer",
+                "const": 300,
+                "description": "How long the signed URL stays valid, counted from when this response was issued. Always 300. This is a fixed value reported back to the caller and is not a parameter, so there is no way to ask for a longer or shorter window. After it lapses, start a new upload."
+              },
+              "headers": {
+                "type": "object",
+                "description": "The headers the PUT has to carry. Only `Content-Length` is covered by the signature, so a body of the wrong length is refused by storage while a different `Content-Type` is accepted.",
+                "required": ["Content-Type", "Content-Length"],
+                "properties": {
+                  "Content-Type": {
+                    "type": "string",
+                    "description": "Exactly the `contentType` that was sent in the request."
+                  },
+                  "Content-Length": {
+                    "type": "string",
+                    "description": "The `fileSize` from the request, as a string. Many HTTP clients set this header themselves from the request body and object to it being set by hand, which is fine as long as the body really is that many bytes."
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "CompleteUploadResponse": {
+        "type": "object",
+        "title": "CompleteUploadResponse",
+        "required": [
+          "id",
+          "slug",
+          "url",
+          "kind",
+          "filename",
+          "mimeType",
+          "fileSize",
+          "createdAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string",
+            "format": "uri",
+            "description": "The address the file is reachable at. This is the authoritative one. It differs from the `url` returned by the start step when the upload turned out to be a site."
+          },
+          "kind": {
+            "$ref": "#/components/schemas/FileKind"
+          },
+          "filename": {
+            "type": "string"
+          },
+          "mimeType": {
+            "type": "string",
+            "description": "The content type recorded for the file."
+          },
+          "fileSize": {
+            "type": "integer",
+            "description": "Size in bytes, as recorded when the upload started."
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the file row was created, in ISO 8601."
+          }
+        }
+      },
+      "FileListResponse": {
+        "type": "object",
+        "title": "FileListResponse",
+        "required": ["data", "nextCursor"],
+        "properties": {
+          "data": {
+            "type": "array",
+            "description": "One page of files, newest first.",
+            "items": {
+              "$ref": "#/components/schemas/FileSummary"
+            }
+          },
+          "nextCursor": {
+            "type": ["string", "null"],
+            "description": "Send this back as `cursor` to fetch the next page. Null on the last page, which is the signal to stop."
+          }
+        }
+      },
+      "FileSummary": {
+        "type": "object",
+        "title": "FileSummary",
+        "description": "A file as it appears in the listing. Internal storage keys and the password hash are never included.",
+        "required": [
+          "id",
+          "slug",
+          "filename",
+          "fileSize",
+          "mimeType",
+          "kind",
+          "viewCount",
+          "createdAt",
+          "expiresAt",
+          "url",
+          "hasPassword",
+          "isDeleted"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "filename": {
+            "type": "string"
+          },
+          "fileSize": {
+            "type": "integer",
+            "description": "Size in bytes."
+          },
+          "mimeType": {
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/FileKind"
+          },
+          "viewCount": {
+            "type": "integer",
+            "description": "How many times the link has been opened. Survives deletion."
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "expiresAt": {
+            "type": ["string", "null"],
+            "format": "date-time",
+            "description": "When the file expires, or null when it does not. Files created through this API never expire, so this is null on everything uploaded with a key."
+          },
+          "url": {
+            "type": "string",
+            "format": "uri",
+            "description": "Where the file is served. Built exactly as the complete step builds it, so the two can never disagree."
+          },
+          "hasPassword": {
+            "type": "boolean",
+            "description": "Whether a viewing password is set. The password itself is never returned."
+          },
+          "isDeleted": {
+            "type": "boolean",
+            "description": "Only ever true when `includeDeleted=true` was sent, so an ordinary listing carries it as false throughout."
+          }
+        }
+      },
+      "DeleteFileResponse": {
+        "type": "object",
+        "title": "DeleteFileResponse",
+        "required": ["id", "deleted"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The id that was deleted."
+          },
+          "deleted": {
+            "type": "boolean",
+            "const": true,
+            "description": "Always true. A call that did not delete anything fails with `not_found` instead, so this never arrives as false."
+          }
+        }
+      }
+    }
+  }
+}
