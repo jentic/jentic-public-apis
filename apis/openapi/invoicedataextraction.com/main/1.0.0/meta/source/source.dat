@@ -1,0 +1,3639 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Invoice Data Extraction API",
+    "version": "1.0.0",
+    "summary": "Turn invoices and other financial documents into structured rows and spreadsheets.",
+    "description": "Upload files, submit an extraction that says in plain words what to extract, wait for it\nto finish, and read the rows as JSON or download an XLSX, CSV or JSON file. An extraction\nsubmitted with `options.ask_questions` can stop and ask when the documents leave something\nunsettled; the caller answers and the extraction continues.\n\nThis document is the contract as the API enforces it. The prose reference, with the same\nfacts told in order, is https://invoicedataextraction.com/docs/api (Markdown:\nhttps://invoicedataextraction.com/docs/api.md). What changed and when, and how the API is\nversioned, is https://invoicedataextraction.com/docs/changelog. A guide for AI agents and the\npeople directing them is https://invoicedataextraction.com/docs/agents.\n\nEvery request may carry `X-SDK-Name` (up to 32 characters) naming the client it comes from,\nand `X-SDK-Version` with its version; the official SDKs send `node` and `python`.\n",
+    "termsOfService": "https://invoicedataextraction.com/terms-of-service",
+    "contact": {
+      "name": "Invoice Data Extraction support",
+      "email": "support@invoicedataextraction.com",
+      "url": "https://invoicedataextraction.com/contact"
+    }
+  },
+  "externalDocs": {
+    "description": "REST API reference",
+    "url": "https://invoicedataextraction.com/docs/api"
+  },
+  "servers": [
+    {
+      "url": "https://api.invoicedataextraction.com/v1"
+    }
+  ],
+  "security": [
+    {
+      "bearerAuth": []
+    }
+  ],
+  "tags": [
+    {
+      "name": "Uploads",
+      "description": "Register the files of one upload session, upload each file in parts to signed URLs, and complete each file. Every upload endpoint shares one rate limit of 600 requests per minute per API key."
+    },
+    {
+      "name": "Extractions",
+      "description": "Submit, wait for, read, list, answer, cancel and delete extractions."
+    },
+    {
+      "name": "Credits",
+      "description": "The account's credit balance."
+    }
+  ],
+  "paths": {
+    "/uploads/sessions": {
+      "post": {
+        "tags": [
+          "Uploads"
+        ],
+        "operationId": "createUploadSession",
+        "summary": "Create an upload session",
+        "description": "Registers one or more files (1 to 6,000) and returns the part size to use when\nuploading each of them. Every file needs at least one available credit at this point,\nso an account with fewer available credits than files is refused with\n`INSUFFICIENT_CREDITS`.\n\nIdempotent: a retry with the same `upload_session_id` and the same files returns the\nexisting session. The same `upload_session_id` with different files is\n`SESSION_ALREADY_INITIALIZED`.\n\nRate limit: 600 requests per minute per API key, shared by the upload endpoints.\n",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateUploadSessionRequest"
+              },
+              "example": {
+                "upload_session_id": "sess_001",
+                "files": [
+                  {
+                    "file_id": "file_001",
+                    "file_name": "invoice-1.pdf",
+                    "file_size_bytes": 120450
+                  },
+                  {
+                    "file_id": "file_002",
+                    "file_name": "receipt.jpg",
+                    "file_size_bytes": 84200
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The session, with the part size to upload each file in.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateUploadSessionResponse"
+                },
+                "example": {
+                  "success": true,
+                  "upload_session_id": "sess_001",
+                  "files": [
+                    {
+                      "file_id": "file_001",
+                      "file_name": "invoice-1.pdf",
+                      "part_size": 8388608
+                    },
+                    {
+                      "file_id": "file_002",
+                      "file_name": "receipt.jpg",
+                      "part_size": 8388608
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`INVALID_INPUT` (the body does not match the schema; `details.issues` names each problem), `DUPLICATE_FILE_NAME`, `DUPLICATE_FILE_ID`, `FILE_TOO_LARGE` (a PDF over 150 MB or an image over 5 MB; `details` names the file and the limit) or `TOTAL_UPLOAD_SIZE_LIMIT_EXCEEDED` (the files together exceed 2 GB).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthenticated"
+          },
+          "402": {
+            "description": "`INSUFFICIENT_CREDITS`: fewer available credits than files. `details` carries `credits_balance`, `credits_reserved` and `file_count`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`SESSION_ALREADY_INITIALIZED`: this `upload_session_id` is in use with different files.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/uploads/sessions/{upload_session_id}/parts": {
+      "post": {
+        "tags": [
+          "Uploads"
+        ],
+        "operationId": "getUploadPartUrls",
+        "summary": "Get signed upload URLs for a file's parts",
+        "description": "Returns one signed URL per requested part number. `PUT` the raw bytes of each part to\nits URL with no extra headers, and keep the `ETag` response header of each `PUT`\n(quotes included) for completing the file.\n\n`total_parts = ceil(file_size_bytes / part_size)`; a file smaller than `part_size` is\none part. Up to 1,000 part numbers per request, each from 1 to 10,000; a URL is valid\nfor 15 minutes from issue, so for a very large file request URLs in batches just before\nuploading each batch.\n\nRate limit: 600 requests per minute per API key, shared by the upload endpoints.\n",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/UploadSessionId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GetUploadPartUrlsRequest"
+              },
+              "examples": {
+                "singlePart": {
+                  "summary": "A file smaller than the part size",
+                  "value": {
+                    "file_id": "file_001",
+                    "part_numbers": [
+                      1
+                    ]
+                  }
+                },
+                "multiPart": {
+                  "summary": "A 20 MB file at an 8 MB part size",
+                  "value": {
+                    "file_id": "file_002",
+                    "part_numbers": [
+                      1,
+                      2,
+                      3
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The signed URLs, one per part number requested.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetUploadPartUrlsResponse"
+                },
+                "example": {
+                  "success": true,
+                  "upload_session_id": "sess_001",
+                  "file_id": "file_001",
+                  "file_name": "invoice-1.pdf",
+                  "part_size": 8388608,
+                  "part_urls": [
+                    {
+                      "part_number": 1,
+                      "url": "https://storage.example.com/...?X-Amz-Signature=..."
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidInput"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthenticated"
+          },
+          "404": {
+            "description": "`FILE_NOT_FOUND`: this `file_id` was not registered when the session was created.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`FILE_NOT_UPLOADABLE`: the file has already been completed or aborted.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/uploads/sessions/{upload_session_id}/complete": {
+      "post": {
+        "tags": [
+          "Uploads"
+        ],
+        "operationId": "completeFileUpload",
+        "summary": "Complete a file's upload",
+        "description": "Finalises one file from the ETags of its uploaded parts. Call it once per file. A file\nthat is already complete returns success again, so a retry after a dropped connection\nis safe.\n\nRate limit: 600 requests per minute per API key, shared by the upload endpoints.\n",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/UploadSessionId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CompleteFileUploadRequest"
+              },
+              "example": {
+                "file_id": "file_001",
+                "parts": [
+                  {
+                    "part_number": 1,
+                    "e_tag": "\"a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4\""
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The file is complete and can be named in an extraction.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CompleteFileUploadResponse"
+                },
+                "example": {
+                  "success": true,
+                  "upload_session_id": "sess_001",
+                  "file_id": "file_001",
+                  "file_name": "invoice-1.pdf"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`INVALID_INPUT`, or `INVALID_COMPLETION_PARTS` (the parts do not cover 1 to the part count with their ETags; `details.reason` says which check failed).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthenticated"
+          },
+          "404": {
+            "description": "`FILE_NOT_FOUND`: this `file_id` was not registered when the session was created.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`FILE_ABORTED` (the file was aborted; upload it in a new session) or `UPLOAD_ID_NOT_FOUND` (the session is no longer available).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`OBJECT_SIZE_MISMATCH`: the uploaded bytes differ from the declared `file_size_bytes`; `details` carries `declared_size_bytes` and `actual_size_bytes`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "502": {
+            "description": "`UPLOAD_COMPLETE_FAILED`: completing the file failed on our side; retryable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/uploads/import": {
+      "post": {
+        "tags": [
+          "Uploads"
+        ],
+        "operationId": "importAttachedFiles",
+        "summary": "Import files attached in an assistant's conversation",
+        "description": "In place of creating a session, uploading parts and completing each file, when the\nfiles are attached in a conversation with an assistant that gives your app a download\nlink for each one, as ChatGPT does: creates the session, uploads every file (1 to 100)\nfrom its link and completes it, in one call. The session's limits apply, and every\nfile needs one available credit. The links expire a few minutes after the assistant\ngives them. When any link cannot be read, nothing is created and nothing is charged.\n\nFiles are independent: one that cannot be uploaded carries its `error` and is listed\nin `failed_file_ids`, and the completed files can be submitted. A retry with the same\n`upload_session_id` and files continues the session, and a file already completed is\nnot uploaded again.\n\nRate limit: 20 requests per minute per API key.\n",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "upload_session_id",
+                  "files"
+                ],
+                "properties": {
+                  "upload_session_id": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9._:-]{1,200}$",
+                    "description": "Your identifier for the session; a retry with the same one and the same files continues it."
+                  },
+                  "files": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 100,
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "file_id",
+                        "file_name",
+                        "url"
+                      ],
+                      "properties": {
+                        "file_id": {
+                          "type": "string",
+                          "pattern": "^[A-Za-z0-9._:-]{1,200}$"
+                        },
+                        "file_name": {
+                          "type": "string",
+                          "description": "The file name, ending in .pdf, .jpg, .jpeg or .png."
+                        },
+                        "url": {
+                          "type": "string",
+                          "format": "uri",
+                          "description": "The download link the assistant gave for the attached file. Links from ChatGPT are accepted."
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "example": {
+                "upload_session_id": "sess_002",
+                "files": [
+                  {
+                    "file_id": "file_001",
+                    "file_name": "invoice-1.pdf",
+                    "url": "https://files.oaiusercontent.com/file-abc123"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The session, with each file's outcome.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "success",
+                    "upload_session_id",
+                    "files",
+                    "completed_file_ids",
+                    "failed_file_ids"
+                  ],
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "upload_session_id": {
+                      "type": "string"
+                    },
+                    "files": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "file_id",
+                          "file_name",
+                          "success"
+                        ],
+                        "properties": {
+                          "file_id": {
+                            "type": "string"
+                          },
+                          "file_name": {
+                            "type": "string"
+                          },
+                          "success": {
+                            "type": "boolean"
+                          },
+                          "error": {
+                            "type": "object",
+                            "description": "Present when the file could not be uploaded.",
+                            "properties": {
+                              "code": {
+                                "type": "string"
+                              },
+                              "message": {
+                                "type": "string"
+                              },
+                              "retryable": {
+                                "type": "boolean"
+                              },
+                              "details": {
+                                "type": "object",
+                                "nullable": true
+                              }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "completed_file_ids": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "failed_file_ids": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                },
+                "example": {
+                  "success": true,
+                  "upload_session_id": "sess_002",
+                  "files": [
+                    {
+                      "file_id": "file_001",
+                      "file_name": "invoice-1.pdf",
+                      "success": true
+                    }
+                  ],
+                  "completed_file_ids": [
+                    "file_001"
+                  ],
+                  "failed_file_ids": []
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`INVALID_INPUT` (a link that is not an assistant's download link for an attached file among them), or the session's own refusals (`DUPLICATE_FILE_NAME`, `DUPLICATE_FILE_ID`, `FILE_TOO_LARGE`, `TOTAL_UPLOAD_SIZE_LIMIT_EXCEEDED`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthenticated"
+          },
+          "402": {
+            "description": "`INSUFFICIENT_CREDITS`: fewer available credits than files.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`SESSION_ALREADY_INITIALIZED`: this `upload_session_id` is in use.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`FILE_LINK_UNREADABLE`: a link could not be read, most often because it expired; `details.file_names` names the files. Attach them again and import with the new links.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/extractions": {
+      "post": {
+        "tags": [
+          "Extractions"
+        ],
+        "operationId": "submitExtraction",
+        "summary": "Submit an extraction",
+        "description": "Submits an extraction over completed files of one upload session. The `prompt` says\nwhat to extract, as a sentence or as an object naming exact output fields.\n`options.json_typed_values: true` is recommended for any integration that reads the\nrows; `options.ask_questions: true` lets the extraction stop and ask when the documents\nleave something unsettled.\n\nIdempotent: the same request sent again with the same `submission_id` returns the\nexisting extraction. Any other request under a `submission_id` that already belongs to\nan extraction is refused with `SUBMISSION_ID_ALREADY_USED`; use a new `submission_id`\nfor each extraction.\nThe task appears in the web dashboard alongside extractions submitted there.\n\nRate limit: 30 requests per minute per API key.\n",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SubmitExtractionRequest"
+              },
+              "examples": {
+                "stringPrompt": {
+                  "summary": "A prompt in a sentence",
+                  "value": {
+                    "submission_id": "sub_001",
+                    "upload_session_id": "sess_001",
+                    "file_ids": [
+                      "file_001",
+                      "file_002"
+                    ],
+                    "task_name": "January invoices",
+                    "prompt": "Extract invoice number, date, vendor name, and total amount",
+                    "output_structure": "per_invoice",
+                    "options": {
+                      "json_typed_values": true
+                    }
+                  }
+                },
+                "objectPrompt": {
+                  "summary": "A prompt naming exact output fields",
+                  "value": {
+                    "submission_id": "sub_002",
+                    "upload_session_id": "sess_001",
+                    "file_ids": [
+                      "file_001",
+                      "file_002"
+                    ],
+                    "task_name": "January invoices",
+                    "prompt": {
+                      "fields": [
+                        {
+                          "name": "Invoice Number"
+                        },
+                        {
+                          "name": "Invoice Date",
+                          "prompt": "The date the invoice was issued, NOT the payment due date"
+                        },
+                        {
+                          "name": "Vendor Name"
+                        },
+                        {
+                          "name": "Line Item Description"
+                        },
+                        {
+                          "name": "Line Item Amount",
+                          "prompt": "Do not include currency symbol, use 2 decimal places"
+                        }
+                      ],
+                      "general_prompt": "Dates should be in YYYY-MM-DD format. Ignore email cover letters."
+                    },
+                    "output_structure": "per_line_item",
+                    "options": {
+                      "exclude_columns": [
+                        "source_file"
+                      ],
+                      "send_completion_email": true,
+                      "json_typed_values": true
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "The extraction is queued. Wait for it with `getExtraction`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubmitExtractionResponse"
+                },
+                "example": {
+                  "success": true,
+                  "extraction_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+                  "submission_state": "received"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidInput"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthenticated"
+          },
+          "409": {
+            "description": "`SUBMISSION_ID_ALREADY_USED`: this `submission_id` already belongs to an extraction, and the request is not the one that created it. `details.extraction_id` is that extraction; `details.differing_fields` lists which of `upload_session_id`, `file_ids`, `prompt`, `output_structure` and `options` differ. Use a new `submission_id` for a new extraction; to retry the earlier request, read that extraction with `getExtraction` instead of submitting again.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "example": {
+                  "success": false,
+                  "error": {
+                    "code": "SUBMISSION_ID_ALREADY_USED",
+                    "message": "This submission_id already belongs to the extraction in details.extraction_id, and this request is not the one that created it: details.differing_fields lists what differs. To run a new extraction, submit again with a new submission_id. If you meant to retry the earlier request, do not submit again: get that extraction with GET /v1/extractions/{extraction_id}.",
+                    "retryable": false,
+                    "details": {
+                      "extraction_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+                      "differing_fields": [
+                        "upload_session_id"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "description": "`SUBMISSIONS_PAUSED`: submissions are paused for a deploy; retry in a few minutes. `details.resumes_at`, when present, is the expected resume time in UTC.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "Extractions"
+        ],
+        "operationId": "listExtractions",
+        "summary": "List extractions",
+        "description": "Your extractions, newest first, as slim summary items with cursor pagination. For the\nfull record of one extraction use `getExtractionDetails`; for its rows,\n`getExtractionResults`.\n\nRate limit: 60 requests per minute per API key.\n",
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/ExtractionStatus"
+            }
+          },
+          {
+            "name": "submission_method",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "api",
+                "web_app"
+              ]
+            }
+          },
+          {
+            "name": "created_after",
+            "in": "query",
+            "required": false,
+            "description": "Inclusive lower bound on `created_at`, ISO 8601 with a timezone.",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "created_before",
+            "in": "query",
+            "required": false,
+            "description": "Inclusive upper bound on `created_at`, ISO 8601 with a timezone.",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/Scope"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 25
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "description": "The `next_cursor` of the previous page. Opaque; never construct one.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "One page of extractions.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListExtractionsResponse"
+                },
+                "example": {
+                  "success": true,
+                  "extractions": [
+                    {
+                      "extraction_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+                      "submission_id": "sub_001",
+                      "task_name": "January invoices",
+                      "status": "completed",
+                      "created_at": "2026-04-27T10:30:00Z",
+                      "submission_method": "api",
+                      "file_count": 12,
+                      "file_names_preview": [
+                        "invoice-001.pdf",
+                        "invoice-002.pdf",
+                        "invoice-003.pdf",
+                        "invoice-004.pdf",
+                        "invoice-005.pdf"
+                      ],
+                      "file_names_truncated": true,
+                      "output_structure": "per_invoice",
+                      "credits_deducted": 25,
+                      "available_outputs": [
+                        "xlsx",
+                        "csv",
+                        "json"
+                      ],
+                      "output_expires_at": "2026-07-26T10:30:00Z"
+                    },
+                    {
+                      "extraction_id": "b2c3d4e5-f6a7-8901-bcde-f23456789012",
+                      "submission_id": null,
+                      "task_name": "Q1 receipts",
+                      "status": "processing",
+                      "created_at": "2026-04-27T11:15:00Z",
+                      "submission_method": "web_app",
+                      "file_count": 4,
+                      "file_names_preview": [
+                        "receipt-april.pdf",
+                        "receipt-may.pdf",
+                        "receipt-june.pdf",
+                        "receipt-july.pdf"
+                      ],
+                      "file_names_truncated": false,
+                      "output_structure": "per_invoice",
+                      "progress": 42
+                    }
+                  ],
+                  "has_more": true,
+                  "next_cursor": "Y3Vyc29yXzAxSjhLTVFSVFZXWFlaMjM0NTY3ODk"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidInput"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthenticated"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/extractions/{extraction_id}": {
+      "get": {
+        "tags": [
+          "Extractions"
+        ],
+        "operationId": "getExtraction",
+        "summary": "Get an extraction's status, holding the request until it changes",
+        "description": "The extraction's live status. With `wait`, the request is held until the extraction\nleaves `processing` or the wait elapses, then answered with the ordinary payload, so a\nhandful of calls replaces a polling loop. Choose a wait shorter than your own client\nor tool timeout; a response after the full wait is an ordinary `processing` response,\nso call again. Without `wait`, leave at least 5 seconds between calls.\n\nEvery response is HTTP 200 with a top-level `status` of exactly one of `processing`,\n`input_required`, `completed`, `failed`, `cancelled`; `success` is `true` for all of\nthem except `failed`. Branch on `status`, and treat a value you do not recognise as\nnon-terminal. The completed and cancelled responses carry the account's remaining\nbalance.\n\nRate limit: 120 requests per minute per API key; a held request counts as one.\n",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ExtractionId"
+          },
+          {
+            "$ref": "#/components/parameters/Wait"
+          },
+          {
+            "$ref": "#/components/parameters/Scope"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The status, in the shape of the status it reports.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExtractionStatusResponse"
+                },
+                "examples": {
+                  "processing": {
+                    "$ref": "#/components/examples/StatusProcessing"
+                  },
+                  "inputRequired": {
+                    "$ref": "#/components/examples/StatusInputRequired"
+                  },
+                  "completed": {
+                    "$ref": "#/components/examples/StatusCompleted"
+                  },
+                  "failed": {
+                    "$ref": "#/components/examples/StatusFailed"
+                  },
+                  "cancelled": {
+                    "$ref": "#/components/examples/StatusCancelled"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidInput"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthenticated"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/ExtractionNotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Extractions"
+        ],
+        "operationId": "deleteExtraction",
+        "summary": "Delete an extraction",
+        "description": "Permanently deletes an extraction, its output files and its uploaded source files\n(source files shared with another extraction are kept until nothing uses them). An\nextraction still being processed cannot be deleted; cancel it first.\n\nRate limit: 30 requests per minute per API key.\n",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ExtractionId"
+          },
+          {
+            "$ref": "#/components/parameters/Scope"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Deleted.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "success"
+                  ],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "const": true
+                    }
+                  }
+                },
+                "example": {
+                  "success": true
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidInput"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthenticated"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/ExtractionNotFound"
+          },
+          "409": {
+            "description": "`EXTRACTION_IN_PROGRESS`: still being processed; wait for it to finish, or cancel it, then delete.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/extractions/{extraction_id}/results": {
+      "get": {
+        "tags": [
+          "Extractions"
+        ],
+        "operationId": "getExtractionResults",
+        "summary": "Get the extracted rows as JSON",
+        "description": "The rows of a completed extraction, in pages, each row an object keyed by the output\ncolumns exactly as the JSON output file holds it: native JSON types when the extraction\nwas submitted with `options.json_typed_values`, strings otherwise. The `Source File`\nand `Review Needed` columns are present unless excluded at submission. The Review\nNeeded items whose rows fall on the page come back alongside; `review_needed.count` is\nthe count for the whole extraction. Rows are available for the same 90 days as the\noutput files.\n\nRate limit: 60 requests per minute per API key.\n",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ExtractionId"
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "description": "Rows to skip.",
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Rows per page.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1000,
+              "default": 100
+            }
+          },
+          {
+            "$ref": "#/components/parameters/Scope"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "One page of rows.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExtractionResultsResponse"
+                },
+                "example": {
+                  "success": true,
+                  "extraction_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+                  "status": "completed",
+                  "output_structure": "per_invoice",
+                  "output_expires_at": "2026-07-26T10:30:00Z",
+                  "json_typed_values": true,
+                  "columns": [
+                    "Invoice Number",
+                    "Invoice Date",
+                    "Vendor Name",
+                    "Total Amount",
+                    "Source File",
+                    "Review Needed"
+                  ],
+                  "rows": [
+                    {
+                      "Invoice Number": "INV-1001",
+                      "Invoice Date": "2026-01-15",
+                      "Vendor Name": "Acme Ltd",
+                      "Total Amount": 1250,
+                      "Source File": "invoice-1.pdf (Page 1)",
+                      "Review Needed": null
+                    }
+                  ],
+                  "offset": 0,
+                  "limit": 100,
+                  "row_count": 1,
+                  "total_rows": 1,
+                  "has_more": false,
+                  "next_offset": null,
+                  "review_needed": {
+                    "count": 0,
+                    "items": []
+                  },
+                  "pages": {
+                    "successful_count": 1,
+                    "failed_count": 0,
+                    "successful": [
+                      {
+                        "file_name": "invoice-1.pdf",
+                        "page": 1
+                      }
+                    ],
+                    "failed": [],
+                    "failure_reasons": []
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidInput"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthenticated"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "description": "`EXTRACTION_NOT_FOUND`; `OUTPUT_NOT_AVAILABLE` (the extraction has not completed, or has no JSON output); or `OUTPUT_EXPIRED` (past the 90-day retention).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/extractions/{extraction_id}/details": {
+      "get": {
+        "tags": [
+          "Extractions"
+        ],
+        "operationId": "getExtractionDetails",
+        "summary": "Get an extraction's full record",
+        "description": "The stable record of one extraction: the original prompt and options, every file name,\nand the page-level results, prompt notes and Review Needed items of a completed one.\nUnlike `getExtraction`, this endpoint always answers `success: true`; a failed\nextraction is a valid record with its failure inside `error`. It carries no download\nURLs; use `getOutputDownloadUrl` for those.\n\nRate limit: 60 requests per minute per API key.\n",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ExtractionId"
+          },
+          {
+            "$ref": "#/components/parameters/Scope"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The record.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExtractionDetailsResponse"
+                },
+                "example": {
+                  "success": true,
+                  "extraction": {
+                    "extraction_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+                    "submission_id": "sub_001",
+                    "task_name": "January invoices",
+                    "status": "completed",
+                    "created_at": "2026-04-27T10:30:00Z",
+                    "submission_method": "api",
+                    "file_count": 12,
+                    "file_names": [
+                      "invoice-1.pdf",
+                      "invoice-2.pdf",
+                      "..."
+                    ],
+                    "output_structure": "per_invoice",
+                    "prompt": {
+                      "fields": [
+                        {
+                          "name": "Invoice Number"
+                        },
+                        {
+                          "name": "Invoice Date",
+                          "prompt": "The date the invoice was issued, NOT the payment due date"
+                        },
+                        {
+                          "name": "Vendor Name"
+                        },
+                        {
+                          "name": "Total Amount",
+                          "prompt": "Do not include currency symbol, use 2 decimal places"
+                        }
+                      ],
+                      "general_prompt": "Dates should be in YYYY-MM-DD format."
+                    },
+                    "options": {
+                      "exclude_columns": [],
+                      "output_language": "automatic",
+                      "review_needed_fill_color": "orange",
+                      "affected_field_fill_color": "orange",
+                      "send_completion_email": false,
+                      "json_typed_values": false,
+                      "ask_questions": false
+                    },
+                    "credits_deducted": 25,
+                    "available_outputs": [
+                      "xlsx",
+                      "csv",
+                      "json"
+                    ],
+                    "output_expires_at": "2026-07-26T10:30:00Z",
+                    "pages": {
+                      "successful_count": 10,
+                      "failed_count": 2,
+                      "successful": [
+                        {
+                          "file_name": "invoice-1.pdf",
+                          "page": 1
+                        },
+                        {
+                          "file_name": "invoice-1.pdf",
+                          "page": 2
+                        }
+                      ],
+                      "failed": [
+                        {
+                          "file_name": "damaged.pdf",
+                          "page": 1
+                        }
+                      ],
+                      "failure_reasons": [
+                        {
+                          "code": "PROCESSING_FILE_SIZE_LIMIT_EXCEEDED",
+                          "message": "The upload was accepted, but during processing part of the PDF became too large for our file-processing limit. This can happen when a compressed PDF is processed internally. Split the PDF into smaller page chunks and resubmit.",
+                          "affected_pages": [
+                            {
+                              "file_name": "damaged.pdf",
+                              "pages": [
+                                1
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    "ai_uncertainty_notes": [],
+                    "review_needed": {
+                      "count": 0,
+                      "items": []
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidInput"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthenticated"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/ExtractionNotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/extractions/{extraction_id}/output": {
+      "get": {
+        "tags": [
+          "Extractions"
+        ],
+        "operationId": "getOutputDownloadUrl",
+        "summary": "Get a fresh download URL for an output file",
+        "description": "A signed URL, valid for 5 minutes, for the XLSX, CSV or JSON file of a completed\nextraction. A plain `GET` on the URL returns the file; no `Authorization` header is\nneeded. The completed status response already carries such URLs; use this endpoint when\nthey have expired. Output files are kept for 90 days from submission.\n\nRate limit: 30 requests per minute per API key.\n",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ExtractionId"
+          },
+          {
+            "name": "format",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "xlsx",
+                "csv",
+                "json"
+              ]
+            }
+          },
+          {
+            "$ref": "#/components/parameters/Scope"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The URL. This response carries no `success` field.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OutputDownloadUrlResponse"
+                },
+                "example": {
+                  "download_url": "https://storage.example.com/...?X-Amz-Signature=...",
+                  "format": "xlsx",
+                  "expires_in_seconds": 300
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidInput"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthenticated"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "description": "`EXTRACTION_NOT_FOUND`; `OUTPUT_NOT_AVAILABLE` (not completed, or this format was never generated); or `OUTPUT_EXPIRED` (past the 90-day retention).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/extractions/{extraction_id}/cancel": {
+      "post": {
+        "tags": [
+          "Extractions"
+        ],
+        "operationId": "cancelExtraction",
+        "summary": "Cancel an extraction",
+        "description": "Stops an extraction that is queued or processing. The request is recorded at once and\nthe extraction stops at its next opportunity; wait for it with `getExtraction` until its\nstatus is `cancelled`, whose `credits_deducted` covers the work done. An extraction that\nwas about to finish may complete instead. The request has no body. Idempotent: a repeat\nreturns the same result and records nothing new.\n\nRate limit: 30 requests per minute per API key.\n",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ExtractionId"
+          },
+          {
+            "$ref": "#/components/parameters/Scope"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "While the extraction is still processing, confirmation that the request was recorded; once it has been cancelled, the cancelled status as `getExtraction` returns it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/CancellationRequestedResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ExtractionCancelled"
+                    }
+                  ]
+                },
+                "examples": {
+                  "requested": {
+                    "summary": "Recorded; the extraction is still stopping",
+                    "value": {
+                      "success": true,
+                      "extraction_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+                      "status": "processing",
+                      "cancellation_requested": true,
+                      "cancel_requested_at": "2026-09-10T14:03:22.418Z"
+                    }
+                  },
+                  "alreadyCancelled": {
+                    "$ref": "#/components/examples/StatusCancelled"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidInput"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthenticated"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/ExtractionNotFound"
+          },
+          "409": {
+            "description": "`EXTRACTION_NOT_CANCELLABLE`: already completed or failed; `details.status` says which.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/extractions/{extraction_id}/answers": {
+      "post": {
+        "tags": [
+          "Extractions"
+        ],
+        "operationId": "answerExtractionQuestions",
+        "summary": "Answer the questions an extraction stopped to ask",
+        "description": "Answers open questions of an extraction whose status is `input_required`. Answer every\nopen question in one request or across several; the extraction continues the moment\nevery open question has an answer. The response is the extraction's status after the\nanswers, exactly as `getExtraction` returns it.\n\nAn answer governs the whole extraction, every document in it and not only the one in\nthe question's example; where the right answer differs by document type, say so in\n`text`, which is accepted on every question. Your own words are screened before they are\nused: an answer given in bad faith, one that tries to misuse the service rather than\nanswer the question, is refused and the question is asked again with\n`previous_answer_rejected: true`; after three refused answers the extraction is\ncancelled with `cancellation_reason: answers_rejected`. A vague or undecided answer is\nnot refused: it is applied, and the matter may be asked again as a new question.\n\nAn answer to a question that is no longer waiting changes nothing and returns the\ncurrent status, so a request can be repeated after a dropped connection. Only a request\nthat could never be right is refused, whole, with `INVALID_INPUT`.\n\nRate limit: 30 requests per minute per API key.\n",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ExtractionId"
+          },
+          {
+            "$ref": "#/components/parameters/Scope"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AnswerQuestionsRequest"
+              },
+              "example": {
+                "answers": [
+                  {
+                    "question_id": "q_1",
+                    "choice_id": "b"
+                  },
+                  {
+                    "question_id": "q_2",
+                    "text": "DD/MM/YYYY"
+                  },
+                  {
+                    "question_id": "q_3",
+                    "accept_recommended": true
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The extraction's status after the answers.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExtractionStatusResponse"
+                },
+                "examples": {
+                  "continuing": {
+                    "summary": "Every open question has an answer",
+                    "value": {
+                      "success": true,
+                      "status": "processing",
+                      "extraction_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+                      "progress": 22
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`INVALID_INPUT`: the id is not a UUID, `scope` is not `own` or `team`, or the body could never be right: `details.issues` names the answer and the field, for a `question_id` the extraction never asked, a `choice_id` it does not offer, empty or over-long `text`, `accept_recommended` sent with `choice_id` or `text`, or a question answered twice in one request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthenticated"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/ExtractionNotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/credits/balance": {
+      "get": {
+        "tags": [
+          "Credits"
+        ],
+        "operationId": "getCreditsBalance",
+        "summary": "Get the credit balance",
+        "description": "The account's total credit balance and the credits reserved by extractions in\nprogress. The usable balance is `credits_balance` minus `credits_reserved`. Costs\nnothing, so it is the call to verify a new key with.\n\nRate limit: 60 requests per minute per API key.\n",
+        "responses": {
+          "200": {
+            "description": "The balance.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreditsBalanceResponse"
+                },
+                "example": {
+                  "success": true,
+                  "credits_balance": 150,
+                  "credits_reserved": 10
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthenticated"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "An API key created at https://invoicedataextraction.com/dashboard?view=API, sent as `Authorization: Bearer YOUR_API_KEY`. Every account includes 50 free pages a month. A team admin's key sees the team's extractions by default (the `scope` parameter)."
+      }
+    },
+    "parameters": {
+      "ExtractionId": {
+        "name": "extraction_id",
+        "in": "path",
+        "required": true,
+        "description": "The `extraction_id` returned by `submitExtraction`.",
+        "schema": {
+          "type": "string",
+          "format": "uuid"
+        }
+      },
+      "UploadSessionId": {
+        "name": "upload_session_id",
+        "in": "path",
+        "required": true,
+        "description": "The `upload_session_id` you chose when creating the session.",
+        "schema": {
+          "$ref": "#/components/schemas/ClientId"
+        }
+      },
+      "Scope": {
+        "name": "scope",
+        "in": "query",
+        "required": false,
+        "description": "`own` or `team`. Team admins default to `team` and see every team member's extractions; everyone else defaults to `own`, and a non-admin passing `team` gets `403 FORBIDDEN`. Under `team`, items carry `submitted_by`.",
+        "schema": {
+          "type": "string",
+          "enum": [
+            "own",
+            "team"
+          ]
+        }
+      },
+      "Wait": {
+        "name": "wait",
+        "in": "query",
+        "required": false,
+        "description": "Seconds to hold the request open, 1 to 45. The response is sent as soon as the extraction leaves `processing` or when the time is up, whichever comes first. Omit it for the current status at once.",
+        "schema": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 45
+        }
+      }
+    },
+    "responses": {
+      "InvalidInput": {
+        "description": "`INVALID_INPUT`: the request does not match the contract; `details.issues` lists each problem with its `path`.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorEnvelope"
+            },
+            "example": {
+              "success": false,
+              "error": {
+                "code": "INVALID_INPUT",
+                "message": "Request validation failed. Check details for specific issues.",
+                "retryable": false,
+                "details": {
+                  "issues": [
+                    {
+                      "message": "file_name must end with a supported extension: .pdf, .jpg, .jpeg, or .png.",
+                      "path": [
+                        "files",
+                        0,
+                        "file_name"
+                      ]
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "Unauthenticated": {
+        "description": "`UNAUTHENTICATED`, `API_KEY_EXPIRED` or `API_KEY_REVOKED`.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorEnvelope"
+            }
+          }
+        }
+      },
+      "Forbidden": {
+        "description": "`FORBIDDEN`: `scope=team` from a caller who is not a team admin.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorEnvelope"
+            }
+          }
+        }
+      },
+      "ExtractionNotFound": {
+        "description": "`EXTRACTION_NOT_FOUND`: no extraction with this id within the caller's scope.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorEnvelope"
+            }
+          }
+        }
+      },
+      "RateLimited": {
+        "description": "`RATE_LIMITED`: wait `details.retry_after_seconds` (also the `Retry-After` header), then retry.",
+        "headers": {
+          "Retry-After": {
+            "description": "Seconds to wait before retrying.",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorEnvelope"
+            }
+          }
+        }
+      },
+      "InternalError": {
+        "description": "`INTERNAL_ERROR`: retry after a short delay.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorEnvelope"
+            }
+          }
+        }
+      }
+    },
+    "examples": {
+      "StatusProcessing": {
+        "summary": "Still processing",
+        "value": {
+          "success": true,
+          "status": "processing",
+          "extraction_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+          "progress": 42
+        }
+      },
+      "StatusInputRequired": {
+        "summary": "Stopped to ask",
+        "value": {
+          "success": true,
+          "status": "input_required",
+          "extraction_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+          "progress": 22,
+          "answer_by": "2026-09-12T11:14:00Z",
+          "questions": [
+            {
+              "question_id": "q_1",
+              "type": "single_choice",
+              "question": "Which name should fill the \"Supplier name\" column when the invoice issuer and payment recipient differ?",
+              "example_from_documents": "The invoices show \"Northgate Search Services\" as the invoice issuer and say \"Please make payment to NSS Franchise Holdings Ltd\".",
+              "scope": {
+                "level": "extraction",
+                "applies_to": "Every document in this extraction, not only the example. If the answer differs by document type, say so in text."
+              },
+              "choices": [
+                {
+                  "choice_id": "a",
+                  "label": "Use the invoice issuer's name",
+                  "cell_would_contain": "Northgate Search Services",
+                  "recommended": true
+                },
+                {
+                  "choice_id": "b",
+                  "label": "Use the payment recipient's name",
+                  "cell_would_contain": "NSS Franchise Holdings Ltd"
+                }
+              ]
+            },
+            {
+              "question_id": "q_2",
+              "type": "free_text",
+              "question": "What date format should I use in the \"invoice_date\" and \"due_date\" columns?",
+              "example_from_documents": "The files show dates such as \"Aug 27, 2026\", \"28 Aug 2026\", and \"2026/09/08\".",
+              "scope": {
+                "level": "extraction",
+                "applies_to": "Every document in this extraction, not only the example. If the answer differs by document type, say so in text."
+              },
+              "choices": [],
+              "recommended_approach": "I will use YYYY-MM-DD for every value in the \"invoice_date\" and \"due_date\" columns."
+            }
+          ]
+        }
+      },
+      "StatusCompleted": {
+        "summary": "Completed",
+        "value": {
+          "success": true,
+          "status": "completed",
+          "extraction_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+          "credits_deducted": 25,
+          "credits_balance": 125,
+          "credits_reserved": 0,
+          "output_structure": "per_invoice",
+          "output_expires_at": "2026-07-26T10:30:00Z",
+          "pages": {
+            "successful_count": 10,
+            "failed_count": 2,
+            "successful": [
+              {
+                "file_name": "invoice-1.pdf",
+                "page": 1
+              },
+              {
+                "file_name": "invoice-1.pdf",
+                "page": 2
+              }
+            ],
+            "failed": [
+              {
+                "file_name": "damaged.pdf",
+                "page": 1
+              }
+            ],
+            "failure_reasons": [
+              {
+                "code": "PROCESSING_FILE_SIZE_LIMIT_EXCEEDED",
+                "message": "The upload was accepted, but during processing part of the PDF became too large for our file-processing limit. This can happen when a compressed PDF is processed internally. Split the PDF into smaller page chunks and resubmit.",
+                "affected_pages": [
+                  {
+                    "file_name": "damaged.pdf",
+                    "pages": [
+                      1
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          "ai_uncertainty_notes": [
+            {
+              "topic": "Documents to extract from",
+              "description": "Your files often contain a 'Tax Invoice' with an attached 'Delivery Note'. I treated the 'Tax Invoice' pages as the main source of data, and ignored the attached 'Delivery Note' pages as supporting context.",
+              "suggested_prompt_additions": [
+                {
+                  "purpose": "To confirm this handling",
+                  "instructions": [
+                    "Extract from 'Tax Invoice' only"
+                  ]
+                },
+                {
+                  "purpose": "To extract from both",
+                  "instructions": [
+                    "Extract from 'Tax Invoice' and 'Delivery Note'"
+                  ]
+                }
+              ]
+            }
+          ],
+          "review_needed": {
+            "count": 1,
+            "items": [
+              {
+                "message": "Check whether the extracted total should include the handwritten adjustment near the bottom of the document.",
+                "affected_fields": [
+                  "Total Amount"
+                ],
+                "output_row_numbers": [
+                  4
+                ],
+                "source_references": [
+                  "invoice-1.pdf (Page 2)"
+                ]
+              }
+            ]
+          },
+          "output": {
+            "xlsx_url": "https://storage.example.com/...?X-Amz-Signature=...",
+            "csv_url": "https://storage.example.com/...?X-Amz-Signature=...",
+            "json_url": "https://storage.example.com/...?X-Amz-Signature=..."
+          }
+        }
+      },
+      "StatusFailed": {
+        "summary": "Failed (HTTP 200, success false)",
+        "value": {
+          "success": false,
+          "status": "failed",
+          "extraction_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+          "error": {
+            "code": "INSUFFICIENT_CREDITS",
+            "message": "Not enough credits for this extraction; details shows the credits required and your balance. Submit fewer pages, or buy credits in the dashboard at invoicedataextraction.com (the plans and prices are at https://invoicedataextraction.com/pricing), then submit again with a new submission_id.",
+            "retryable": false,
+            "details": {
+              "credits_required": 25,
+              "credits_balance": 15,
+              "credits_reserved": 10
+            }
+          }
+        }
+      },
+      "StatusCancelled": {
+        "summary": "Cancelled",
+        "value": {
+          "success": true,
+          "status": "cancelled",
+          "extraction_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+          "credits_deducted": 4,
+          "cancellation_reason": "user",
+          "credits_balance": 146,
+          "credits_reserved": 0
+        }
+      }
+    },
+    "schemas": {
+      "ClientId": {
+        "type": "string",
+        "pattern": "^[A-Za-z0-9._:-]{1,200}$",
+        "description": "An identifier you choose: 1 to 200 characters from letters, digits, dots, underscores, colons and hyphens. Used for `upload_session_id`, `file_id` and `submission_id`."
+      },
+      "ErrorCode": {
+        "type": "string",
+        "description": "The codes an error envelope can carry, from any endpoint.",
+        "enum": [
+          "UNAUTHENTICATED",
+          "API_KEY_EXPIRED",
+          "API_KEY_REVOKED",
+          "INVALID_INPUT",
+          "EXTRACTION_NOT_FOUND",
+          "INTERNAL_ERROR",
+          "SUBMISSIONS_PAUSED",
+          "SUBMISSION_ID_ALREADY_USED",
+          "DUPLICATE_FILE_NAME",
+          "DUPLICATE_FILE_ID",
+          "FILE_TOO_LARGE",
+          "TOTAL_UPLOAD_SIZE_LIMIT_EXCEEDED",
+          "SESSION_ALREADY_INITIALIZED",
+          "FILE_NOT_FOUND",
+          "FILE_NOT_UPLOADABLE",
+          "FILE_ABORTED",
+          "INVALID_COMPLETION_PARTS",
+          "OBJECT_SIZE_MISMATCH",
+          "UPLOAD_ID_NOT_FOUND",
+          "INSUFFICIENT_CREDITS",
+          "UPLOAD_COMPLETE_FAILED",
+          "OUTPUT_NOT_AVAILABLE",
+          "OUTPUT_EXPIRED",
+          "EXTRACTION_IN_PROGRESS",
+          "EXTRACTION_NOT_CANCELLABLE",
+          "NOT_FOUND",
+          "FORBIDDEN",
+          "RATE_LIMITED"
+        ]
+      },
+      "ErrorObject": {
+        "type": "object",
+        "required": [
+          "code",
+          "message",
+          "retryable",
+          "details"
+        ],
+        "properties": {
+          "code": {
+            "$ref": "#/components/schemas/ErrorCode"
+          },
+          "message": {
+            "type": "string",
+            "description": "What happened and what to do next, in plain words."
+          },
+          "retryable": {
+            "type": "boolean",
+            "description": "`true` when the same request may succeed after a short delay; `false` when the request itself must change."
+          },
+          "details": {
+            "description": "Always present: `null`, or an object with error-specific context. `INVALID_INPUT` carries `issues`, each with a `message` and a `path`; `RATE_LIMITED` carries `retry_after_seconds`.",
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": true
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "ErrorEnvelope": {
+        "type": "object",
+        "required": [
+          "success",
+          "error"
+        ],
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "const": false
+          },
+          "error": {
+            "$ref": "#/components/schemas/ErrorObject"
+          }
+        }
+      },
+      "ExtractionStatus": {
+        "type": "string",
+        "enum": [
+          "processing",
+          "input_required",
+          "completed",
+          "failed",
+          "cancelled"
+        ]
+      },
+      "OutputStructure": {
+        "type": "string",
+        "enum": [
+          "automatic",
+          "per_invoice",
+          "per_line_item"
+        ],
+        "description": "`per_invoice`: one row per invoice. `per_line_item`: one row per line item, with the invoice-level fields repeated. `automatic`: chosen from your prompt and documents; responses report the resolved value once processing completes."
+      },
+      "OutputLanguage": {
+        "type": "string",
+        "enum": [
+          "automatic",
+          "en",
+          "ar",
+          "zh-Hant",
+          "zh-Hans",
+          "nl",
+          "fr",
+          "de",
+          "el",
+          "he",
+          "it",
+          "ja",
+          "pl",
+          "pt",
+          "es",
+          "th"
+        ]
+      },
+      "FillColor": {
+        "type": "string",
+        "enum": [
+          "none",
+          "yellow",
+          "orange",
+          "red"
+        ]
+      },
+      "UploadSessionFileRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "file_id",
+          "file_name",
+          "file_size_bytes"
+        ],
+        "properties": {
+          "file_id": {
+            "$ref": "#/components/schemas/ClientId"
+          },
+          "file_name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "description": "The file name with its extension, one of `.pdf`, `.jpg`, `.jpeg`, `.png`; no control characters, slashes or surrounding whitespace. Unique within the session."
+          },
+          "file_size_bytes": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "The exact size in bytes. PDFs up to 150 MB (157,286,400 bytes) and up to 5,000 pages; images up to 5 MB (5,242,880 bytes); all files of a session together up to 2 GB."
+          }
+        }
+      },
+      "CreateUploadSessionRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "upload_session_id",
+          "files"
+        ],
+        "properties": {
+          "upload_session_id": {
+            "$ref": "#/components/schemas/ClientId"
+          },
+          "files": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 6000,
+            "items": {
+              "$ref": "#/components/schemas/UploadSessionFileRequest"
+            }
+          }
+        }
+      },
+      "CreateUploadSessionResponse": {
+        "type": "object",
+        "required": [
+          "success",
+          "upload_session_id",
+          "files"
+        ],
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "const": true
+          },
+          "upload_session_id": {
+            "$ref": "#/components/schemas/ClientId"
+          },
+          "files": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "file_id",
+                "file_name",
+                "part_size"
+              ],
+              "properties": {
+                "file_id": {
+                  "$ref": "#/components/schemas/ClientId"
+                },
+                "file_name": {
+                  "type": "string"
+                },
+                "part_size": {
+                  "type": "integer",
+                  "description": "The part size in bytes to split the file into; the same for every file in the session (8,388,608 today). A file smaller than this is one part."
+                }
+              }
+            }
+          }
+        }
+      },
+      "GetUploadPartUrlsRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "file_id",
+          "part_numbers"
+        ],
+        "properties": {
+          "file_id": {
+            "$ref": "#/components/schemas/ClientId"
+          },
+          "part_numbers": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 1000,
+            "items": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 10000
+            },
+            "description": "1-indexed part numbers; duplicates are ignored."
+          }
+        }
+      },
+      "GetUploadPartUrlsResponse": {
+        "type": "object",
+        "required": [
+          "success",
+          "upload_session_id",
+          "file_id",
+          "file_name",
+          "part_size",
+          "part_urls"
+        ],
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "const": true
+          },
+          "upload_session_id": {
+            "$ref": "#/components/schemas/ClientId"
+          },
+          "file_id": {
+            "$ref": "#/components/schemas/ClientId"
+          },
+          "file_name": {
+            "type": "string"
+          },
+          "part_size": {
+            "type": "integer"
+          },
+          "part_urls": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "part_number",
+                "url"
+              ],
+              "properties": {
+                "part_number": {
+                  "type": "integer"
+                },
+                "url": {
+                  "type": "string",
+                  "format": "uri",
+                  "description": "`PUT` the part's raw bytes here within 15 minutes; keep the `ETag` response header."
+                }
+              }
+            }
+          }
+        }
+      },
+      "CompleteFileUploadRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "file_id",
+          "parts"
+        ],
+        "properties": {
+          "file_id": {
+            "$ref": "#/components/schemas/ClientId"
+          },
+          "parts": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 10000,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "part_number",
+                "e_tag"
+              ],
+              "properties": {
+                "part_number": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 10000
+                },
+                "e_tag": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "The `ETag` header of the part's `PUT` response, quotes included."
+                }
+              }
+            }
+          }
+        }
+      },
+      "CompleteFileUploadResponse": {
+        "type": "object",
+        "required": [
+          "success",
+          "upload_session_id",
+          "file_id",
+          "file_name"
+        ],
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "const": true
+          },
+          "upload_session_id": {
+            "$ref": "#/components/schemas/ClientId"
+          },
+          "file_id": {
+            "$ref": "#/components/schemas/ClientId"
+          },
+          "file_name": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "const": "completed",
+            "description": "Present when this call completed the file; absent when the file was already complete."
+          }
+        }
+      },
+      "PromptField": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 2,
+            "maxLength": 50,
+            "description": "The output column name, exactly as it will appear. Names are unique ignoring case, spaces and underscores, and may not be `Source File` or `Review Needed`."
+          },
+          "prompt": {
+            "description": "Instructions for this field, 3 to 600 characters. May be omitted or empty.",
+            "anyOf": [
+              {
+                "type": "string",
+                "const": ""
+              },
+              {
+                "type": "string",
+                "minLength": 3,
+                "maxLength": 600
+              }
+            ]
+          }
+        }
+      },
+      "PromptObject": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "fields"
+        ],
+        "properties": {
+          "fields": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 20,
+            "items": {
+              "$ref": "#/components/schemas/PromptField"
+            }
+          },
+          "general_prompt": {
+            "type": "string",
+            "maxLength": 1500,
+            "description": "Instructions that apply to the whole task and every field."
+          }
+        }
+      },
+      "ExtractionOptions": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "Every field is optional. The three output preferences default to the account's settings on the web app's Preferences page; a value sent here applies to this extraction only.",
+        "properties": {
+          "exclude_columns": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "source_file",
+                "review_needed"
+              ]
+            },
+            "default": [],
+            "description": "System columns to leave out of the output files. Completed responses still carry `review_needed` when the column is excluded."
+          },
+          "output_language": {
+            "$ref": "#/components/schemas/OutputLanguage"
+          },
+          "review_needed_fill_color": {
+            "$ref": "#/components/schemas/FillColor"
+          },
+          "affected_field_fill_color": {
+            "$ref": "#/components/schemas/FillColor"
+          },
+          "send_completion_email": {
+            "type": "boolean",
+            "default": false,
+            "description": "Email the account when this extraction finishes, whether it completes, fails or is cancelled."
+          },
+          "json_typed_values": {
+            "type": "boolean",
+            "default": false,
+            "description": "Native JSON types in the JSON output and the results endpoint: numbers for amounts, quantities and rates, booleans for yes/no fields, `null` for an empty cell. Recommended for a new integration that reads the rows. Fixed at submission."
+          },
+          "ask_questions": {
+            "type": "boolean",
+            "default": false,
+            "description": "Let the extraction stop and ask when the documents leave something unsettled. The status is then `input_required` with the questions; answer with `answerExtractionQuestions`. Off, the extraction never stops to ask."
+          }
+        }
+      },
+      "SubmitExtractionRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "submission_id",
+          "upload_session_id",
+          "file_ids",
+          "task_name",
+          "prompt",
+          "output_structure"
+        ],
+        "properties": {
+          "submission_id": {
+            "$ref": "#/components/schemas/ClientId"
+          },
+          "upload_session_id": {
+            "$ref": "#/components/schemas/ClientId"
+          },
+          "file_ids": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 6000,
+            "items": {
+              "$ref": "#/components/schemas/ClientId"
+            },
+            "description": "Files completed in this session."
+          },
+          "task_name": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 40,
+            "description": "Your own label for the extraction."
+          },
+          "prompt": {
+            "description": "What to extract: a sentence of up to 5,000 characters, or an object naming the exact output fields.",
+            "oneOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 5000
+              },
+              {
+                "$ref": "#/components/schemas/PromptObject"
+              }
+            ]
+          },
+          "output_structure": {
+            "$ref": "#/components/schemas/OutputStructure"
+          },
+          "options": {
+            "$ref": "#/components/schemas/ExtractionOptions"
+          }
+        }
+      },
+      "SubmitExtractionResponse": {
+        "type": "object",
+        "required": [
+          "success",
+          "extraction_id",
+          "submission_state"
+        ],
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "const": true
+          },
+          "extraction_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "submission_state": {
+            "type": "string",
+            "const": "received"
+          }
+        }
+      },
+      "PageReference": {
+        "type": "object",
+        "required": [
+          "file_name",
+          "page"
+        ],
+        "properties": {
+          "file_name": {
+            "type": "string"
+          },
+          "page": {
+            "type": "integer"
+          }
+        }
+      },
+      "PageFailureReason": {
+        "type": "object",
+        "required": [
+          "code",
+          "message",
+          "affected_pages"
+        ],
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "affected_pages": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "file_name",
+                "pages"
+              ],
+              "properties": {
+                "file_name": {
+                  "type": "string"
+                },
+                "pages": {
+                  "type": "array",
+                  "items": {
+                    "type": "integer"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "Pages": {
+        "type": "object",
+        "description": "Which pages were processed and which failed; data from failed pages is missing from the output.",
+        "required": [
+          "successful_count",
+          "failed_count",
+          "successful",
+          "failed",
+          "failure_reasons"
+        ],
+        "properties": {
+          "successful_count": {
+            "type": "integer"
+          },
+          "failed_count": {
+            "type": "integer"
+          },
+          "successful": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PageReference"
+            }
+          },
+          "failed": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PageReference"
+            }
+          },
+          "failure_reasons": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PageFailureReason"
+            }
+          }
+        }
+      },
+      "UncertaintyNote": {
+        "type": "object",
+        "description": "A prompt note, an assumption made where the prompt left room for interpretation, with prompt text that would settle it next time.",
+        "required": [
+          "topic",
+          "description",
+          "suggested_prompt_additions"
+        ],
+        "properties": {
+          "topic": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "suggested_prompt_additions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "purpose",
+                "instructions"
+              ],
+              "properties": {
+                "purpose": {
+                  "type": "string"
+                },
+                "instructions": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "ReviewNeededItem": {
+        "type": "object",
+        "required": [
+          "message",
+          "affected_fields",
+          "output_row_numbers",
+          "source_references"
+        ],
+        "properties": {
+          "message": {
+            "type": "string"
+          },
+          "affected_fields": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Empty when the concern is about the row or document rather than particular fields."
+          },
+          "output_row_numbers": {
+            "type": "array",
+            "items": {
+              "type": "integer"
+            },
+            "description": "1-based data row numbers, not counting the header row."
+          },
+          "source_references": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "ReviewNeeded": {
+        "type": "object",
+        "description": "Rows that need a human's check before the data is relied on. Check `count` first.",
+        "required": [
+          "count",
+          "items"
+        ],
+        "properties": {
+          "count": {
+            "type": "integer"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ReviewNeededItem"
+            }
+          }
+        }
+      },
+      "OutputUrls": {
+        "type": "object",
+        "required": [
+          "xlsx_url",
+          "csv_url",
+          "json_url"
+        ],
+        "properties": {
+          "xlsx_url": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uri"
+          },
+          "csv_url": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uri"
+          },
+          "json_url": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uri"
+          }
+        },
+        "description": "Signed URLs valid for 5 minutes; `null` when a format was not generated or the output has expired."
+      },
+      "QuestionScope": {
+        "type": "object",
+        "required": [
+          "level",
+          "applies_to"
+        ],
+        "properties": {
+          "level": {
+            "type": "string",
+            "description": "What the answer governs. `extraction` is the only value today: every document in the extraction, not only the one in the example. Treat a value you do not recognise as narrower than the extraction and read `applies_to`.",
+            "enum": [
+              "extraction"
+            ]
+          },
+          "applies_to": {
+            "type": "string",
+            "description": "The scope in words, for whoever is answering."
+          }
+        }
+      },
+      "QuestionChoice": {
+        "type": "object",
+        "required": [
+          "choice_id",
+          "label"
+        ],
+        "properties": {
+          "choice_id": {
+            "type": "string",
+            "description": "A letter, `a` onwards."
+          },
+          "label": {
+            "type": "string"
+          },
+          "cell_would_contain": {
+            "type": "string",
+            "description": "The value this choice would put in the cell for the example, when known."
+          },
+          "recommended": {
+            "type": "boolean",
+            "const": true,
+            "description": "Present on the one choice the extraction recommends."
+          }
+        }
+      },
+      "Question": {
+        "type": "object",
+        "required": [
+          "question_id",
+          "type",
+          "question",
+          "scope",
+          "choices"
+        ],
+        "properties": {
+          "question_id": {
+            "type": "string",
+            "description": "Use it when answering."
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "single_choice",
+              "free_text"
+            ],
+            "description": "`single_choice` offers `choices`; answer with one, with words added if you like. `free_text` wants your own words, or the recommended approach. Words are accepted on every question, so an unrecognised type can still be answered with `text`."
+          },
+          "question": {
+            "type": "string"
+          },
+          "example_from_documents": {
+            "type": "string",
+            "description": "A real instance from the documents that the answer would change."
+          },
+          "scope": {
+            "$ref": "#/components/schemas/QuestionScope"
+          },
+          "choices": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/QuestionChoice"
+            },
+            "description": "Empty for `free_text`."
+          },
+          "recommended_approach": {
+            "type": "string",
+            "description": "On a `free_text` question, what the extraction does if you accept the recommendation."
+          },
+          "previous_answer_rejected": {
+            "type": "boolean",
+            "const": true,
+            "description": "Present when an earlier answer to this question was refused. Answer differently."
+          }
+        }
+      },
+      "ExtractionProcessing": {
+        "type": "object",
+        "required": [
+          "success",
+          "status",
+          "extraction_id",
+          "progress"
+        ],
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "const": true
+          },
+          "status": {
+            "type": "string",
+            "const": "processing"
+          },
+          "extraction_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "progress": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100
+          }
+        }
+      },
+      "ExtractionInputRequired": {
+        "type": "object",
+        "description": "The extraction stopped to ask. Questions appear the moment they exist, and every open question of the extraction is listed together. If the questions are not all answered within about four minutes, the extraction pauses and waits, and the account owner is emailed that a task is waiting for an answer, with a second email before the deadline. If the questions are not all answered by `answer_by`, which is 40 hours after the files were uploaded, the extraction is cancelled with `cancellation_reason: unanswered` and the work done so far is charged. The extraction continues the moment every open question has an answer.",
+        "required": [
+          "success",
+          "status",
+          "extraction_id",
+          "progress",
+          "answer_by",
+          "questions"
+        ],
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "const": true
+          },
+          "status": {
+            "type": "string",
+            "const": "input_required"
+          },
+          "extraction_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "progress": {
+            "type": "integer"
+          },
+          "answer_by": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "questions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Question"
+            }
+          }
+        }
+      },
+      "ExtractionCompleted": {
+        "type": "object",
+        "required": [
+          "success",
+          "status",
+          "extraction_id",
+          "credits_deducted",
+          "credits_balance",
+          "credits_reserved",
+          "output_structure",
+          "output_expires_at",
+          "pages",
+          "ai_uncertainty_notes",
+          "review_needed",
+          "output"
+        ],
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "const": true
+          },
+          "status": {
+            "type": "string",
+            "const": "completed"
+          },
+          "extraction_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "credits_deducted": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "One credit per successfully processed page."
+          },
+          "credits_balance": {
+            "type": "integer",
+            "description": "The account's total balance after this extraction was charged."
+          },
+          "credits_reserved": {
+            "type": "integer",
+            "description": "Credits held by extractions still in progress; usable balance is `credits_balance` minus this."
+          },
+          "output_structure": {
+            "type": "string",
+            "enum": [
+              "per_invoice",
+              "per_line_item"
+            ],
+            "description": "The resolved structure, also when `automatic` was submitted."
+          },
+          "output_expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "90 days after submission; after it the output URLs are `null` and the rows and files are gone."
+          },
+          "pages": {
+            "$ref": "#/components/schemas/Pages"
+          },
+          "ai_uncertainty_notes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UncertaintyNote"
+            }
+          },
+          "review_needed": {
+            "$ref": "#/components/schemas/ReviewNeeded"
+          },
+          "output": {
+            "$ref": "#/components/schemas/OutputUrls"
+          }
+        }
+      },
+      "ExtractionFailureCode": {
+        "type": "string",
+        "description": "Why an extraction failed. Retryable codes may succeed when submitted again with a new\n`submission_id`: `CONCURRENT_TASK_LIMIT` (as many extractions running as the account allows, 15 by\ndefault and more on request, counting those started in the web app),\n`SUBMISSION_STALLED`, `INTERNAL_ERROR`. The\nothers need a change first: `INSUFFICIENT_CREDITS` (details: `credits_required`,\n`credits_balance`, `credits_reserved`), `FILE_PAGE_LIMIT_EXCEEDED` and `ENCRYPTED_FILE`\n(details: `file_names`), `NO_PAGES_FOUND`, `VALIDATION_FAILED`, `PROMPT_REJECTED`,\n`PROMPT_UNCLEAR`, `FILE_SIZE_LIMIT_EXCEEDED`, `PROCESSING_FILE_SIZE_LIMIT_EXCEEDED`.\n",
+        "enum": [
+          "INSUFFICIENT_CREDITS",
+          "FILE_PAGE_LIMIT_EXCEEDED",
+          "ENCRYPTED_FILE",
+          "CONCURRENT_TASK_LIMIT",
+          "NO_PAGES_FOUND",
+          "VALIDATION_FAILED",
+          "PROMPT_REJECTED",
+          "PROMPT_UNCLEAR",
+          "FILE_SIZE_LIMIT_EXCEEDED",
+          "PROCESSING_FILE_SIZE_LIMIT_EXCEEDED",
+          "SUBMISSION_STALLED",
+          "INTERNAL_ERROR"
+        ]
+      },
+      "ExtractionFailureError": {
+        "type": "object",
+        "required": [
+          "code",
+          "message",
+          "retryable",
+          "details"
+        ],
+        "properties": {
+          "code": {
+            "$ref": "#/components/schemas/ExtractionFailureCode"
+          },
+          "message": {
+            "type": "string"
+          },
+          "retryable": {
+            "type": "boolean"
+          },
+          "details": {
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": true
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "ExtractionFailed": {
+        "type": "object",
+        "description": "HTTP 200 with `success: false`. Where the next step is to submit again, use a new `submission_id`.",
+        "required": [
+          "success",
+          "status",
+          "extraction_id",
+          "error"
+        ],
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "const": false
+          },
+          "status": {
+            "type": "string",
+            "const": "failed"
+          },
+          "extraction_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "error": {
+            "$ref": "#/components/schemas/ExtractionFailureError"
+          }
+        }
+      },
+      "CancellationReason": {
+        "type": "string",
+        "enum": [
+          "user",
+          "unanswered",
+          "answers_rejected"
+        ],
+        "description": "`user`: cancelled from the dashboard or with `cancelExtraction`. `unanswered`: a question was not answered by `answer_by`. `answers_rejected`: three answers were refused."
+      },
+      "ExtractionCancelled": {
+        "type": "object",
+        "description": "No output is produced; `credits_deducted` covers the work done before the extraction stopped.",
+        "required": [
+          "success",
+          "status",
+          "extraction_id",
+          "credits_deducted",
+          "cancellation_reason",
+          "credits_balance",
+          "credits_reserved"
+        ],
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "const": true
+          },
+          "status": {
+            "type": "string",
+            "const": "cancelled"
+          },
+          "extraction_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "credits_deducted": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "cancellation_reason": {
+            "$ref": "#/components/schemas/CancellationReason"
+          },
+          "credits_balance": {
+            "type": "integer"
+          },
+          "credits_reserved": {
+            "type": "integer"
+          }
+        }
+      },
+      "ExtractionStatusResponse": {
+        "description": "The status response, one shape per `status`.",
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/ExtractionProcessing"
+          },
+          {
+            "$ref": "#/components/schemas/ExtractionInputRequired"
+          },
+          {
+            "$ref": "#/components/schemas/ExtractionCompleted"
+          },
+          {
+            "$ref": "#/components/schemas/ExtractionFailed"
+          },
+          {
+            "$ref": "#/components/schemas/ExtractionCancelled"
+          }
+        ],
+        "discriminator": {
+          "propertyName": "status",
+          "mapping": {
+            "processing": "#/components/schemas/ExtractionProcessing",
+            "input_required": "#/components/schemas/ExtractionInputRequired",
+            "completed": "#/components/schemas/ExtractionCompleted",
+            "failed": "#/components/schemas/ExtractionFailed",
+            "cancelled": "#/components/schemas/ExtractionCancelled"
+          }
+        }
+      },
+      "CancellationRequestedResponse": {
+        "type": "object",
+        "required": [
+          "success",
+          "extraction_id",
+          "status",
+          "cancellation_requested",
+          "cancel_requested_at"
+        ],
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "const": true
+          },
+          "extraction_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "type": "string",
+            "const": "processing"
+          },
+          "cancellation_requested": {
+            "type": "boolean",
+            "const": true
+          },
+          "cancel_requested_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the request was first recorded."
+          }
+        }
+      },
+      "AnswerText": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 1000,
+        "description": "Your own words. Accepted on every question, alone or beside a `choice_id`."
+      },
+      "Answer": {
+        "description": "Names a question and gives one of: a `choice_id`, with `text` beside it if you like; `text` alone; or `accept_recommended: true`.",
+        "oneOf": [
+          {
+            "type": "object",
+            "title": "A choice, with words beside it if you like",
+            "additionalProperties": false,
+            "required": [
+              "question_id",
+              "choice_id"
+            ],
+            "properties": {
+              "question_id": {
+                "type": "string"
+              },
+              "choice_id": {
+                "type": "string",
+                "description": "A `choice_id` of a `single_choice` question."
+              },
+              "text": {
+                "$ref": "#/components/schemas/AnswerText"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "title": "Your own words",
+            "additionalProperties": false,
+            "required": [
+              "question_id",
+              "text"
+            ],
+            "properties": {
+              "question_id": {
+                "type": "string"
+              },
+              "text": {
+                "$ref": "#/components/schemas/AnswerText"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "title": "The recommendation",
+            "additionalProperties": false,
+            "required": [
+              "question_id",
+              "accept_recommended"
+            ],
+            "properties": {
+              "question_id": {
+                "type": "string"
+              },
+              "accept_recommended": {
+                "type": "boolean",
+                "const": true,
+                "description": "Take the recommended choice, or on a `free_text` question the recommended approach."
+              }
+            }
+          }
+        ]
+      },
+      "AnswerQuestionsRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "answers"
+        ],
+        "properties": {
+          "answers": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 15,
+            "items": {
+              "$ref": "#/components/schemas/Answer"
+            }
+          }
+        }
+      },
+      "ExtractionResultsResponse": {
+        "type": "object",
+        "required": [
+          "success",
+          "extraction_id",
+          "status",
+          "output_structure",
+          "output_expires_at",
+          "json_typed_values",
+          "columns",
+          "rows",
+          "offset",
+          "limit",
+          "row_count",
+          "total_rows",
+          "has_more",
+          "next_offset",
+          "review_needed",
+          "pages"
+        ],
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "const": true
+          },
+          "extraction_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "type": "string",
+            "const": "completed"
+          },
+          "output_structure": {
+            "type": "string",
+            "enum": [
+              "per_invoice",
+              "per_line_item"
+            ]
+          },
+          "output_expires_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "json_typed_values": {
+            "type": "boolean",
+            "description": "`true` when values carry native JSON types; `false` when every value is a string."
+          },
+          "columns": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The output column names in order."
+          },
+          "rows": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            },
+            "description": "One object per row with a value under every column. Row `i` of the page (from 0) is data row `offset + i + 1`."
+          },
+          "offset": {
+            "type": "integer"
+          },
+          "limit": {
+            "type": "integer"
+          },
+          "row_count": {
+            "type": "integer"
+          },
+          "total_rows": {
+            "type": "integer"
+          },
+          "has_more": {
+            "type": "boolean"
+          },
+          "next_offset": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "review_needed": {
+            "$ref": "#/components/schemas/ReviewNeeded"
+          },
+          "pages": {
+            "$ref": "#/components/schemas/Pages"
+          }
+        }
+      },
+      "OutputDownloadUrlResponse": {
+        "type": "object",
+        "required": [
+          "download_url",
+          "format",
+          "expires_in_seconds"
+        ],
+        "properties": {
+          "download_url": {
+            "type": "string",
+            "format": "uri"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "xlsx",
+              "csv",
+              "json"
+            ]
+          },
+          "expires_in_seconds": {
+            "type": "integer",
+            "const": 300
+          }
+        }
+      },
+      "SubmittedBy": {
+        "type": "object",
+        "required": [
+          "email"
+        ],
+        "properties": {
+          "email": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "ExtractionListItem": {
+        "type": "object",
+        "description": "A slim summary. Beyond the common fields, a `completed` item carries `credits_deducted`, `available_outputs` and `output_expires_at`; `processing` carries `progress`; `input_required` carries `progress` and `answer_by`; `cancelled` carries `credits_deducted` and `cancellation_reason`; `failed` carries `error` with `code` and `retryable`. Under `scope=team` every item carries `submitted_by`.",
+        "required": [
+          "extraction_id",
+          "submission_id",
+          "task_name",
+          "status",
+          "created_at",
+          "submission_method",
+          "file_count",
+          "file_names_preview",
+          "file_names_truncated",
+          "output_structure"
+        ],
+        "properties": {
+          "extraction_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "submission_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`null` for extractions submitted from the web dashboard."
+          },
+          "task_name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "$ref": "#/components/schemas/ExtractionStatus"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "submission_method": {
+            "type": "string",
+            "enum": [
+              "api",
+              "web_app"
+            ]
+          },
+          "file_count": {
+            "type": "integer"
+          },
+          "file_names_preview": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Up to the first five file names."
+          },
+          "file_names_truncated": {
+            "type": "boolean"
+          },
+          "output_structure": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "automatic",
+              "per_invoice",
+              "per_line_item",
+              null
+            ]
+          },
+          "credits_deducted": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "available_outputs": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "xlsx",
+                "csv",
+                "json"
+              ]
+            }
+          },
+          "output_expires_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "progress": {
+            "type": "integer"
+          },
+          "answer_by": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "cancellation_reason": {
+            "$ref": "#/components/schemas/CancellationReason"
+          },
+          "error": {
+            "type": "object",
+            "required": [
+              "code",
+              "retryable"
+            ],
+            "properties": {
+              "code": {
+                "$ref": "#/components/schemas/ExtractionFailureCode"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            }
+          },
+          "submitted_by": {
+            "$ref": "#/components/schemas/SubmittedBy"
+          }
+        }
+      },
+      "ListExtractionsResponse": {
+        "type": "object",
+        "required": [
+          "success",
+          "extractions",
+          "has_more",
+          "next_cursor"
+        ],
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "const": true
+          },
+          "extractions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ExtractionListItem"
+            }
+          },
+          "has_more": {
+            "type": "boolean"
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "ExtractionDetails": {
+        "type": "object",
+        "description": "The full record. Beyond the common fields, a `completed` extraction carries `credits_deducted`, `available_outputs`, `output_expires_at`, `pages`, `ai_uncertainty_notes` and `review_needed`; `processing` carries `progress`; `input_required` carries `progress`, `answer_by` and `questions`; `cancelled` carries `credits_deducted` and `cancellation_reason`; `failed` carries the full `error`. Under `scope=team` the record carries `submitted_by`.",
+        "required": [
+          "extraction_id",
+          "submission_id",
+          "task_name",
+          "status",
+          "created_at",
+          "submission_method",
+          "file_count",
+          "file_names",
+          "output_structure",
+          "prompt",
+          "options"
+        ],
+        "properties": {
+          "extraction_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "submission_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "task_name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "$ref": "#/components/schemas/ExtractionStatus"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "submission_method": {
+            "type": "string",
+            "enum": [
+              "api",
+              "web_app"
+            ]
+          },
+          "file_count": {
+            "type": "integer"
+          },
+          "file_names": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "output_structure": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "automatic",
+              "per_invoice",
+              "per_line_item",
+              null
+            ]
+          },
+          "prompt": {
+            "description": "The original prompt, as a string or as the object form. An empty string for a web-app extraction submitted without one; `null` when no prompt was stored.",
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/components/schemas/PromptObject"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "options": {
+            "type": "object",
+            "description": "Every option, filled with the values that applied, including the account preferences that filled any field left out at submission.",
+            "required": [
+              "exclude_columns",
+              "output_language",
+              "review_needed_fill_color",
+              "affected_field_fill_color",
+              "send_completion_email",
+              "json_typed_values",
+              "ask_questions"
+            ],
+            "properties": {
+              "exclude_columns": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "source_file",
+                    "review_needed"
+                  ]
+                }
+              },
+              "output_language": {
+                "$ref": "#/components/schemas/OutputLanguage"
+              },
+              "review_needed_fill_color": {
+                "$ref": "#/components/schemas/FillColor"
+              },
+              "affected_field_fill_color": {
+                "$ref": "#/components/schemas/FillColor"
+              },
+              "send_completion_email": {
+                "type": "boolean"
+              },
+              "json_typed_values": {
+                "type": "boolean"
+              },
+              "ask_questions": {
+                "type": "boolean"
+              }
+            }
+          },
+          "credits_deducted": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "available_outputs": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "xlsx",
+                "csv",
+                "json"
+              ]
+            }
+          },
+          "output_expires_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "pages": {
+            "$ref": "#/components/schemas/Pages"
+          },
+          "ai_uncertainty_notes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UncertaintyNote"
+            }
+          },
+          "review_needed": {
+            "$ref": "#/components/schemas/ReviewNeeded"
+          },
+          "progress": {
+            "type": "integer"
+          },
+          "answer_by": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "questions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Question"
+            }
+          },
+          "cancellation_reason": {
+            "$ref": "#/components/schemas/CancellationReason"
+          },
+          "error": {
+            "$ref": "#/components/schemas/ExtractionFailureError"
+          },
+          "submitted_by": {
+            "$ref": "#/components/schemas/SubmittedBy"
+          }
+        }
+      },
+      "ExtractionDetailsResponse": {
+        "type": "object",
+        "required": [
+          "success",
+          "extraction"
+        ],
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "const": true
+          },
+          "extraction": {
+            "$ref": "#/components/schemas/ExtractionDetails"
+          }
+        }
+      },
+      "CreditsBalanceResponse": {
+        "type": "object",
+        "required": [
+          "success",
+          "credits_balance",
+          "credits_reserved"
+        ],
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "const": true
+          },
+          "credits_balance": {
+            "type": "integer",
+            "description": "Total balance, paid and free credits together."
+          },
+          "credits_reserved": {
+            "type": "integer",
+            "description": "Held by extractions in progress; up to this much is deducted when they complete."
+          }
+        }
+      }
+    }
+  }
+}
