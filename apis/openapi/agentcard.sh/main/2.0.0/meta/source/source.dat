@@ -1,0 +1,3473 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Agentcard API",
+    "version": "2.0.0",
+    "description": "The Agentcard v2 API \u2014 connect your users and verify their identity from your own backend. Every call is authenticated with a platform access token minted from your `client_id` + `client_secret`."
+  },
+  "servers": [
+    {
+      "url": "https://api.agentcard.sh",
+      "description": "There is one base URL. Sandbox vs production is decided by the client credential you use, never by the host."
+    }
+  ],
+  "security": [
+    {
+      "platformToken": []
+    }
+  ],
+  "tags": [
+    {
+      "name": "Authentication",
+      "description": "Exchange your client credentials for a platform access token, and introspect what a token acts as."
+    },
+    {
+      "name": "Connect",
+      "description": "Connect a user to your platform: send a one-time code, verify it, record consent, and keep the connection alive."
+    },
+    {
+      "name": "Identity verification",
+      "description": "Verify a connected user's identity: upload their ID, submit any extra fields we ask for, then show a short face scan."
+    }
+  ],
+  "paths": {
+    "/api/v2/oauth/token": {
+      "post": {
+        "tags": [
+          "Authentication"
+        ],
+        "summary": "Create an access token",
+        "operationId": "createAccessToken",
+        "security": [],
+        "description": "Exchanges your `client_id` + `client_secret` for a platform access token (OAuth2 client credentials, RFC 6749 \u00a74.4). The token lives one hour \u2014 when it expires, exchange again; there are no refresh tokens on this grant.\n\nGet your credentials in the Agentcard dashboard under **Organization \u2192 Developer \u2192 Credentials**. A sandbox client mints tokens that act in sandbox; a production client acts in production.\n\nYou can also send the credentials as HTTP Basic (`Authorization: Basic base64(client_id:client_secret)`) instead of in the form body.\n\nThis endpoint is rate limited to 30 requests per 5 minutes per IP \u2014 cache the token and reuse it until it expires.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "grant_type",
+                  "client_id",
+                  "client_secret"
+                ],
+                "properties": {
+                  "grant_type": {
+                    "type": "string",
+                    "enum": [
+                      "client_credentials"
+                    ],
+                    "description": "Always `client_credentials`."
+                  },
+                  "client_id": {
+                    "type": "string",
+                    "description": "Your client id, from the dashboard."
+                  },
+                  "client_secret": {
+                    "type": "string",
+                    "description": "Your client secret (`acs_\u2026`), shown once when you create the client."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The token to send as `Authorization: Bearer <access_token>` on every other call.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TokenResponse"
+                },
+                "example": {
+                  "access_token": "eyJhbGciOiJIUzI1NiIs\u2026",
+                  "token_type": "Bearer",
+                  "expires_in": 3600,
+                  "scope": "api"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`unsupported_grant_type` \u2014 the `grant_type` isn't `client_credentials`. `unauthorized_client` \u2014 the client can't use this grant.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OAuthError"
+                },
+                "example": {
+                  "error": "unsupported_grant_type",
+                  "error_description": "Only grant_type=client_credentials is supported here"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`invalid_client` \u2014 unknown client or bad credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OAuthError"
+                },
+                "example": {
+                  "error": "invalid_client",
+                  "error_description": "Unknown client or bad credentials"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`access_denied` \u2014 the organization is suspended.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OAuthError"
+                },
+                "example": {
+                  "error": "access_denied",
+                  "error_description": "Organization is suspended"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2": {
+      "get": {
+        "tags": [
+          "Authentication"
+        ],
+        "summary": "Introspect credential",
+        "operationId": "introspectCredential",
+        "description": "Returns the organization and mode your token acts as. Useful as a health check and to confirm you're pointed at the right credential.",
+        "responses": {
+          "200": {
+            "description": "The organization and mode behind the token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "object": {
+                      "type": "string",
+                      "enum": [
+                        "api_v2"
+                      ]
+                    },
+                    "organization_id": {
+                      "type": "string",
+                      "description": "The organization the token belongs to."
+                    },
+                    "test_mode": {
+                      "type": "boolean",
+                      "description": "`true` when the token acts in test mode, `false` in production. Decided by the client the token was minted from. Prefer this over the deprecated `mode` field."
+                    },
+                    "mode": {
+                      "type": "string",
+                      "enum": [
+                        "sandbox",
+                        "production"
+                      ],
+                      "deprecated": true,
+                      "description": "Deprecated \u2014 `sandbox` is the legacy wire name for test mode; read `test_mode` instead. Kept unchanged so existing integrations never break."
+                    }
+                  },
+                  "required": [
+                    "object",
+                    "organization_id",
+                    "test_mode"
+                  ]
+                },
+                "example": {
+                  "object": "api_v2",
+                  "organization_id": "org_a1b2c3",
+                  "mode": "sandbox",
+                  "test_mode": true
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      }
+    },
+    "/api/v2/connect/start": {
+      "post": {
+        "tags": [
+          "Connect"
+        ],
+        "summary": "Send a code",
+        "operationId": "connectStart",
+        "description": "Sends a one-time code to the user by email or phone. Provide **exactly one** of `email` or `phone`. Codes are valid for 10 minutes.\n\nIf you've designed a connect email in your dashboard, we send that branded email; otherwise we send a default one.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "email": {
+                    "type": "string",
+                    "format": "email",
+                    "description": "The user's email address. Provide this or `phone`, not both."
+                  },
+                  "phone": {
+                    "type": "string",
+                    "description": "The user's phone number in E.164 format (e.g. `+15551234567`). Provide this or `email`, not both."
+                  },
+                  "external_user_id": {
+                    "type": "string",
+                    "maxLength": 255,
+                    "description": "Optional. Your own identifier for the user, stored on the attempt for your reference."
+                  }
+                }
+              },
+              "example": {
+                "email": "user@example.com"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The attempt. Pass its `id` back as `connect_id` when you verify.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectAttempt"
+                },
+                "example": {
+                  "object": "connect_attempt",
+                  "id": "ca_9f8e7d6c",
+                  "channel": "email",
+                  "expires_at": "2026-07-12T20:30:00.000Z"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`invalid_request` \u2014 missing or both of `email` and `phone`. `invalid_phone` \u2014 the number isn't valid or supported. `client_credentials_required` \u2014 the token wasn't minted from client credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "502": {
+            "description": "`auth_provider_error` \u2014 the code couldn't be sent. Try again.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`auth_unavailable` \u2014 authentication is temporarily unavailable. Retry shortly.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/connect/verify": {
+      "post": {
+        "tags": [
+          "Connect"
+        ],
+        "summary": "Verify the code",
+        "operationId": "connectVerify",
+        "description": "Checks the code the user entered and, on success, connects the user and returns the token pair to store. Completing the code **is** the authorization \u2014 there is no separate approval screen.\n\nThe returned `access_token` is the **user's connection token**: it acts on behalf of this user (send it as the bearer token to the MCP server to create cards, check balances, and shop as them). It is not the platform token \u2014 the endpoints in this reference keep using your platform access token and name the user with `user_id`.\n\nA code can be verified once: a second verify of the same attempt returns `invalid_connect_attempt`.\n\nIn **sandbox** the code is always `111111`.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "connect_id",
+                  "code"
+                ],
+                "properties": {
+                  "connect_id": {
+                    "type": "string",
+                    "description": "The `id` returned by `/connect/start`."
+                  },
+                  "code": {
+                    "type": "string",
+                    "maxLength": 12,
+                    "description": "The one-time code the user entered. Always `111111` in sandbox."
+                  }
+                }
+              },
+              "example": {
+                "connect_id": "ca_9f8e7d6c",
+                "code": "111111"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The connection. Store the token pair and `user.id` \u2014 every KYC call names the user by it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Connection"
+                },
+                "example": {
+                  "object": "connection",
+                  "access_token": "act_1a2b3c\u2026",
+                  "refresh_token": "rct_4d5e6f\u2026",
+                  "token_type": "Bearer",
+                  "expires_in": 3600,
+                  "user": {
+                    "id": "usr_7g8h9i",
+                    "email": "user@example.com",
+                    "phone": null
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`invalid_request` \u2014 missing `connect_id` or `code`. `invalid_connect_attempt` \u2014 the attempt is unknown, already used, or expired. `client_credentials_required` \u2014 the token wasn't minted from client credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`invalid_code` \u2014 that code is invalid or expired.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "`auth_provider_error` \u2014 verification failed downstream. Try again.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/connect/consent": {
+      "post": {
+        "tags": [
+          "Connect"
+        ],
+        "summary": "Record consent",
+        "operationId": "connectConsent",
+        "description": "Records that the user authorized your platform to act on their behalf. Safe to retry \u2014 it's idempotent per user, so a repeat call updates the same record instead of creating a duplicate.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "user_id"
+                ],
+                "properties": {
+                  "user_id": {
+                    "type": "string",
+                    "description": "The `user.id` from `/connect/verify`."
+                  },
+                  "terms_version": {
+                    "type": "string",
+                    "maxLength": 64,
+                    "description": "Optional. The version of your terms the user accepted, stored for your audit trail."
+                  }
+                }
+              },
+              "example": {
+                "user_id": "usr_7g8h9i",
+                "terms_version": "2026-07-01"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The consent record.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Consent"
+                },
+                "example": {
+                  "object": "consent",
+                  "id": "cns_1a2b3c",
+                  "user_id": "usr_7g8h9i",
+                  "terms_version": "2026-07-01",
+                  "created_at": "2026-07-12T20:30:00.000Z"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`invalid_request` \u2014 missing `user_id`. `client_credentials_required` \u2014 the token wasn't minted from client credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "description": "`connection_not_found` \u2014 no connection exists for that user under your client.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/connect/refresh": {
+      "post": {
+        "tags": [
+          "Connect"
+        ],
+        "summary": "Refresh the connection",
+        "operationId": "connectRefresh",
+        "description": "Connection access tokens expire after one hour. Exchange the refresh token for a new pair before then.\n\nEach refresh returns a **new** refresh token and invalidates the old one \u2014 replace the stored token every time.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "refresh_token"
+                ],
+                "properties": {
+                  "refresh_token": {
+                    "type": "string",
+                    "description": "The refresh token from the most recent `/connect/verify` or `/connect/refresh`."
+                  }
+                }
+              },
+              "example": {
+                "refresh_token": "rct_4d5e6f\u2026"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The new token pair.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectionRefreshed"
+                },
+                "example": {
+                  "object": "connection",
+                  "access_token": "act_9z8y7x\u2026",
+                  "refresh_token": "rct_6w5v4u\u2026",
+                  "token_type": "Bearer",
+                  "expires_in": 3600
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`invalid_request` \u2014 missing `refresh_token`. `client_credentials_required` \u2014 the token wasn't minted from client credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`invalid_refresh_token` \u2014 that refresh token is invalid or expired.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/kyc/documents/front": {
+      "post": {
+        "tags": [
+          "Identity verification"
+        ],
+        "summary": "Upload the front of the ID",
+        "operationId": "kycUploadFront",
+        "description": "Uploads the front of the user's identity document as a base64-encoded image. This step acknowledges receipt; the next step (`back`) tells you what comes next.\n\nAny upload response may include a `warnings` array with actionable feedback (for example, that the other side of the document is still needed).\n\nThe response's `extracted` object carries what the document reader pulled off the image \u2014 use it to prefill your details form so the user confirms instead of typing.",
+        "requestBody": {
+          "$ref": "#/components/requestBodies/KycDocument"
+        },
+        "responses": {
+          "200": {
+            "description": "Receipt acknowledged \u2014 upload the back next. May include a `warnings` array.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KycState"
+                },
+                "example": {
+                  "object": "kyc",
+                  "status": "awaiting_documents",
+                  "extracted": {
+                    "document_type": "drivers_license",
+                    "issuing_country": "US",
+                    "first_name": "Jane",
+                    "last_name": "Doe",
+                    "date_of_birth": "1990-05-14"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/KycDocumentBadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/ConnectionNotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/UserConflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/DocumentUnprocessable"
+          },
+          "502": {
+            "$ref": "#/components/responses/VerificationError"
+          }
+        }
+      }
+    },
+    "/api/v2/kyc/documents/back": {
+      "post": {
+        "tags": [
+          "Identity verification"
+        ],
+        "summary": "Upload the back of the ID",
+        "operationId": "kycUploadBack",
+        "description": "Uploads the back of the document. The response tells you what to do next \u2014 this is the branch point of the flow:\n\n- `needs_information` \u2192 collect exactly the `required_fields` and post them to `/kyc/information`.\n- `requires_verification` \u2192 show the user the `iframe_url` for the face scan.\n- `rejected` \u2192 the document couldn't be verified.",
+        "requestBody": {
+          "$ref": "#/components/requestBodies/KycDocument"
+        },
+        "responses": {
+          "200": {
+            "description": "The next step of the flow.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KycState"
+                },
+                "examples": {
+                  "needs_information": {
+                    "summary": "Needs more info",
+                    "value": {
+                      "object": "kyc",
+                      "status": "needs_information",
+                      "required_fields": [
+                        "national_id_number",
+                        "phone_number"
+                      ],
+                      "extracted": {
+                        "document_type": "drivers_license",
+                        "issuing_country": "US",
+                        "document_number": "D1234567",
+                        "first_name": "Jane",
+                        "last_name": "Doe",
+                        "date_of_birth": "1990-05-14",
+                        "address_line1": "123 Market St",
+                        "address_city": "San Francisco",
+                        "address_region": "CA",
+                        "address_postal_code": "94105",
+                        "address_country": "US"
+                      }
+                    }
+                  },
+                  "requires_verification": {
+                    "summary": "Ready for face scan",
+                    "value": {
+                      "object": "kyc",
+                      "status": "requires_verification",
+                      "iframe_url": "https://in.sumsub.com/websdk/p/\u2026"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/KycDocumentBadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/ConnectionNotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/UserConflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/DocumentUnprocessable"
+          },
+          "502": {
+            "$ref": "#/components/responses/VerificationError"
+          }
+        }
+      }
+    },
+    "/api/v2/kyc/information": {
+      "post": {
+        "tags": [
+          "Identity verification"
+        ],
+        "summary": "Submit information",
+        "operationId": "kycSubmitInformation",
+        "description": "Submits the extra fields requested by a `needs_information` response. Send only the fields listed in `required_fields`; values are trimmed, and a blank value counts as not provided. For a fresh verification, the response returns the `iframe_url` for the face scan. For an imported verification (Reusable KYC), the submit that completes the residential address returns `pending` and files the card issuer application right after it, in the background, so the response never waits on the issuer; the verification then moves to `approved` or `rejected` through the status poll or the `identity.verification.updated` webhook. Repeating the request is safe: it returns the current status.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "user_id"
+                ],
+                "properties": {
+                  "user_id": {
+                    "type": "string",
+                    "description": "The connected user's id."
+                  },
+                  "first_name": {
+                    "type": "string"
+                  },
+                  "last_name": {
+                    "type": "string"
+                  },
+                  "date_of_birth": {
+                    "type": "string",
+                    "description": "ISO 8601 date, `YYYY-MM-DD`."
+                  },
+                  "national_id_number": {
+                    "type": "string",
+                    "description": "The user's national ID or tax identification number for the country that issued their document \u2014 for US documents this is the SSN; for any other country it is the national ID / tax number printed on (or associated with) the document. Forwarded to the verification provider only; never stored by Agentcard."
+                  },
+                  "phone_number": {
+                    "type": "string",
+                    "description": "E.164 format with country code (e.g. `+15551234567`)."
+                  },
+                  "address_line1": {
+                    "type": "string"
+                  },
+                  "address_line2": {
+                    "type": "string"
+                  },
+                  "address_city": {
+                    "type": "string"
+                  },
+                  "address_region": {
+                    "type": "string",
+                    "description": "State, province, or region."
+                  },
+                  "address_postal_code": {
+                    "type": "string"
+                  },
+                  "address_country": {
+                    "type": "string",
+                    "description": "ISO 3166-1 alpha-2 country code (e.g. `US`)."
+                  },
+                  "user_ip": {
+                    "type": "string",
+                    "description": "The end user's IP address as your frontend saw it (public IPv4 or IPv6; private or reserved addresses are rejected). Strongly recommended: identity screening checks the applicant's IP, and an IP belonging to a datacenter (such as your backend's) can fail an otherwise valid verification. Pass the address your user connected to you from; without it, your server's own address may be recorded as a last resort and can fail that screening."
+                  }
+                }
+              },
+              "example": {
+                "user_id": "usr_7g8h9i",
+                "national_id_number": "123456789",
+                "address_line1": "123 Main St",
+                "address_city": "San Francisco",
+                "address_region": "CA",
+                "address_postal_code": "94105",
+                "address_country": "US"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The next step: `requires_verification` with the `iframe_url` for a fresh verification, or `pending` when the submit completed an imported verification (the card issuer application is filed right after the response).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KycState"
+                },
+                "example": {
+                  "object": "kyc",
+                  "status": "requires_verification",
+                  "iframe_url": "https://in.sumsub.com/websdk/p/\u2026"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`invalid_request` \u2014 missing `user_id`, or a `user_ip` that is not a public IPv4/IPv6 address. `invalid_fields` \u2014 a value didn't check out; the error adds a `field_errors` object naming each field to fix.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "invalid_fields",
+                    "message": "Some of the information provided is invalid.",
+                    "field_errors": {
+                      "date_of_birth": "Enter a valid date."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/ConnectionNotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/UserConflict"
+          },
+          "502": {
+            "$ref": "#/components/responses/VerificationError"
+          }
+        }
+      }
+    },
+    "/api/v2/kyc": {
+      "get": {
+        "tags": [
+          "Identity verification"
+        ],
+        "summary": "Get verification status",
+        "operationId": "kycGetStatus",
+        "description": "Polls the current verification status \u2014 the alternative to the `identity.verification.updated` webhook.",
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "The connected user's id."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The current status.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KycState"
+                },
+                "example": {
+                  "object": "kyc",
+                  "status": "approved"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`invalid_request` \u2014 missing `user_id`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/ConnectionNotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/UserConflict"
+          }
+        }
+      }
+    },
+    "/api/v2/kyc/simulate": {
+      "post": {
+        "tags": [
+          "Identity verification"
+        ],
+        "summary": "Simulate an outcome (test mode)",
+        "operationId": "kycSimulate",
+        "description": "**Test mode only.** Drives a test-mode verification to a chosen terminal outcome instantly \u2014 test verifications never complete on their own. The simulated verdict flows through the same status contract and fires the same `identity.verification.updated` webhook a real review produces, so your status handling and webhook consumer are exercised end to end. Requires a test-mode client credential; live tokens get `403 sandbox_only`.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "user_id",
+                  "outcome"
+                ],
+                "properties": {
+                  "user_id": {
+                    "type": "string",
+                    "description": "The connected user's id."
+                  },
+                  "outcome": {
+                    "type": "string",
+                    "enum": [
+                      "approved",
+                      "rejected",
+                      "requires_input"
+                    ],
+                    "description": "The verdict to apply. `approved` \u2014 verification succeeds. `rejected` \u2014 terminal rejection. `requires_input` \u2014 a retryable bounce asking for new document photos."
+                  },
+                  "reason": {
+                    "type": "string",
+                    "maxLength": 300,
+                    "description": "Optional end-user-safe explanation carried on non-approved outcomes \u2014 it appears as `reason` in statuses and webhook events, exactly like a real review's. It must not name internal providers or identifiers (rejected with `400 invalid_reason`), since it is shown to end users verbatim."
+                  }
+                }
+              },
+              "example": {
+                "user_id": "usr_7g8h9i",
+                "outcome": "rejected",
+                "reason": "The name on the document does not match the application."
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The verification's new state, exactly as `GET /api/v2/kyc` now reports it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KycState"
+                },
+                "example": {
+                  "object": "kyc",
+                  "simulated": true,
+                  "status": "rejected",
+                  "reason": "The name on the document does not match the application."
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`invalid_request` \u2014 missing `user_id` or an unknown `outcome`. `invalid_reason` \u2014 the `reason` names an internal provider or identifier (it is shown to end users verbatim).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "description": "`sandbox_only` \u2014 the token is a live credential. Live verifications are decided by the identity provider and cannot be simulated.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "sandbox_only",
+                    "message": "Simulated verification outcomes only exist in test mode. Live verifications are decided by the identity provider."
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/ConnectionNotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/UserConflict"
+          },
+          "502": {
+            "$ref": "#/components/responses/VerificationError"
+          }
+        }
+      }
+    },
+    "/api/v2/kyc/import": {
+      "post": {
+        "tags": [
+          "Identity verification"
+        ],
+        "summary": "Import a verification (Sumsub share token)",
+        "operationId": "kycImport",
+        "description": "Import a verification you already ran on your **own Sumsub account** (Reusable KYC). Generate a single-use share token for the Agentcard client id, send it here, and the user skips document capture and the face scan. A successful import drops into the exact same status contract as a fresh verification: poll `GET /api/v2/kyc` or listen for `identity.verification.updated`. Requires one-time partner pairing between your Sumsub account and Agentcard's (per environment) \u2014 ask your Agentcard contact to enable it. Share tokens are single-use with a short TTL, so generate one fresh per import attempt.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "user_id",
+                  "share_token"
+                ],
+                "properties": {
+                  "user_id": {
+                    "type": "string",
+                    "description": "The connected user's id."
+                  },
+                  "share_token": {
+                    "type": "string",
+                    "description": "A Sumsub share token generated by your account for the Agentcard client id (`POST /resources/accessTokens/shareToken` with `forClientId`). Single-use; expires after its `ttlInSecs`."
+                  },
+                  "user_ip": {
+                    "type": "string",
+                    "description": "The end user's IP address as your frontend saw it (public IPv4 or IPv6; private or reserved addresses are rejected). Strongly recommended: identity screening checks the applicant's IP, and an IP belonging to a datacenter (such as your backend's) can fail an otherwise valid verification. Pass the address your user connected to you from; without it, your server's own address may be recorded as a last resort and can fail that screening."
+                  }
+                }
+              },
+              "example": {
+                "user_id": "usr_7g8h9i",
+                "share_token": "_act-jwt-eyJhbGciOiJub25lIn0..."
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The verification's state after the import, exactly as `GET /api/v2/kyc` now reports it. A complete applicant lands on `pending` while checks run (then `approved`). An applicant whose shared verification carried no residential address lands on `needs_information` with the exact `required_fields`: submit them via `POST /api/v2/kyc/information` right away (import first, then information), and the card issuer application is filed as soon as the address lands.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KycState"
+                },
+                "example": {
+                  "object": "kyc",
+                  "status": "pending"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`invalid_request` \u2014 missing `user_id` or `share_token`, or a `user_ip` that is not a public IPv4/IPv6 address. `invalid_share_token` \u2014 the token is invalid, expired, or already used; generate a fresh one and retry. `sharing_not_configured` \u2014 test mode has no sharing tenant configured; use `POST /api/v2/kyc/simulate` instead.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "description": "`sharing_not_enabled` \u2014 your Sumsub account and Agentcard's are not paired in this environment. Complete partner pairing first.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`connection_not_found` \u2014 the user has no active connection under this client.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`verification_in_progress` \u2014 a verification is already in flight for this user. Drive it to completion with the status flow instead of importing.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`verification_not_compatible` \u2014 the shared verification does not include everything the card program requires (an identity document and a selfie check). Share applicants from a level that includes both, or let the user run the standard flow.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/buy": {
+      "post": {
+        "tags": [
+          "Purchase"
+        ],
+        "summary": "Buy",
+        "operationId": "buy",
+        "security": [
+          {
+            "userAccessToken": []
+          }
+        ],
+        "description": "One conversational endpoint that places real orders. Send the user's request as plain text in `ask`; thread follow-ups with `conversation_id`; place a shown cart by echoing its `hash` in `confirm` (or an array of hashes for several carts). Money only moves on a confirm, and only for exactly the cart the hash describes.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "ask": {
+                    "type": "string",
+                    "description": "What the user wants, in plain language. Required unless the call is a confirm.",
+                    "minLength": 1,
+                    "pattern": "\\S"
+                  },
+                  "conversation_id": {
+                    "type": "string",
+                    "description": "The thread to continue. A confirm always requires it.",
+                    "minLength": 1
+                  },
+                  "confirm": {
+                    "description": "A cart hash from a previous response (16 hex characters), or an array of hashes to place several carts. An array confirm cannot carry an ask in the same call.",
+                    "oneOf": [
+                      {
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{16}$"
+                      },
+                      {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{16}$"
+                        },
+                        "minItems": 1,
+                        "maxItems": 8
+                      }
+                    ]
+                  },
+                  "payment_source": {
+                    "type": "string",
+                    "enum": [
+                      "vault"
+                    ],
+                    "description": "Pay the confirmed cart(s) with the user's own vaulted card, whatever the user's wording: the confirm pauses with decline_code vault_approval_required and an approval_url, the user approves on their device, and the same confirm places the order. Confirm-only. Omit it and the loop keeps its default source."
+                  },
+                  "delivery_address": {
+                    "type": "object",
+                    "description": "The delivery address for this conversation, when your app manages the user's addresses. The agent ships to exactly these values, never asks the user to confirm or correct them, and does not read or update the wallet's saved default address for the conversation. Send it on any turn (the first is fine); it holds for the whole conversation, and a later turn's value replaces it. A malformed address is refused with 400 invalid_delivery_address before any turn runs.",
+                    "required": [
+                      "street",
+                      "city",
+                      "state",
+                      "zip"
+                    ],
+                    "properties": {
+                      "street": {
+                        "type": "string",
+                        "description": "Street address, e.g. \"1900 Jefferson St\"."
+                      },
+                      "address2": {
+                        "type": "string",
+                        "description": "Apartment, suite or floor."
+                      },
+                      "city": {
+                        "type": "string"
+                      },
+                      "state": {
+                        "type": "string",
+                        "description": "Two-letter state or province code, e.g. \"CA\" or \"BC\"."
+                      },
+                      "zip": {
+                        "type": "string",
+                        "description": "US ZIP (or ZIP+4) or Canadian postal code, e.g. \"94123\" or \"V6B 5A1\"."
+                      },
+                      "phone": {
+                        "type": "string",
+                        "description": "Recipient phone number. Retail shipping requires one."
+                      },
+                      "name": {
+                        "type": "string",
+                        "description": "Recipient full name for the shipping label."
+                      },
+                      "can_leave_at_door": {
+                        "type": "boolean",
+                        "description": "Whether the courier may leave the order at the door (merchant-dependent)."
+                      },
+                      "country": {
+                        "type": "string",
+                        "description": "ISO 3166-1 alpha-2 country code, e.g. \"US\" or \"CA\". Inferred from the postal code when omitted."
+                      }
+                    }
+                  }
+                },
+                "anyOf": [
+                  {
+                    "required": [
+                      "ask"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "confirm"
+                    ]
+                  }
+                ],
+                "dependentRequired": {
+                  "confirm": [
+                    "conversation_id"
+                  ],
+                  "payment_source": [
+                    "confirm"
+                  ]
+                },
+                "not": {
+                  "required": [
+                    "ask",
+                    "confirm"
+                  ],
+                  "properties": {
+                    "confirm": {
+                      "type": "array"
+                    }
+                  }
+                }
+              },
+              "examples": {
+                "ask": {
+                  "summary": "Start a purchase",
+                  "value": {
+                    "ask": "a 16 oz bag of Colombian ground coffee from Amazon, ship it to 1900 Jefferson St, San Francisco"
+                  }
+                },
+                "confirm": {
+                  "summary": "Place a shown cart",
+                  "value": {
+                    "conversation_id": "conv_9a8b7c6d5e4f3a2b1c0d9e8f",
+                    "confirm": "9f2c4a1b8e3d5f07"
+                  }
+                },
+                "multiCartConfirm": {
+                  "summary": "Place several carts",
+                  "value": {
+                    "conversation_id": "conv_9a8b7c6d5e4f3a2b1c0d9e8f",
+                    "confirm": [
+                      "9f2c4a1b8e3d5f07",
+                      "31d8a6e0c47b92f5"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "One turn of the purchase conversation, in the fixed envelope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "The fixed response envelope. Every field is present on every response, null when empty.",
+                  "properties": {
+                    "conversation_id": {
+                      "type": "string",
+                      "description": "Thread it back on every follow-up. Returned on the first call too."
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "needs_input",
+                        "order_placed",
+                        "partially_placed",
+                        "declined"
+                      ],
+                      "description": "needs_input is progress, not failure: the reply is a question or a cart waiting on confirmation."
+                    },
+                    "reply": {
+                      "type": "string",
+                      "description": "The assistant's turn as prose, ready to show a human."
+                    },
+                    "messages": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "description": "The same turn split into ordered bubbles for chat surfaces."
+                    },
+                    "message_id": {
+                      "type": "string"
+                    },
+                    "cart": {
+                      "type": [
+                        "object",
+                        "null"
+                      ],
+                      "description": "The most recently shown cart. Null when no cart is on the table.",
+                      "properties": {
+                        "merchant": {
+                          "type": "string",
+                          "description": "Public merchant id, e.g. retail, doordash, goodeggs."
+                        },
+                        "merchant_name": {
+                          "type": "string",
+                          "description": "Display name for the merchant, or the store when one is selected (Amazon, Walmart)."
+                        },
+                        "items": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "name": {
+                                "type": "string"
+                              },
+                              "qty": {
+                                "type": "integer"
+                              },
+                              "priceCents": {
+                                "type": "integer"
+                              },
+                              "product_id": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ],
+                                "description": "The merchant's id for the line; tells two same-name lines apart. Null on carts shown before it was captured."
+                              }
+                            },
+                            "required": [
+                              "name",
+                              "qty",
+                              "product_id"
+                            ]
+                          }
+                        },
+                        "serviceFeesCents": {
+                          "type": "integer",
+                          "description": "All fees combined, including the Agentcard service fee."
+                        },
+                        "tipCents": {
+                          "type": "integer"
+                        },
+                        "totalCents": {
+                          "type": "integer",
+                          "description": "The all-in amount a confirm authorizes: merchandise, fees, and tip."
+                        },
+                        "hash": {
+                          "type": "string",
+                          "description": "Identity of exactly this cart. Echo it back as confirm to place the order."
+                        }
+                      },
+                      "required": [
+                        "merchant",
+                        "merchant_name",
+                        "items",
+                        "serviceFeesCents",
+                        "tipCents",
+                        "totalCents",
+                        "hash"
+                      ]
+                    },
+                    "carts": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "description": "The most recently shown cart. Null when no cart is on the table.",
+                        "properties": {
+                          "merchant": {
+                            "type": "string",
+                            "description": "Public merchant id, e.g. retail, doordash, goodeggs."
+                          },
+                          "merchant_name": {
+                            "type": "string",
+                            "description": "Display name for the merchant, or the store when one is selected (Amazon, Walmart)."
+                          },
+                          "items": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "name": {
+                                  "type": "string"
+                                },
+                                "qty": {
+                                  "type": "integer"
+                                },
+                                "priceCents": {
+                                  "type": "integer"
+                                },
+                                "product_id": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ],
+                                  "description": "The merchant's id for the line; tells two same-name lines apart. Null on carts shown before it was captured."
+                                }
+                              },
+                              "required": [
+                                "name",
+                                "qty",
+                                "product_id"
+                              ]
+                            }
+                          },
+                          "serviceFeesCents": {
+                            "type": "integer",
+                            "description": "All fees combined, including the Agentcard service fee."
+                          },
+                          "tipCents": {
+                            "type": "integer"
+                          },
+                          "totalCents": {
+                            "type": "integer",
+                            "description": "The all-in amount a confirm authorizes: merchandise, fees, and tip."
+                          },
+                          "hash": {
+                            "type": "string",
+                            "description": "Identity of exactly this cart. Echo it back as confirm to place the order."
+                          }
+                        },
+                        "required": [
+                          "merchant",
+                          "merchant_name",
+                          "items",
+                          "serviceFeesCents",
+                          "tipCents",
+                          "totalCents",
+                          "hash"
+                        ]
+                      },
+                      "description": "Every open cart in the conversation, oldest first. A conversation can hold carts at several merchants."
+                    },
+                    "placements": {
+                      "type": [
+                        "array",
+                        "null"
+                      ],
+                      "description": "Per-cart outcomes of a multi-cart confirm; null on every other call. Partial success is representable here.",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "merchant": {
+                            "type": "string"
+                          },
+                          "merchant_name": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": [
+                              "needs_input",
+                              "order_placed",
+                              "partially_placed",
+                              "declined"
+                            ]
+                          },
+                          "reply": {
+                            "type": "string"
+                          },
+                          "error_code": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "order_id": {
+                            "type": [
+                              "string",
+                              "null"
+                            ],
+                            "description": "This cart's order id when it placed."
+                          },
+                          "payment_source": {
+                            "$ref": "#/components/schemas/PaymentSource"
+                          },
+                          "decline_code": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "approval_url": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "charge_status": {
+                            "type": [
+                              "string",
+                              "null"
+                            ],
+                            "enum": [
+                              "none",
+                              "confirming",
+                              "settled",
+                              "unknown",
+                              null
+                            ]
+                          },
+                          "merchant_total_cents": {
+                            "type": [
+                              "integer",
+                              "null"
+                            ],
+                            "description": "For a cart the merchant priced outside US dollars: the merchant's own total in that currency's smallest unit, the same figure order.placed and order.failed carry. Null for a US dollar cart and when no checkout ran."
+                          },
+                          "merchant_currency": {
+                            "type": [
+                              "string",
+                              "null"
+                            ],
+                            "description": "The merchant's currency as a lower-case ISO code (cad) when the cart was priced outside US dollars. Null for a US dollar cart and when no checkout ran."
+                          }
+                        },
+                        "required": [
+                          "merchant",
+                          "merchant_name",
+                          "status",
+                          "reply",
+                          "order_id",
+                          "payment_source",
+                          "decline_code",
+                          "approval_url",
+                          "charge_status",
+                          "merchant_total_cents",
+                          "merchant_currency"
+                        ]
+                      }
+                    },
+                    "catalog": {
+                      "type": [
+                        "object",
+                        "null"
+                      ],
+                      "description": "The last product search as data, with a freshness stamp. Null when nothing fresh was searched.",
+                      "properties": {
+                        "merchant": {
+                          "type": "string"
+                        },
+                        "merchant_name": {
+                          "type": "string"
+                        },
+                        "store": {
+                          "type": [
+                            "object",
+                            "null"
+                          ],
+                          "properties": {
+                            "id": {
+                              "type": "string"
+                            },
+                            "name": {
+                              "type": "string"
+                            },
+                            "eta_minutes": {
+                              "type": [
+                                "integer",
+                                "null"
+                              ],
+                              "description": "A delivery store's estimate in minutes when the search ran, null when it showed none. Absent for other merchants."
+                            }
+                          },
+                          "description": "The store searched: its id and, when known, its name. Null when the search covered several stores."
+                        },
+                        "items": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string"
+                              },
+                              "name": {
+                                "type": "string"
+                              },
+                              "priceCents": {
+                                "type": "integer"
+                              },
+                              "image_url": {
+                                "type": "string",
+                                "format": "uri",
+                                "description": "The product photo, when the merchant provides one. Absolute https URL."
+                              }
+                            },
+                            "required": [
+                              "id"
+                            ]
+                          }
+                        },
+                        "as_of": {
+                          "type": "string",
+                          "format": "date-time"
+                        }
+                      }
+                    },
+                    "error_code": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Machine-readable failure code when something went wrong."
+                    },
+                    "order_id": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Set when this call placed an order: the merchant's order id, or Agentcard's when the merchant returns none. The same key as order.orderId in GET /cards/transactions/by-payment-method and order_id on order.placed. Null on a multi-cart confirm (see placements)."
+                    },
+                    "payment_source": {
+                      "$ref": "#/components/schemas/PaymentSource"
+                    },
+                    "decline_code": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "The machine code behind a declined: a gate reason (byoc_approval_required, vault_approval_required, sandbox_mode, per_txn_max_exceeded, card_limit_reached, ...) or a merchant code (items_unavailable, pos_cart_validation). in_progress means another attempt holds this checkout (Agentcard places a vault order itself when the approval lands): wait and read GET /buy/conversations/{id} instead of confirming again. Null on success and on recoverable errors."
+                    },
+                    "approval_url": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "The link to send the user when the attempt paused for their bank's or Vault's approval. Send the same confirm again once they approve."
+                    },
+                    "charge_status": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "enum": [
+                        "none",
+                        "confirming",
+                        "settled",
+                        "unknown",
+                        null
+                      ],
+                      "description": "Whether money moved on this call's checkout: none (nothing charged, nothing pending: every decline, approval pause and refusal answered before money moved), confirming (placed, charge still confirming), settled, or unknown (the attempt may have moved money and Agentcard cannot yet say; do not retry, read the conversation's orders, then support). Null when no checkout ran."
+                    },
+                    "merchant_total_cents": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ],
+                      "description": "For a cart the merchant priced outside US dollars: the merchant's own total in that currency's smallest unit, the same figure order.placed and order.failed carry. Null for a US dollar cart and when no checkout ran."
+                    },
+                    "merchant_currency": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "The merchant's currency as a lower-case ISO code (cad) when the cart was priced outside US dollars. Null for a US dollar cart and when no checkout ran."
+                    },
+                    "unmatched": {
+                      "type": "array",
+                      "description": "Asks that did not make it into a cart, cumulative for the conversation, with machine-derived reasons and the moment each happened. An entry leaves only when the same line later lands in a cart; placing an order does not clear it. Never inferred from the reply. Always an array.",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "merchant": {
+                            "type": "string"
+                          },
+                          "requested": {
+                            "type": "string",
+                            "description": "The query or line name that was asked for."
+                          },
+                          "reason": {
+                            "type": "string",
+                            "enum": [
+                              "not_found",
+                              "unavailable"
+                            ]
+                          },
+                          "detail": {
+                            "type": [
+                              "string",
+                              "null"
+                            ],
+                            "description": "The merchant's own words when it refused, dropped, or delisted the line."
+                          },
+                          "at": {
+                            "type": "string",
+                            "format": "date-time",
+                            "description": "When it happened; identifies the turn it came from."
+                          }
+                        },
+                        "required": [
+                          "merchant",
+                          "requested",
+                          "reason",
+                          "detail",
+                          "at"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "conversation_id",
+                    "status",
+                    "reply",
+                    "messages",
+                    "message_id",
+                    "cart",
+                    "carts",
+                    "placements",
+                    "catalog",
+                    "error_code",
+                    "order_id",
+                    "payment_source",
+                    "decline_code",
+                    "approval_url",
+                    "charge_status",
+                    "merchant_total_cents",
+                    "merchant_currency",
+                    "unmatched"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request body.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "hint": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "conversation_id not found for this user and connection.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The call could not run: the cart changed since that hash was issued (the body carries the fresh carts), nothing has been shown to confirm yet, the conversation is closed, or another turn is still running on this conversation (code turn_in_progress: wait for GET /buy/conversations/:id to report turn_in_progress false, then send again). Never a charge.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "description": "Present on the turn conflict: turn_in_progress."
+                    },
+                    "conversation_id": {
+                      "type": "string"
+                    },
+                    "cart": {
+                      "type": [
+                        "object",
+                        "null"
+                      ],
+                      "description": "The most recently shown cart. Null when no cart is on the table.",
+                      "properties": {
+                        "merchant": {
+                          "type": "string",
+                          "description": "Public merchant id, e.g. retail, doordash, goodeggs."
+                        },
+                        "merchant_name": {
+                          "type": "string",
+                          "description": "Display name for the merchant, or the store when one is selected (Amazon, Walmart)."
+                        },
+                        "items": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "name": {
+                                "type": "string"
+                              },
+                              "qty": {
+                                "type": "integer"
+                              },
+                              "priceCents": {
+                                "type": "integer"
+                              },
+                              "product_id": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ],
+                                "description": "The merchant's id for the line; tells two same-name lines apart. Null on carts shown before it was captured."
+                              }
+                            },
+                            "required": [
+                              "name",
+                              "qty",
+                              "product_id"
+                            ]
+                          }
+                        },
+                        "serviceFeesCents": {
+                          "type": "integer",
+                          "description": "All fees combined, including the Agentcard service fee."
+                        },
+                        "tipCents": {
+                          "type": "integer"
+                        },
+                        "totalCents": {
+                          "type": "integer",
+                          "description": "The all-in amount a confirm authorizes: merchandise, fees, and tip."
+                        },
+                        "hash": {
+                          "type": "string",
+                          "description": "Identity of exactly this cart. Echo it back as confirm to place the order."
+                        }
+                      },
+                      "required": [
+                        "merchant",
+                        "merchant_name",
+                        "items",
+                        "serviceFeesCents",
+                        "tipCents",
+                        "totalCents",
+                        "hash"
+                      ]
+                    },
+                    "carts": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "description": "The most recently shown cart. Null when no cart is on the table.",
+                        "properties": {
+                          "merchant": {
+                            "type": "string",
+                            "description": "Public merchant id, e.g. retail, doordash, goodeggs."
+                          },
+                          "merchant_name": {
+                            "type": "string",
+                            "description": "Display name for the merchant, or the store when one is selected (Amazon, Walmart)."
+                          },
+                          "items": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "name": {
+                                  "type": "string"
+                                },
+                                "qty": {
+                                  "type": "integer"
+                                },
+                                "priceCents": {
+                                  "type": "integer"
+                                },
+                                "product_id": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ],
+                                  "description": "The merchant's id for the line; tells two same-name lines apart. Null on carts shown before it was captured."
+                                }
+                              },
+                              "required": [
+                                "name",
+                                "qty",
+                                "product_id"
+                              ]
+                            }
+                          },
+                          "serviceFeesCents": {
+                            "type": "integer",
+                            "description": "All fees combined, including the Agentcard service fee."
+                          },
+                          "tipCents": {
+                            "type": "integer"
+                          },
+                          "totalCents": {
+                            "type": "integer",
+                            "description": "The all-in amount a confirm authorizes: merchandise, fees, and tip."
+                          },
+                          "hash": {
+                            "type": "string",
+                            "description": "Identity of exactly this cart. Echo it back as confirm to place the order."
+                          }
+                        },
+                        "required": [
+                          "merchant",
+                          "merchant_name",
+                          "items",
+                          "serviceFeesCents",
+                          "tipCents",
+                          "totalCents",
+                          "hash"
+                        ]
+                      }
+                    }
+                  }
+                },
+                "example": {
+                  "error": "cart changed since that hash was issued \u2014 verify the current carts and confirm their hashes",
+                  "conversation_id": "conv_9a8b7c6d5e4f3a2b1c0d9e8f",
+                  "cart": {
+                    "merchant": "retail",
+                    "merchant_name": "Amazon",
+                    "items": [
+                      {
+                        "name": "Cafe Mesa de los Santos Colombian Ground Coffee, 16 oz",
+                        "qty": 1,
+                        "priceCents": 2450
+                      }
+                    ],
+                    "serviceFeesCents": 61,
+                    "tipCents": 0,
+                    "totalCents": 2511,
+                    "hash": "31d8a6e0c47b92f5"
+                  },
+                  "carts": [
+                    {
+                      "merchant": "retail",
+                      "merchant_name": "Amazon",
+                      "items": [
+                        {
+                          "name": "Cafe Mesa de los Santos Colombian Ground Coffee, 16 oz",
+                          "qty": 1,
+                          "priceCents": 2450
+                        }
+                      ],
+                      "serviceFeesCents": 61,
+                      "tipCents": 0,
+                      "totalCents": 2511,
+                      "hash": "31d8a6e0c47b92f5"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Agentcard could not take the per-conversation turn lock (an infrastructure fault, not contention). Nothing ran; retry in a few seconds. Body: { error, code: \"turn_lock_unavailable\", conversation_id }.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "turn_lock_unavailable"
+                      ]
+                    },
+                    "conversation_id": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "The shopping agent could not complete this turn. On a multi-cart confirm the body still carries placements for the orders that already went through.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "conversation_id": {
+                      "type": "string"
+                    },
+                    "placements": {
+                      "type": [
+                        "array",
+                        "null"
+                      ],
+                      "items": {
+                        "type": "object"
+                      }
+                    },
+                    "error_code": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/buy/merchants": {
+      "get": {
+        "tags": [
+          "Purchase"
+        ],
+        "summary": "List the merchants /buy can place at",
+        "operationId": "listBuyMerchants",
+        "security": [
+          {
+            "userAccessToken": []
+          }
+        ],
+        "description": "The live catalogue for rail selection: every merchant id /buy accepts, its display name, and whether this user still needs to link an account there. Same bearer scoping as POST /buy. Merchant ids are the public ids /buy uses in `placements[].merchant` and `unmatched[].merchant` (`retail` covers Amazon, Walmart, Target, Best Buy, Home Depot, Lowe's, Macy's, Wayfair, Staples, Kohl's and B&H Photo).",
+        "responses": {
+          "200": {
+            "description": "The catalogue.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "merchants"
+                  ],
+                  "properties": {
+                    "merchants": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "slug",
+                          "name",
+                          "link_status"
+                        ],
+                        "properties": {
+                          "slug": {
+                            "type": "string",
+                            "description": "The merchant id /buy uses (for example retail, doordash, goodeggs, locale, flights)."
+                          },
+                          "name": {
+                            "type": "string",
+                            "description": "Display name."
+                          },
+                          "tier": {
+                            "type": "string",
+                            "description": "How the merchant is integrated."
+                          },
+                          "money_path": {
+                            "type": "string",
+                            "description": "How the merchant is paid."
+                          },
+                          "link_status": {
+                            "type": "string",
+                            "enum": [
+                              "ready",
+                              "linked",
+                              "pending",
+                              "error",
+                              "unlinked"
+                            ],
+                            "description": "Whether this user can shop there now. ready: the merchant needs no account link (retail, flights). linked: the user's account is linked; shop now. pending: a link was started and not finished; /buy resumes it. error: the last link attempt failed; /buy links it again. unlinked: no link yet; /buy walks the user through it. Only ready and linked place orders without a link step first."
+                          },
+                          "capabilities": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            },
+                            "description": "What the merchant supports (search, cart, scheduling, pickup, ...)."
+                          },
+                          "description": {
+                            "type": "string"
+                          },
+                          "unavailable": {
+                            "type": "object",
+                            "description": "Present when checkout is temporarily unavailable at this merchant, with the reason under `checkout`.",
+                            "properties": {
+                              "checkout": {
+                                "type": "string"
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid bearer."
+          }
+        }
+      }
+    },
+    "/buy/conversations/{id}": {
+      "get": {
+        "tags": [
+          "Purchase"
+        ],
+        "summary": "Read a purchase conversation",
+        "operationId": "getBuyConversation",
+        "security": [
+          {
+            "userAccessToken": []
+          }
+        ],
+        "description": "The server's view of a /buy conversation, for a confirm whose response never arrived: whether a turn is still running, the last checkout attempt (any outcome, with its code and approval link), and every order the conversation placed, read from the ledger. Same bearer scoping as POST /buy.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "The conversation_id returned by POST /buy."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The conversation.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "conversation_id": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "open",
+                        "closed"
+                      ]
+                    },
+                    "turn_in_progress": {
+                      "type": "boolean",
+                      "description": "True while a POST /buy call is still running on this conversation. Poll until it clears, then read orders and last_checkout."
+                    },
+                    "last_checkout": {
+                      "type": [
+                        "object",
+                        "null"
+                      ],
+                      "description": "The most recent checkout attempt, whatever its outcome. Cleared when a new turn starts.",
+                      "properties": {
+                        "at": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "merchant": {
+                          "type": "string"
+                        },
+                        "merchant_name": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "placed",
+                            "pending",
+                            "denied",
+                            "needs_approval",
+                            "error"
+                          ]
+                        },
+                        "code": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "message": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "order_id": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "payment_source": {
+                          "$ref": "#/components/schemas/PaymentSource"
+                        },
+                        "decline_code": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "approval_url": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "charge_status": {
+                          "type": "string",
+                          "enum": [
+                            "none",
+                            "confirming",
+                            "settled",
+                            "unknown"
+                          ]
+                        },
+                        "total_cents": {
+                          "type": [
+                            "integer",
+                            "null"
+                          ]
+                        },
+                        "merchant_total_cents": {
+                          "type": [
+                            "integer",
+                            "null"
+                          ],
+                          "description": "For a cart the merchant priced outside US dollars: the merchant's own total in that currency's smallest unit, the same figure order.placed and order.failed carry. Null for a US dollar cart and when no checkout ran."
+                        },
+                        "merchant_currency": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "description": "The merchant's currency as a lower-case ISO code (cad) when the cart was priced outside US dollars. Null for a US dollar cart and when no checkout ran."
+                        },
+                        "items": {
+                          "type": [
+                            "array",
+                            "null"
+                          ],
+                          "items": {
+                            "type": "string"
+                          },
+                          "description": "Delisted lines on an items_unavailable refusal."
+                        }
+                      }
+                    },
+                    "orders": {
+                      "type": "array",
+                      "description": "Every order this conversation placed, from the ledger, oldest first.",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "order_id": {
+                            "type": "string"
+                          },
+                          "merchant": {
+                            "type": "string"
+                          },
+                          "merchant_name": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": [
+                              "settled",
+                              "confirming",
+                              "cancelled",
+                              "failed"
+                            ],
+                            "description": "settled = charged; confirming = placed, charge still confirming; cancelled = the merchant cancelled after settlement and the budget was refunded; failed = placed but the funding never confirmed and the reservation was released."
+                          },
+                          "total_cents": {
+                            "type": "integer",
+                            "description": "The all-in amount, fees included."
+                          },
+                          "payment_source": {
+                            "$ref": "#/components/schemas/PaymentSource"
+                          },
+                          "placed_at": {
+                            "type": [
+                              "string",
+                              "null"
+                            ],
+                            "format": "date-time"
+                          },
+                          "merchant_total_cents": {
+                            "type": [
+                              "integer",
+                              "null"
+                            ],
+                            "description": "For a cart the merchant priced outside US dollars: the merchant's own total in that currency's smallest unit, the same figure order.placed carries. Null for a US dollar cart and for an order placed before Agentcard kept it."
+                          },
+                          "merchant_currency": {
+                            "type": [
+                              "string",
+                              "null"
+                            ],
+                            "description": "The merchant's currency as a lower-case ISO code (cad) when the cart was priced outside US dollars. Null for a US dollar cart and for an order placed before Agentcard kept it."
+                          }
+                        },
+                        "required": [
+                          "order_id",
+                          "merchant",
+                          "merchant_name",
+                          "status",
+                          "total_cents",
+                          "payment_source",
+                          "placed_at",
+                          "merchant_total_cents",
+                          "merchant_currency"
+                        ]
+                      }
+                    },
+                    "carts": {
+                      "type": "array",
+                      "description": "Every cart still on the table, each with its hash (the same shape as carts on POST /buy).",
+                      "items": {
+                        "type": "object"
+                      }
+                    },
+                    "unmatched": {
+                      "type": "array",
+                      "description": "Asks that did not reach a cart, cumulative for the conversation (the same shape and rules as unmatched on POST /buy).",
+                      "items": {
+                        "type": "object"
+                      }
+                    },
+                    "created_at": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "updated_at": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  },
+                  "required": [
+                    "conversation_id",
+                    "status",
+                    "turn_in_progress",
+                    "last_checkout",
+                    "orders",
+                    "carts",
+                    "unmatched"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such conversation for this bearer."
+          }
+        }
+      }
+    },
+    "/buy/orders/{order_id}": {
+      "get": {
+        "tags": [
+          "Purchase"
+        ],
+        "summary": "Read where an order is",
+        "operationId": "getBuyOrder",
+        "security": [
+          {
+            "userAccessToken": []
+          }
+        ],
+        "description": "Where one placed order is now: its delivery stage, the arrival estimate and whether Agentcard is still following it. Agentcard reads a DoorDash order about once a minute until it is delivered or canceled, and sends order.updated on every stage change; this read answers from the last stage it read and never calls the merchant. For a merchant Agentcard cannot follow, status is placed, confirmed or canceled from what the merchant told checkout. Same bearer scoping as POST /buy: a user token (a connection access_token or a cardholder buy_token) reads that user's own order, and a platform access token reads the order of a connected person named by user_id.",
+        "parameters": [
+          {
+            "name": "order_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "The order_id from order.placed, or from an order in GET /buy/conversations/{id}."
+          },
+          {
+            "name": "user_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "The connected person whose order this is. Required with a platform access token: a read that leaves it out is refused with 400 user_id_required. Leave it out with a user token, which names the person itself."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The order.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "order_id": {
+                      "type": "string"
+                    },
+                    "merchant": {
+                      "type": "string"
+                    },
+                    "merchant_name": {
+                      "type": "string"
+                    },
+                    "conversation_id": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "placed",
+                        "confirmed",
+                        "courier_assigned",
+                        "courier_at_store",
+                        "ready_for_pickup",
+                        "picked_up",
+                        "arriving",
+                        "delivered",
+                        "canceled"
+                      ],
+                      "description": "The delivery stage, in Agentcard's words for every merchant."
+                    },
+                    "status_updated_at": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "format": "date-time",
+                      "description": "When the order reached this stage."
+                    },
+                    "estimated_arrival": {
+                      "type": [
+                        "object",
+                        "null"
+                      ],
+                      "description": "The arrival window the merchant quotes, or null when it quotes none.",
+                      "properties": {
+                        "earliest": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "format": "date-time"
+                        },
+                        "latest": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "format": "date-time"
+                        }
+                      }
+                    },
+                    "tracking": {
+                      "type": "string",
+                      "enum": [
+                        "live",
+                        "ended",
+                        "not_available"
+                      ],
+                      "description": "live while Agentcard follows the order, ended once it stopped (delivered, canceled, past six hours, or gone from the merchant more than two hours after it was placed), not_available for a merchant it cannot follow."
+                    },
+                    "checked_at": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "format": "date-time",
+                      "description": "When Agentcard last tried to read the order from the merchant. A try that read nothing moves this time too, so read status_updated_at for how old the stage itself is."
+                    },
+                    "placed_at": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "format": "date-time"
+                    }
+                  }
+                },
+                "example": {
+                  "order_id": "9632435a-4d4d-48bb-869d-5d0e3bd1410b",
+                  "merchant": "doordash",
+                  "merchant_name": "DoorDash",
+                  "conversation_id": "conv_9a8b7c6d5e4f3a2b1c0d9e8f",
+                  "status": "arriving",
+                  "status_updated_at": "2026-10-06T00:53:54.000Z",
+                  "estimated_arrival": {
+                    "earliest": "2026-10-06T00:53:20.000Z",
+                    "latest": "2026-10-06T00:55:20.000Z"
+                  },
+                  "tracking": "live",
+                  "checked_at": "2026-10-06T00:54:30.000Z",
+                  "placed_at": "2026-10-06T00:28:58.000Z"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such placed order for this bearer."
+          }
+        }
+      }
+    },
+    "/api/v2/flow_status": {
+      "get": {
+        "tags": [
+          "Member cards"
+        ],
+        "summary": "Get the member flow status",
+        "operationId": "memberFlowStatus",
+        "security": [
+          {
+            "userAccessToken": []
+          }
+        ],
+        "description": "One read that answers \"what should happen next for this member\": add a card, create a card, share an approval link, or fetch the open card. Authenticated with the member's connection token from [Verify the code](/companies/api/reference/connect-verify).",
+        "responses": {
+          "200": {
+            "description": "The flow status.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FlowStatus"
+                },
+                "example": {
+                  "object": "flow_status",
+                  "status": "ready",
+                  "next_action": {
+                    "type": "create_card"
+                  },
+                  "attached_cards": [
+                    {
+                      "id": "cc_123",
+                      "status": "active",
+                      "network": "visa",
+                      "brand": "Visa",
+                      "last4": "7318",
+                      "art_url": null
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      }
+    },
+    "/api/v2/cards": {
+      "get": {
+        "tags": [
+          "Member cards"
+        ],
+        "summary": "List the member's cards",
+        "operationId": "memberCardsList",
+        "security": [
+          {
+            "userAccessToken": []
+          }
+        ],
+        "description": "The member's cards as this connection sees it: added cards (attachments, pending included) and the cards created against them.",
+        "responses": {
+          "200": {
+            "description": "Added cards and created cards.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "attached_cards": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/AttachedCard"
+                      }
+                    },
+                    "cards": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/MemberCard"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Member cards"
+        ],
+        "summary": "Create a card",
+        "operationId": "memberCardCreate",
+        "security": [
+          {
+            "userAccessToken": []
+          }
+        ],
+        "description": "Create a one-time virtual card against the member's added card, then key its credentials into your checkout and [close it](/companies/api/reference/member-card-close) when you're done. Sandbox answers `201` with an open test card. Production answers `202 approval_pending` with an `approval_url` the member confirms with a passkey; retry with the SAME `Idempotency-Key` (or watch [flow status](/companies/api/reference/member-flow-status)) until the card is `open`, then read it once on [Get a card](/companies/api/reference/member-card-get). Credentials stay valid for about an hour, so create the card right before checkout.",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Stable key for THIS card intent (your order id). Retries with the same key resume the same card; they never create a second one."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "amount_cents"
+                ],
+                "properties": {
+                  "amount_cents": {
+                    "type": "integer",
+                    "minimum": 100,
+                    "maximum": 2000000,
+                    "description": "Exact amount in cents the card can spend, e.g. 2500 = $25.00."
+                  },
+                  "currency": {
+                    "type": "string",
+                    "enum": [
+                      "usd"
+                    ]
+                  },
+                  "connected_card_id": {
+                    "type": "string",
+                    "description": "Draw on a specific added card. Omit to use the newest active one."
+                  },
+                  "merchant": {
+                    "type": "object",
+                    "properties": {
+                      "name": {
+                        "type": "string"
+                      },
+                      "url": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "description": {
+                    "type": "string",
+                    "maxLength": 200
+                  },
+                  "metadata": {
+                    "type": "object"
+                  }
+                }
+              },
+              "example": {
+                "amount_cents": 2500,
+                "currency": "usd",
+                "description": "Order #1042"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The card is open (sandbox, and frictionless production mints).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemberCard"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "`approval_pending`: share `approval_url` with the member, then retry with the same `Idempotency-Key`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemberCard"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`invalid_request`, `idempotency_key_required`, or `multi_use_connected_unsupported`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "402": {
+            "description": "`subscription_required`: production needs an active Agentcard subscription.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`attach_required`: no active added card (start one on Add a card), or `request_in_flight`: the same key is still processing; retry in a few seconds.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`byoc_unavailable`: the card network is briefly unavailable. Retry with the same `Idempotency-Key`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/cards/{card_id}": {
+      "get": {
+        "tags": [
+          "Member cards"
+        ],
+        "summary": "Get a card",
+        "operationId": "memberCardGet",
+        "security": [
+          {
+            "userAccessToken": []
+          }
+        ],
+        "description": "Authoritative card state. While the card is `open` it carries `credentials` (number, expiry, CVC) to key into the checkout. Each read of an open card notifies the member that the credentials were accessed, so fetch once when you are ready to pay rather than polling; poll [flow status](/companies/api/reference/member-flow-status) instead.",
+        "parameters": [
+          {
+            "name": "card_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The card.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemberCard"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "description": "`card_not_found`: no such card for this connection.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/cards/{card_id}/close": {
+      "post": {
+        "tags": [
+          "Member cards"
+        ],
+        "summary": "Close a card",
+        "operationId": "memberCardClose",
+        "security": [
+          {
+            "userAccessToken": []
+          }
+        ],
+        "description": "Close a card after checkout. Idempotent: closing a closed card answers `200`. One-time cards also close themselves after their first approved charge.",
+        "parameters": [
+          {
+            "name": "card_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Closed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "object": {
+                      "type": "string",
+                      "example": "card"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string",
+                      "example": "closed"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "description": "`card_not_found`: no such card for this connection.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`rewards_card_protected`: this card class cannot be closed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "platformToken": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "A platform access token. Get one on the **Create an access token** endpoint by exchanging your `client_id` + `client_secret`, then send it as `Authorization: Bearer <token>`. Tokens live one hour."
+      },
+      "userAccessToken": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "The user's connection access_token (user authentication), or an org-minted buy_token for org-owned accounts."
+      }
+    },
+    "requestBodies": {
+      "KycDocument": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "required": [
+                "user_id",
+                "image"
+              ],
+              "properties": {
+                "user_id": {
+                  "type": "string",
+                  "description": "The connected user's id."
+                },
+                "image": {
+                  "type": "string",
+                  "description": "The image bytes, base64-encoded."
+                },
+                "mime_type": {
+                  "type": "string",
+                  "default": "image/jpeg",
+                  "description": "The image's MIME type."
+                },
+                "document_type": {
+                  "type": "string",
+                  "enum": [
+                    "drivers_license",
+                    "state_id",
+                    "passport"
+                  ],
+                  "description": "Optional document-type hint. Without it the document is auto-detected and defaults to a US driver's license. If a response `warnings` entry asks you to resubmit with a `document_type`, send the same image again with this field set \u2014 no need to go back to the user."
+                },
+                "issuing_country": {
+                  "type": "string",
+                  "description": "Optional ISO 3166-1 country code (alpha-2 or alpha-3) of the country that issued the document. Defaults to US when the document doesn't reveal it \u2014 always send it for non-US documents (e.g. `DE` for a German national ID)."
+                },
+                "user_ip": {
+                  "type": "string",
+                  "description": "The end user's IP address as your frontend saw it (public IPv4 or IPv6; private or reserved addresses are rejected). Strongly recommended: identity screening checks the applicant's IP, and an IP belonging to a datacenter (such as your backend's) can fail an otherwise valid verification. Pass the address your user connected to you from; without it, your server's own address may be recorded as a last resort and can fail that screening."
+                }
+              }
+            },
+            "example": {
+              "user_id": "usr_7g8h9i",
+              "image": "<base64>",
+              "mime_type": "image/jpeg"
+            }
+          }
+        }
+      }
+    },
+    "responses": {
+      "Unauthorized": {
+        "description": "`unauthorized` \u2014 the platform access token is missing or expired. Exchange your client credentials for a fresh one.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "ConnectionNotFound": {
+        "description": "`connection_not_found` \u2014 no connection exists for that user under your client.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "VerificationError": {
+        "description": "`verification_error` \u2014 the step failed downstream. Try again.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "KycDocumentBadRequest": {
+        "description": "`invalid_request` \u2014 missing `user_id` or `image`, an unrecognized `document_type` / `issuing_country`, or a `user_ip` that is not a public IPv4/IPv6 address. `invalid_image` \u2014 `image` isn't valid base64. `client_credentials_required` \u2014 the token wasn't minted from client credentials.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "UserConflict": {
+        "description": "`user_conflict` \u2014 the email on file in your organization belongs to a different account. Contact support.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "DocumentUnprocessable": {
+        "description": "`document_rejected` \u2014 the image couldn't be processed; ask the user to retake the photo. `document_expired` \u2014 the document itself is expired; ask for a valid one. Either may include a `warnings` array with actionable feedback.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            },
+            "example": {
+              "error": {
+                "code": "document_rejected",
+                "message": "The document image could not be processed \u2014 ask the user for a new, clear photo.",
+                "warnings": [
+                  "The verification provider still needs the back of the document \u2014 ask the user for the other side."
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "schemas": {
+      "PaymentSource": {
+        "type": [
+          "object",
+          "null"
+        ],
+        "description": "What paid, or what would have paid. brand and last4 are the user's own card for added_card, vault and stored_payment_method; null for balance and company_balance, where no card of theirs is in the flow. Null when no checkout ran or it refused before resolving the source.",
+        "properties": {
+          "source": {
+            "type": "string",
+            "enum": [
+              "balance",
+              "added_card",
+              "vault",
+              "company_balance",
+              "stored_payment_method"
+            ]
+          },
+          "brand": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "last4": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "source",
+          "brand",
+          "last4"
+        ]
+      },
+      "TokenResponse": {
+        "type": "object",
+        "properties": {
+          "access_token": {
+            "type": "string",
+            "description": "The platform access token. Send it as `Authorization: Bearer <access_token>` on every other endpoint."
+          },
+          "token_type": {
+            "type": "string",
+            "enum": [
+              "Bearer"
+            ]
+          },
+          "expires_in": {
+            "type": "integer",
+            "description": "Seconds until the token expires (3600 = one hour)."
+          },
+          "scope": {
+            "type": "string",
+            "enum": [
+              "api"
+            ]
+          }
+        }
+      },
+      "OAuthError": {
+        "type": "object",
+        "description": "RFC 6749 \u00a75.2 error shape \u2014 only the token endpoint uses it.",
+        "properties": {
+          "error": {
+            "type": "string",
+            "description": "A stable, machine-readable code."
+          },
+          "error_description": {
+            "type": "string",
+            "description": "A human-readable explanation."
+          }
+        }
+      },
+      "Error": {
+        "type": "object",
+        "description": "Every v2 error uses the same envelope.",
+        "properties": {
+          "error": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "description": "A stable, machine-readable string (snake_case). Branch on this."
+              },
+              "message": {
+                "type": "string",
+                "description": "A human-readable explanation, safe to log."
+              },
+              "docs": {
+                "type": "string",
+                "description": "A link back to the reference."
+              },
+              "field_errors": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "description": "Only on `invalid_fields` \u2014 names each field to fix."
+              },
+              "warnings": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Only on document upload errors \u2014 actionable feedback safe to show the user."
+              }
+            }
+          }
+        }
+      },
+      "ConnectAttempt": {
+        "type": "object",
+        "properties": {
+          "object": {
+            "type": "string",
+            "enum": [
+              "connect_attempt"
+            ]
+          },
+          "id": {
+            "type": "string",
+            "description": "The attempt id. Pass it back as `connect_id` when you verify."
+          },
+          "channel": {
+            "type": "string",
+            "enum": [
+              "email",
+              "phone"
+            ],
+            "description": "The channel the code was sent on."
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the attempt expires (ISO 8601). Codes are valid for 10 minutes."
+          }
+        }
+      },
+      "Connection": {
+        "type": "object",
+        "properties": {
+          "object": {
+            "type": "string",
+            "enum": [
+              "connection"
+            ]
+          },
+          "access_token": {
+            "type": "string",
+            "description": "The user's connection token \u2014 store it to act on their behalf. Send it as the bearer token to the MCP server; never in the `Authorization` header of these endpoints."
+          },
+          "refresh_token": {
+            "type": "string",
+            "description": "Use it with `/connect/refresh` to get a new pair before the access token expires."
+          },
+          "token_type": {
+            "type": "string",
+            "enum": [
+              "Bearer"
+            ]
+          },
+          "expires_in": {
+            "type": "integer",
+            "description": "Seconds until the access token expires (3600 = one hour)."
+          },
+          "user": {
+            "type": "object",
+            "description": "The connected user. Store `id` \u2014 every KYC call names the user by it.",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "email": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Set when the user connected by email, otherwise `null`."
+              },
+              "phone": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Set when the user connected by phone, otherwise `null`."
+              }
+            }
+          }
+        }
+      },
+      "ConnectionRefreshed": {
+        "type": "object",
+        "properties": {
+          "object": {
+            "type": "string",
+            "enum": [
+              "connection"
+            ]
+          },
+          "access_token": {
+            "type": "string",
+            "description": "The new connection access token."
+          },
+          "refresh_token": {
+            "type": "string",
+            "description": "The new refresh token. The old one is now invalid \u2014 replace the stored token every time."
+          },
+          "token_type": {
+            "type": "string",
+            "enum": [
+              "Bearer"
+            ]
+          },
+          "expires_in": {
+            "type": "integer",
+            "description": "Seconds until the access token expires (3600 = one hour)."
+          }
+        }
+      },
+      "Consent": {
+        "type": "object",
+        "properties": {
+          "object": {
+            "type": "string",
+            "enum": [
+              "consent"
+            ]
+          },
+          "id": {
+            "type": "string"
+          },
+          "user_id": {
+            "type": "string"
+          },
+          "terms_version": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "KycState": {
+        "type": "object",
+        "description": "The single status contract every KYC response carries.",
+        "properties": {
+          "object": {
+            "type": "string",
+            "enum": [
+              "kyc"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "awaiting_documents",
+              "needs_information",
+              "requires_verification",
+              "pending",
+              "approved",
+              "rejected"
+            ],
+            "description": "`awaiting_documents` \u2014 upload the front and back. `needs_information` \u2014 collect the `required_fields` and submit them. `requires_verification` \u2014 show the user the `iframe_url`. `pending` \u2014 under review, no action needed. `approved` \u2014 verified, done. `rejected` \u2014 the user did not pass. Statuses are not one-way: a review can send a user back \u2014 `pending` may return to `needs_information` (a detail didn't match the document; re-collect the listed fields and resubmit, the check re-runs automatically) or to `awaiting_documents` (the images were unusable; upload both sides again). Always branch on the current status."
+          },
+          "required_fields": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Only on `needs_information` \u2014 exactly the fields to collect and post to `/kyc/information`."
+          },
+          "iframe_url": {
+            "type": "string",
+            "description": "On every actionable status (`awaiting_documents`, `needs_information`, `requires_verification`): the hosted page that collects whatever the verification still needs, and the face scan at `requires_verification`. Embed it in an iframe with `allow=\"camera; microphone\"`. Short-lived: always use the most recent one from a poll or webhook, never a stored copy."
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Optional, on document uploads \u2014 actionable feedback safe to show the user (for example, that the other side of the document is still needed)."
+          },
+          "extracted": {
+            "type": "object",
+            "description": "Optional, on document uploads \u2014 what the document reader pulled off the uploaded image(s), so you can prefill your details form instead of asking the user to re-type what the ID already says. Keys match the `/kyc/information` request fields (`first_name`, `last_name`, `date_of_birth`, `address_line1`, `address_city`, `address_region`, `address_postal_code`, `address_country`) plus `document_type`, `issuing_country`, and `document_number` (the number printed on the document \u2014 for US documents this is NOT the SSN, so never prefill it into `national_id_number` when `issuing_country` is `US`). Fields appear as they become readable: the front usually carries the name and date of birth; a US back adds the barcode address. Always let the user confirm or correct prefilled values.",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "reason": {
+            "type": "string",
+            "description": "Optional, on `needs_information`, `awaiting_documents`, `requires_verification`, and `rejected` \u2014 a short, end-user-safe explanation of what the review asked for (for example, \u201cEnter your full name exactly as it appears on your identity document.\u201d). Safe to show the user verbatim."
+          }
+        }
+      },
+      "AttachedCard": {
+        "type": "object",
+        "description": "A card the member added to their wallet (an attachment).",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "The attachment id."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "active",
+              "ineligible",
+              "revoked"
+            ]
+          },
+          "network": {
+            "type": "string",
+            "nullable": true,
+            "example": "visa"
+          },
+          "brand": {
+            "type": "string",
+            "nullable": true
+          },
+          "last4": {
+            "type": "string",
+            "nullable": true
+          },
+          "art_url": {
+            "type": "string",
+            "nullable": true,
+            "description": "The issuing bank's card art, when the network provides it."
+          }
+        }
+      },
+      "MemberCard": {
+        "type": "object",
+        "description": "A one-time virtual card created against the member's added card.",
+        "properties": {
+          "object": {
+            "type": "string",
+            "example": "card"
+          },
+          "id": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "approval_pending",
+              "open",
+              "in_use",
+              "paused",
+              "pausing",
+              "closing",
+              "closed"
+            ],
+            "description": "Envelope status. `open` carries credentials; `approval_pending` carries `approval_url`. `pausing`: a charge paused the card and the card network has not confirmed the pause yet; it becomes `paused` on its own. `closing`: a charge spent the card and the card network has not confirmed the close yet; it becomes `closed` on its own."
+          },
+          "spend_limit_cents": {
+            "type": "integer"
+          },
+          "balance_cents": {
+            "type": "integer"
+          },
+          "connected_card_id": {
+            "type": "string",
+            "nullable": true,
+            "description": "The attachment this card draws on."
+          },
+          "last4": {
+            "type": "string"
+          },
+          "expiry": {
+            "type": "string",
+            "example": "12/30"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "approval_url": {
+            "type": "string",
+            "description": "Only while `approval_pending`: the page where the member approves this purchase with a passkey."
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Only while `approval_pending`: when the approval window closes."
+          },
+          "closed_reason": {
+            "type": "string",
+            "description": "Only when `closed`: `used`, `canceled`, `expired`, or `declined`."
+          },
+          "credentials": {
+            "type": "object",
+            "description": "Only on an `open` card: the one-time credential to key into a checkout. Never persist it.",
+            "properties": {
+              "number": {
+                "type": "string"
+              },
+              "exp_month": {
+                "type": "integer",
+                "nullable": true
+              },
+              "exp_year": {
+                "type": "integer",
+                "nullable": true
+              },
+              "cvc": {
+                "type": "string"
+              }
+            }
+          },
+          "credentials_status": {
+            "type": "string",
+            "description": "`protected` when the member requires an approval per reveal; `retry` when the credential read should be retried."
+          }
+        }
+      },
+      "FlowStatus": {
+        "type": "object",
+        "description": "Where this member is in the add-a-card -> create-a-card flow, with the one next action.",
+        "properties": {
+          "object": {
+            "type": "string",
+            "example": "flow_status"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "no_card_attached",
+              "attach_pending",
+              "attach_failed",
+              "ready",
+              "approval_pending",
+              "card_ready"
+            ]
+          },
+          "next_action": {
+            "type": "object",
+            "nullable": true,
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "attach_card",
+                  "create_card",
+                  "share_approval_url",
+                  "get_card"
+                ]
+              },
+              "id": {
+                "type": "string"
+              },
+              "url": {
+                "type": "string",
+                "description": "The link to hand the member (add-a-card page, or the approval page)."
+              },
+              "expires_at": {
+                "type": "string",
+                "format": "date-time"
+              }
+            }
+          },
+          "attached_cards": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AttachedCard"
+            }
+          },
+          "card": {
+            "$ref": "#/components/schemas/MemberCard"
+          },
+          "reason": {
+            "type": "string",
+            "description": "Only on `attach_failed`: the ineligible reason."
+          },
+          "message": {
+            "type": "string",
+            "description": "Only on `attach_failed`: human-readable copy for the member."
+          }
+        }
+      }
+    }
+  }
+}
