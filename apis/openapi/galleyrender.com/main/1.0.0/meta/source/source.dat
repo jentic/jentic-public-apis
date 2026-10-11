@@ -1,0 +1,5247 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Galley Render API",
+    "version": "1.0.0",
+    "summary": "Documents for agents. JSON in, PDF out.",
+    "description": "A template plus a JSON payload becomes a PDF, PNG or JPG behind a signed URL.\n\nEvery render is deterministic and cached: the cache key is a SHA-256 over the template\nversion's checksum, the output format, and the canonical JSON of the data and options.\nAn identical repeat request returns the stored object with `cached: true` and is not billed.\n\nSmall jobs finish inside the request and return `200` with a URL. A request carrying a\n`webhook_url`, `async: true`, a large payload, or a batch item is queued and returns `202`\nwith an id to poll.\n\nAgents can skip signup entirely: the MCP server at https://mcp.galleyrender.com/mcp mints a\ntrial of 10 PDF pages or 10 images on the first call and hands back a key that works here too.",
+    "termsOfService": "https://galleyrender.com/terms",
+    "contact": {
+      "name": "Galley Render support",
+      "email": "support@galleyrender.com",
+      "url": "https://galleyrender.com/support"
+    }
+  },
+  "externalDocs": {
+    "description": "Documentation",
+    "url": "https://galleyrender.com/docs/quickstart"
+  },
+  "servers": [
+    {
+      "url": "https://api.galleyrender.com",
+      "description": "Production"
+    }
+  ],
+  "security": [
+    {
+      "bearerAuth": []
+    }
+  ],
+  "tags": [
+    {
+      "name": "Renders",
+      "description": "Turn a template and a payload into a file."
+    },
+    {
+      "name": "Templates",
+      "description": "The versioned template store."
+    },
+    {
+      "name": "Library",
+      "description": "The starter library, as the website describes it. No key."
+    },
+    {
+      "name": "Sign-up",
+      "description": "Whether a verification link has been clicked yet. No key."
+    },
+    {
+      "name": "Account",
+      "description": "Usage, limits and health."
+    },
+    {
+      "name": "Billing",
+      "description": "Upgrade, manage the subscription, and the Stripe webhook."
+    },
+    {
+      "name": "Imports",
+      "description": "Turn a PDF you already send into a template. Paid plans."
+    }
+  ],
+  "paths": {
+    "/v1/render": {
+      "post": {
+        "tags": [
+          "Renders"
+        ],
+        "operationId": "createRender",
+        "summary": "Render a document",
+        "description": "Renders `template` with `data` and returns a signed URL. Returns `200` when the render finished inside the request, `202` when it was queued. A cache hit always returns `200`.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RenderRequest"
+              },
+              "examples": {
+                "invoice": {
+                  "summary": "A one-page invoice as a PDF",
+                  "value": {
+                    "template": "invoice@1",
+                    "format": "pdf",
+                    "data": {
+                      "invoice_number": "INV-1042",
+                      "issued_on": "2026-09-16",
+                      "seller": {
+                        "name": "Galley Render"
+                      },
+                      "buyer": {
+                        "name": "Acme Robotics"
+                      },
+                      "line_items": [
+                        {
+                          "description": "Starter plan, September",
+                          "quantity": 1,
+                          "unit_price": 19
+                        }
+                      ]
+                    }
+                  }
+                },
+                "ogCard": {
+                  "summary": "A social card as a PNG on the fast path",
+                  "value": {
+                    "template": "og-card",
+                    "format": "png",
+                    "data": {
+                      "title": "JSON in, PDF out."
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Rendered inside the request, or served from cache.",
+            "headers": {
+              "X-RateLimit-Limit": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Renders allowed per window."
+              },
+              "X-RateLimit-Remaining": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Renders left in this window."
+              },
+              "X-RateLimit-Reset": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Seconds until the window resets."
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Render"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Queued. Poll `GET /v1/renders/{id}` or wait for the webhook.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Render"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`invalid_request` — including a value anywhere in `template`, `data`, `options` or `webhook_url` that cannot be stored: a NUL character (U+0000), an unpaired UTF-16 surrogate (U+D800–U+DFFF not part of a pair), or JSON nested more than 128 levels deep; `errors[0].path` names it. Or `asset_blocked`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`authentication_error` — the key is missing, malformed or revoked.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "`quota_exceeded` or `spend_cap_exceeded` — checked before the render starts, against the template's declared `expected_pages` for a PDF and 1 unit for raster output. `details.estimated_units` is what was estimated.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`permission_error` — the account is suspended. `plan_required` — the request asked for something this account's plan does not carry: a `webhook_url`, or a cloud delivery option. `details.required_plan` names the cheapest plan that would work.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`not_found` — no such template or version on this account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`validation_error` — the payload does not match the template schema. `render_failed` with `details.cause: \"template\"` — the template or its data made the render fail (a Liquid error, markup Satori rejects, a page that never finishes loading, a page size Chromium cannot print). Fix the template or the data; retrying fails the same way.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "`rate_limited` — more renders started than the plan allows per minute (60 free, 600 paid), counted per API key. `Retry-After` says how many seconds to wait; `X-RateLimit-Remaining` is on successful responses too.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`render_failed` with `details.cause: \"server\"` or `\"storage\"` — the render failed on our side; one retry is reasonable. `details.shutting_down: true` is one shape of `cause: \"server\"`: the instance that would have handled this render is being replaced and refused rather than starting work it might not finish — the retry is close to certain to work, on the next instance. `internal_error` — ours.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/render/batch": {
+      "post": {
+        "tags": [
+          "Renders"
+        ],
+        "operationId": "createRenderBatch",
+        "summary": "Render up to 50 documents",
+        "description": "Every item is queued. Items that hit the cache come back finished. A failed item does not fail the batch: its entry in `renders` is an error envelope with the same `index`.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BatchRequest"
+              },
+              "examples": {
+                "two": {
+                  "summary": "Two invoices with one shared webhook",
+                  "value": {
+                    "webhook_url": "https://example.com/hooks/galley",
+                    "renders": [
+                      {
+                        "template": "invoice@1",
+                        "format": "pdf",
+                        "data": {
+                          "invoice_number": "INV-1042"
+                        }
+                      },
+                      {
+                        "template": "invoice@1",
+                        "format": "pdf",
+                        "data": {
+                          "invoice_number": "INV-1043"
+                        }
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Accepted.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Batch"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`invalid_request` — empty batch, or more than 50 items.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`authentication_error`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "`rate_limited`. A batch spends one unit of the per-minute limit per item, so 50 renders count as 50.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/renders": {
+      "get": {
+        "tags": [
+          "Renders"
+        ],
+        "operationId": "listRenders",
+        "summary": "List recent renders",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "How many to return, newest first.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 25
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Newest first.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "object": {
+                      "type": "string",
+                      "const": "list"
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Render"
+                      }
+                    }
+                  },
+                  "required": [
+                    "object",
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`authentication_error`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/renders/{id}": {
+      "get": {
+        "tags": [
+          "Renders"
+        ],
+        "operationId": "getRender",
+        "summary": "Get a render and a fresh signed URL",
+        "description": "Signed URLs expire after an hour; the stored file is kept until the render's `expires_at` (your plan's retention when it was made). Until then, call this again for a new URL rather than re-rendering — it costs nothing. After it, this answers `410 retention_expired` and the file is deleted; render again to have it back.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "The render id returned by `POST /v1/render`.",
+            "schema": {
+              "type": "string",
+              "pattern": "^rnd_[a-z0-9]+$",
+              "examples": [
+                "rnd_7hq2m4x8k1bv"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The render.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Render"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`authentication_error`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`not_found` — no render with that id on this account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "`retention_expired` — the render's file has passed its retention (`expires_at`) and is deleted, or is about to be. The render itself is in `details.render`, every field, with `url: null` and `file_deleted_at`; `details.rerender` is the request that makes the document again (a new, billed render).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/library": {
+      "get": {
+        "tags": [
+          "Library"
+        ],
+        "operationId": "getLibrary",
+        "summary": "The starter library, or one use-case kit of it",
+        "description": "The 43 starter templates every account is seeded with, described the way the website describes them: the human name from the schema's `title`, the committed preview at its real pixel size, the example payload, and the `demo` block — the three fields a person would want their own words in, labelled for them rather than for the schema.\n\n**No key.** Nothing here is about an account: it is the same data the template gallery and every template page already publish. Cache it — the body only changes on a deploy, it carries an `ETag`, and a repeat request with `If-None-Match` is a `304`.\n\n`?pack=` narrows to one kit and returns it in picker order, **lead document first**. Without it you get all 43 in name order. Either way `packs` carries all six kits with their titles and membership, so one request is enough to draw the picker.\n\n`source` is deliberately not included: it is public, but 43 templates of embedded woff2 is several megabytes and nothing renders in the browser. Use `GET /v1/templates/{ref}` for the copy on your own account.",
+        "security": [],
+        "parameters": [
+          {
+            "name": "pack",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "hoa",
+                "trades",
+                "freelancer",
+                "events",
+                "coach",
+                "nonprofit"
+              ]
+            },
+            "description": "One use-case kit. Omit for the whole library."
+          },
+          {
+            "name": "If-None-Match",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "The `ETag` from a previous response. A match answers `304` with no body."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The library, or the requested kit.",
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Changes only when the library does."
+              },
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "`public, max-age=300, stale-while-revalidate=86400`."
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Library"
+                }
+              }
+            }
+          },
+          "304": {
+            "description": "`If-None-Match` matched. Nothing has changed."
+          },
+          "404": {
+            "description": "`not_found` — no kit by that name. `details.available_packs` lists the six.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/signup/status": {
+      "get": {
+        "tags": [
+          "Sign-up"
+        ],
+        "operationId": "getSignupStatus",
+        "summary": "Has the owner answered that verification email yet?",
+        "description": "One word — `pending`, `verified`, `issued`, `cancelled` — about one sign-up, so a page that has just sent somebody an email can finish the job itself instead of asking them to press a button again when they get back.\n\n**It has no side effects.** It mints nothing, mails nothing, verifies nothing and consumes nothing, and it is not a step in getting a key: the key still comes from `create_account`, after the owner confirms the request on the page the email links to, once. This only says when that call is worth making.\n\n**It never returns an address.** The token is a public id, and a public id is handed out by `existing_account`, so an address here would undo that answer's redaction.\n\n**No key.** The `token` is the `account.id` that `create_account` returned with `pending_verification`, which the caller that started the sign-up holds and nobody else does.\n\nPoll every `poll_after_seconds`. This has its own budget — thirty checks a minute per token — so polling here never spends the three-per-hour `create_account` budget, which is the whole reason it exists.",
+        "security": [],
+        "parameters": [
+          {
+            "name": "token",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^acct_[a-z0-9]+$",
+              "examples": [
+                "acct_7hq2m4x8k1bv"
+              ]
+            },
+            "description": "The `account.id` from the `create_account` call that started this sign-up."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Where this sign-up has got to.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SignupStatus"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`invalid_request` — no `token`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`not_found` — no sign-up under that token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "`rate_limited` — more than thirty checks in a minute for one token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/templates": {
+      "get": {
+        "tags": [
+          "Templates"
+        ],
+        "operationId": "listTemplates",
+        "summary": "List templates on the account",
+        "responses": {
+          "200": {
+            "description": "Every template, with its latest version number.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "object": {
+                      "type": "string",
+                      "const": "list"
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Template"
+                      }
+                    }
+                  },
+                  "required": [
+                    "object",
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`authentication_error`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Templates"
+        ],
+        "operationId": "createTemplate",
+        "summary": "Create a template at version 1",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TemplateInput"
+              },
+              "examples": {
+                "minimal": {
+                  "summary": "A one-line template with a schema",
+                  "value": {
+                    "name": "delivery-note",
+                    "engine": "chromium",
+                    "source": "<html><body><h1>{{ title }}</h1></body></html>",
+                    "schema": {
+                      "type": "object",
+                      "required": [
+                        "title"
+                      ],
+                      "properties": {
+                        "title": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "example": {
+                      "title": "Delivery note 1"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created at version 1.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Template"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`invalid_request` — bad name, unparseable Liquid, or an invalid JSON Schema.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`authentication_error`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`plan_required` (`details.feature: \"templates\"`) — the account already holds as many templates of its own as its plan keeps (`details.template_limit`, `details.own_templates`). The starter library never counts. Nothing the account has is affected: publishing a new version is never limited, and deleting a template makes room.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`conflict` (`details.code: \"template_exists\"`) — a live template already holds that name. Publish a new version instead. A soft-deleted template does not hold its name: deleting `invoice` frees it, and creating `invoice` again starts a new template at version 1.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/templates/{ref}": {
+      "get": {
+        "tags": [
+          "Templates"
+        ],
+        "operationId": "getTemplate",
+        "summary": "Get one template version",
+        "description": "`invoice` resolves the latest version; `invoice@3` pins version 3.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/TemplateRef"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The template and the resolved version, including its source and schema.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Template"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`authentication_error`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`not_found`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Templates"
+        ],
+        "operationId": "deleteTemplate",
+        "summary": "Soft-delete a template",
+        "description": "Existing renders keep working and their stored files are untouched, and renders pinned to `name@version` keep resolving. The name is released: creating a template with the same name afterwards succeeds and starts a new template at version 1.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/TemplateRef"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Deleted.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "object": {
+                      "type": "string",
+                      "const": "template"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "deleted": {
+                      "type": "boolean",
+                      "const": true
+                    }
+                  },
+                  "required": [
+                    "object",
+                    "id",
+                    "name",
+                    "deleted"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`authentication_error`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`not_found`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/templates/{name}/versions": {
+      "get": {
+        "tags": [
+          "Templates"
+        ],
+        "operationId": "listTemplateVersions",
+        "summary": "List a template's versions",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/TemplateName"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Every published version.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "object": {
+                      "type": "string",
+                      "const": "list"
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/TemplateVersion"
+                      }
+                    }
+                  },
+                  "required": [
+                    "object",
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`authentication_error`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`not_found`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Templates"
+        ],
+        "operationId": "createTemplateVersion",
+        "summary": "Publish a new immutable version",
+        "description": "Earlier versions keep rendering byte-for-byte as they did. Renders cached against the old version stay valid; the new version starts with a cold cache.\n\n**Fields you leave out are inherited from the previous version, not reset.** `engine`, `schema`, `options`, `expected_pages` and `example` all carry forward, so `{\"source\": \"…\"}` publishes a new body against the same renderer and the same validation contract. Send a field to override it, and send an empty value (`{}` for `schema` or `options`, `null` for `example`) to clear it. `source` is always required, and `message` is never inherited — it is the note for this version.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/TemplateName"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TemplateVersionInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Published.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Template"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`invalid_request`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`authentication_error`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`not_found`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/templates/{ref}/validate": {
+      "post": {
+        "tags": [
+          "Templates"
+        ],
+        "operationId": "validateTemplateData",
+        "summary": "Dry-run a payload against a template schema",
+        "description": "Renders nothing and costs nothing. Returns the same field-level errors `POST /v1/render` would.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/TemplateRef"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "data": {
+                    "description": "The payload you intend to render."
+                  }
+                },
+                "required": [
+                  "data"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Whether the payload is valid, and why not.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "object": {
+                      "type": "string",
+                      "const": "validation"
+                    },
+                    "template": {
+                      "type": "string",
+                      "examples": [
+                        "invoice@1"
+                      ]
+                    },
+                    "valid": {
+                      "type": "boolean"
+                    },
+                    "errors": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/FieldError"
+                      }
+                    },
+                    "warnings": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Warning"
+                      },
+                      "description": "Fields the template would not use, possibly empty. The same array `POST /v1/render` returns."
+                    },
+                    "example": {
+                      "description": "The template's own example payload, or null."
+                    }
+                  },
+                  "required": [
+                    "object",
+                    "template",
+                    "valid",
+                    "errors",
+                    "warnings"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`authentication_error`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`not_found`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/imports": {
+      "post": {
+        "tags": [
+          "Imports"
+        ],
+        "operationId": "createImport",
+        "summary": "Start turning an existing document into a template",
+        "description": "Paid plans only. Takes a PDF three ways: a multipart `file` part, a JSON `file_url` the API fetches (public https only), or JSON `{ \"upload\": true }`, which answers with a one-time upload link and an import in `awaiting_upload`. Answers in under a second with the import in `uploaded`; the work happens after, so poll `GET /v1/imports/{id}`. The same bytes from the same account inside 24 hours are the same import and answer `200` with `existing: true` unless `force` is true. A feature that is switched off on the deployment answers `503 import_disabled`.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "file"
+                ],
+                "properties": {
+                  "file": {
+                    "type": "string",
+                    "format": "binary",
+                    "description": "A PDF, up to 20 MB and 10 pages."
+                  },
+                  "options": {
+                    "type": "string",
+                    "description": "A JSON object part: `{ \"auto\": true, \"name\": \"ashcroft-invoice\", \"hint\": \"invoice\" }`."
+                  },
+                  "force": {
+                    "type": "string",
+                    "enum": [
+                      "true",
+                      "false"
+                    ],
+                    "description": "`true` to import the same bytes again inside 24 hours."
+                  }
+                }
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ImportRequest"
+              },
+              "examples": {
+                "fileUrl": {
+                  "summary": "A PDF the API fetches",
+                  "value": {
+                    "file_url": "https://example.com/our-invoice.pdf",
+                    "options": {
+                      "auto": false
+                    }
+                  }
+                },
+                "uploadLink": {
+                  "summary": "A one-time upload link",
+                  "value": {
+                    "upload": true
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The same bytes were imported by this account in the last 24 hours; this is that import, with `existing: true`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Import"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "The import. With `upload: true`, `status` is `awaiting_upload` and `upload` carries the link.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Import"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`invalid_request` — none or more than one of `file`, `file_url`, `upload`, or a bad `options` field. `asset_blocked` — a `file_url` the egress policy refuses.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`authentication_error`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`plan_required` with `details.feature: \"imports\"` — the plan carries no imports (Free) or the period's count is used; `details.import_limit`, `imports_used`, `required_plan`, `required_plan_price_usd` and `feature_docs_url` say which. `permission_error` — the account is not in a closed beta of the feature.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "`import_unsupported` with `details.reason: \"too_large\"` — over 20 MB.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`import_unsupported` — `details.reason` is `unsupported_type`, `docx_not_yet` or `pptx_not_yet`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "`rate_limited` — requests faster than the account's per-minute rate limit (wait `Retry-After` seconds), or an import limit named by `details.scope`: `imports_hourly` (the hour's starts are spent; `details.retry_after_seconds`) or `imports_in_flight` (the account already has as many imports being worked as its plan allows).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`import_disabled` — document import is not switched on for this deployment.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "Imports"
+        ],
+        "operationId": "listImports",
+        "summary": "List recent imports",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "How many to return, newest first.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 25
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Newest first. No draft bodies.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "object": {
+                      "type": "string",
+                      "const": "list"
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Import"
+                      }
+                    }
+                  },
+                  "required": [
+                    "object",
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`authentication_error`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`import_disabled`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/imports/{id}": {
+      "get": {
+        "tags": [
+          "Imports"
+        ],
+        "operationId": "getImport",
+        "summary": "Get an import",
+        "description": "`questions` are present while `status` is `awaiting_answers`; `preview_url`, `check` and `draft_summary` when it is `ready` or `saved`. The preview and a question's crop are signed for 15 minutes and re-signed on every read. Poll about every 3 seconds; an import usually takes a few minutes, most of it Galley writing the template.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ImportId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The import.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Import"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`authentication_error`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`not_found` — no such import on this account, or it has been deleted.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`import_disabled`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Imports"
+        ],
+        "operationId": "deleteImport",
+        "summary": "Delete an import now",
+        "description": "Deletes the source, the page images, the preview and what the analysis read from the document, now rather than at the end of the retention period. A template already saved from the import is untouched.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ImportId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Deleted.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "deleted": {
+                      "type": "boolean",
+                      "const": true
+                    }
+                  },
+                  "required": [
+                    "deleted"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`authentication_error`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`not_found`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`import_disabled`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/imports/{id}/answers": {
+      "post": {
+        "tags": [
+          "Imports"
+        ],
+        "operationId": "answerImport",
+        "summary": "Answer an import's questions",
+        "description": "Each answer is one of the question's own option values, and a `path` only with `field` or `field_with_default`. Nothing else is accepted. A question left out takes its recommended option, recorded as `answered_by: \"auto\"`. Answers can be given once: a second call is `409 conflict` with `details.code: \"import_already_answered\"`.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ImportId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AnswerRequest"
+              },
+              "examples": {
+                "one": {
+                  "summary": "Answer one, leave the rest to the recommendation",
+                  "value": {
+                    "answers": [
+                      {
+                        "question_id": "q1",
+                        "value": "field_with_default",
+                        "path": "payment_terms"
+                      }
+                    ],
+                    "answered_by": "user"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Accepted; the import moves on to synthesis.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Import"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`invalid_request` — the body is not JSON.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`authentication_error`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`not_found`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`conflict` — the import is not waiting for answers (`details.code` is `import_already_answered` or `import_invalid_transition`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`validation_error` — an unknown `question_id`, a `value` that is not one of the question's options (`errors[0].path` is `answers[i].value`), or a bad `path`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`import_disabled`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/imports/{id}/save": {
+      "post": {
+        "tags": [
+          "Imports"
+        ],
+        "operationId": "saveImport",
+        "summary": "Save a ready import as a template",
+        "description": "Creates the account's own template, version 1, from the import's draft. It counts against the plan's template limit exactly as `POST /v1/templates` does. Nothing is a template until this call. Saving again returns the same template with `200` and `saved: true`. Saving is never counted against the plan's import count.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ImportId"
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "pattern": "^[a-z0-9][a-z0-9._-]{0,62}$",
+                    "examples": [
+                      "ashcroft-invoice"
+                    ]
+                  },
+                  "description": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Already saved: the same template.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SavedImportTemplate"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "The new template.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SavedImportTemplate"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`authentication_error`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`plan_required` with `details.feature: \"templates\"` — the plan's template limit is reached.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`not_found`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`conflict` — the import is not `ready` (`details.code: \"import_invalid_transition\"`), or it has no draft.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`import_disabled`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/imports/{id}/draft": {
+      "get": {
+        "tags": [
+          "Imports"
+        ],
+        "operationId": "getImportDraft",
+        "summary": "Read the draft template in full",
+        "description": "The template an import made, whole: source, schema, example, strings and options, for a caller who wants to edit it before saving or to create the template by hand. It holds the words of the document, so it is served only to the account that made the import, and only once the import is `ready` or `saved`.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ImportId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The draft.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImportDraft"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`authentication_error`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`not_found`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`conflict` — no draft yet (`details.code: \"import_no_draft\"`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`import_disabled`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/imports/{id}/feedback": {
+      "post": {
+        "tags": [
+          "Imports"
+        ],
+        "operationId": "sendImportFeedback",
+        "summary": "Say whether the result was useful",
+        "description": "One call per import; a second replaces the first. The note is your own words about your own document; it is stored on the import and read by a person, and is not sent to analytics. There is no `share_source` option yet.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ImportId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "useful"
+                ],
+                "properties": {
+                  "useful": {
+                    "type": "boolean"
+                  },
+                  "note": {
+                    "type": "string",
+                    "maxLength": 500,
+                    "examples": [
+                      "The totals row is in the wrong place."
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Recorded.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "object": {
+                      "type": "string",
+                      "const": "import_feedback"
+                    },
+                    "import_id": {
+                      "type": "string"
+                    },
+                    "recorded": {
+                      "type": "boolean",
+                      "const": true
+                    }
+                  },
+                  "required": [
+                    "object",
+                    "import_id",
+                    "recorded"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`authentication_error`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`not_found`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`validation_error` — `useful` is not a boolean, or `note` is over 500 characters.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`import_disabled`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/imports/uploads/{token}": {
+      "post": {
+        "tags": [
+          "Imports"
+        ],
+        "operationId": "uploadImportFile",
+        "summary": "Put a PDF on an upload link",
+        "description": "No API key: the token in the path is the credential. It comes from `upload.url` or `upload.curl` on an import made with `upload: true`, works once, and dies after 15 minutes. A file that is refused (not a PDF, over 20 MB) does not spend it.",
+        "security": [],
+        "parameters": [
+          {
+            "name": "token",
+            "in": "path",
+            "required": true,
+            "description": "The one-time upload token.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "file"
+                ],
+                "properties": {
+                  "file": {
+                    "type": "string",
+                    "format": "binary",
+                    "description": "A PDF, up to 20 MB and 10 pages."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Accepted; the import proceeds.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Import"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`invalid_request` — no `file` part.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "`link_expired` — unknown, expired or already used.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "`import_unsupported` with `details.reason: \"too_large\"`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`import_unsupported` — not a PDF.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`import_disabled`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/usage": {
+      "get": {
+        "tags": [
+          "Account"
+        ],
+        "operationId": "getUsage",
+        "summary": "Usage, cost and limits for the current period",
+        "responses": {
+          "200": {
+            "description": "The account's position this billing period.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Usage"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`authentication_error`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/account": {
+      "get": {
+        "tags": [
+          "Account"
+        ],
+        "operationId": "getAccount",
+        "summary": "The account behind this key, and the webhook signing secret",
+        "description": "`webhook_secret` is returned **once**, on the first call that has one to give; after that it is `null` and only `webhook_secret_prefix` identifies which secret is in use. Store it when you get it. If you lose it, rotate.",
+        "responses": {
+          "200": {
+            "description": "The account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Account"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`authentication_error`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/account/webhook-secret": {
+      "post": {
+        "tags": [
+          "Account"
+        ],
+        "operationId": "rotateWebhookSecret",
+        "summary": "Rotate the webhook signing secret",
+        "description": "Mints a new secret and returns it once. The previous secret stops verifying immediately, so update your handler in the same change.",
+        "responses": {
+          "200": {
+            "description": "Rotated. The new secret is in the body and will not be shown again.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "object",
+                    "account",
+                    "webhook_secret",
+                    "rotated_at"
+                  ],
+                  "properties": {
+                    "object": {
+                      "type": "string",
+                      "const": "webhook_secret"
+                    },
+                    "account": {
+                      "type": "string"
+                    },
+                    "webhook_secret": {
+                      "type": "string",
+                      "examples": [
+                        "whsec_9Fb2…"
+                      ]
+                    },
+                    "webhook_secret_prefix": {
+                      "type": "string"
+                    },
+                    "rotated_at": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "note": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`authentication_error`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/account/spend-cap": {
+      "post": {
+        "tags": [
+          "Account"
+        ],
+        "operationId": "setSpendCap",
+        "summary": "Set this account's monthly spend cap",
+        "description": "The cap bounds what you are billed **past** your plan's allowance, at your plan's own rate, over your Stripe billing period. The pages and images the plan includes never count toward it, so a cap of `0` means \"never bill me past my plan\" rather than \"stop rendering\". On an annual plan the figure is monthly and the period cap is twelve times it.\n\nAnything from `0` to the maximum in `max_self_serve_usd` (also on `GET /v1/account` as `limits.monthly_spend_cap_max_usd`). Above that, write to support@galleyrender.com.\n\nFree accounts and keyless trials cannot be billed and are never capped: the setting is stored and `applies_now` is `false` until the account is on a paid plan.\n\nA rise is emailed to the account's verified address, because a key is the account and the inbox is the one place a key holder cannot reach.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "monthly_spend_cap_usd"
+                ],
+                "properties": {
+                  "monthly_spend_cap_usd": {
+                    "type": "number",
+                    "minimum": 0,
+                    "description": "US dollars a month, cents allowed. `0` means no overage at all.",
+                    "examples": [
+                      100,
+                      12.5,
+                      0
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Set. In force from the next render on a paid plan.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "object",
+                    "account",
+                    "monthly_spend_cap_usd"
+                  ],
+                  "properties": {
+                    "object": {
+                      "type": "string",
+                      "const": "spend_cap"
+                    },
+                    "account": {
+                      "type": "string"
+                    },
+                    "plan": {
+                      "type": "string"
+                    },
+                    "monthly_spend_cap_usd": {
+                      "type": "number",
+                      "examples": [
+                        100
+                      ]
+                    },
+                    "previous_monthly_spend_cap_usd": {
+                      "type": "number",
+                      "examples": [
+                        50
+                      ]
+                    },
+                    "period_spend_cap_usd": {
+                      "type": "number",
+                      "description": "What the cap is over the billing period: twelve times the monthly figure on an annual plan."
+                    },
+                    "period_months": {
+                      "type": "integer",
+                      "examples": [
+                        1,
+                        12
+                      ]
+                    },
+                    "max_self_serve_usd": {
+                      "type": "number"
+                    },
+                    "applies_now": {
+                      "type": "boolean"
+                    },
+                    "effect": {
+                      "type": "string"
+                    },
+                    "raise_above_the_maximum": {
+                      "type": "string"
+                    },
+                    "docs_url": {
+                      "type": "string",
+                      "format": "uri"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`invalid_request`: not a number, negative, or above the maximum.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`authentication_error`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`conflict`: the cap changed while this request was in flight.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/account/keys": {
+      "post": {
+        "tags": [
+          "Account"
+        ],
+        "operationId": "createApiKey",
+        "summary": "Mint another API key for this account",
+        "description": "Returns a new key **once**, in `api_key`. Keys are stored as a SHA-256 digest and cannot be read back by this API, by the dashboard or by support, so save it before you do anything else and do not write it to a log or a transcript.\n\nAuthenticated by a key you already hold — a live key is the proof that you are the account. Nothing is revoked by this call: deploy the new key, confirm it works, then revoke the old one with `POST /v1/account/keys/{id}/revoke`. `other_live_keys` lists the ids you might mean, including the one you authenticated with.\n\n**No key at all?** This endpoint cannot help you — it needs one. Call `create_account` on the MCP server with the account's verified address: it mails a one-time link code, `link_account` binds this client with it, and `rotate_key` then mints a key from there.",
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "maxLength": 40,
+                    "description": "A label for this key, so two can be told apart later. Defaults to `rotated`.",
+                    "examples": [
+                      "ci",
+                      "laptop"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Minted. The plaintext key is in this response and will not be shown again.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "object",
+                    "id",
+                    "api_key",
+                    "key_prefix"
+                  ],
+                  "properties": {
+                    "object": {
+                      "type": "string",
+                      "const": "api_key"
+                    },
+                    "account": {
+                      "type": "string"
+                    },
+                    "id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "api_key": {
+                      "type": "string",
+                      "examples": [
+                        "glr_sk_8Qd1nR7xKpV2sYbL4mTf9Uae"
+                      ]
+                    },
+                    "key_prefix": {
+                      "type": "string",
+                      "examples": [
+                        "glr_sk_8Qd1nR7"
+                      ]
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "created_at": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "shown_once": {
+                      "type": "string"
+                    },
+                    "do_not_log_it": {
+                      "type": "string"
+                    },
+                    "other_live_keys": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "key_prefix": {
+                            "type": "string"
+                          },
+                          "created_at": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "last_used_at": {
+                            "type": [
+                              "string",
+                              "null"
+                            ],
+                            "format": "date-time",
+                            "description": "When the key last authenticated. Recorded only from the release after 2026-09-21; null on an older key means unknown, not unused."
+                          },
+                          "is_the_key_you_authenticated_with": {
+                            "type": "boolean"
+                          }
+                        }
+                      }
+                    },
+                    "last_used_at_note": {
+                      "type": "string"
+                    },
+                    "to_finish_rotating": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`authentication_error`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/account/keys/{id}/revoke": {
+      "post": {
+        "tags": [
+          "Account"
+        ],
+        "operationId": "revokeApiKey",
+        "summary": "Revoke one API key",
+        "description": "Immediate and permanent: the next request carrying that key gets `authentication_error`. The id comes from `other_live_keys` on `POST /v1/account/keys`.\n\nRevoking the account's **last** live key is refused with `invalid_request`. An account with no live key cannot mint one here, so that request is a lock-out rather than a cleanup: mint the replacement first.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "The key to revoke. Keys on other accounts answer `not_found`."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Revoked.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "object",
+                    "id",
+                    "revoked"
+                  ],
+                  "properties": {
+                    "object": {
+                      "type": "string",
+                      "const": "api_key"
+                    },
+                    "account": {
+                      "type": "string"
+                    },
+                    "id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "key_prefix": {
+                      "type": "string"
+                    },
+                    "revoked": {
+                      "type": "boolean",
+                      "const": true
+                    },
+                    "revoked_at": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "effect": {
+                      "type": "string"
+                    },
+                    "live_keys_remaining": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`invalid_request` — this is the only live key on the account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`authentication_error`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`not_found` — no live key with that id on this account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/billing/checkout": {
+      "post": {
+        "tags": [
+          "Billing"
+        ],
+        "operationId": "createCheckoutSession",
+        "summary": "Start an upgrade: a Stripe-hosted Checkout Session",
+        "description": "Returns a hosted Checkout URL for one paid plan. Open `url` in a browser and pay there — Galley never sees a card. The session carries the plan's flat price and its metered overage price, and Stripe Tax is calculated on the page.\n\n**The plan does not change when this returns.** It changes when Stripe delivers `checkout.session.completed` and `customer.subscription.created` to our webhook, a second or two later. Poll `GET /v1/account` and read `subscription.status`.\n\nThe account must have a verified email address: the invoice, the receipt and every dunning message go to it. A keyless trial gets `permission_error` naming the call that fixes it.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CheckoutRequest"
+              },
+              "examples": {
+                "solo": {
+                  "summary": "The $5 entry plan, monthly",
+                  "value": {
+                    "plan": "solo",
+                    "interval": "month"
+                  }
+                },
+                "starterAnnual": {
+                  "summary": "Starter, annual (two months free)",
+                  "value": {
+                    "plan": "starter",
+                    "interval": "year"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "A Checkout Session. Nothing has been charged.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CheckoutSession"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`invalid_request` — unknown `plan`, bad `interval`, or a return URL off galleyrender.com.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`authentication_error`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`permission_error` — the account has no verified email address.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/billing/portal": {
+      "post": {
+        "tags": [
+          "Billing"
+        ],
+        "operationId": "createPortalSession",
+        "summary": "A Stripe Customer Portal link",
+        "description": "Returns a single-use, short-lived URL to the Stripe-hosted portal, where a customer can switch plans, update a card, download invoices and cancel at period end. This is the only way any of those happen: the API cannot change or cancel a subscription, by design.\n\n`not_found` until the account has a Stripe customer, which the first checkout creates.",
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "return_url": {
+                    "type": "string",
+                    "description": "Where the portal's back link goes. Must be https on galleyrender.com.",
+                    "examples": [
+                      "https://galleyrender.com/dashboard"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "A portal session.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PortalSession"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`authentication_error`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`not_found` — this account has never subscribed, so it has no Stripe customer.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/stripe/webhook": {
+      "post": {
+        "tags": [
+          "Billing"
+        ],
+        "operationId": "stripeWebhook",
+        "summary": "Stripe's webhook endpoint (not for customers)",
+        "description": "Stripe calls this; you do not. It is the only unauthenticated write path in the API, and the `Stripe-Signature` header is what stands in for authentication: the raw body is verified against the endpoint's signing secret before a byte of it is parsed.\n\nHandled: `checkout.session.completed`, `customer.subscription.created`, `.updated`, `.deleted`, `invoice.paid`, `invoice.payment_failed`. Idempotent on the Stripe event id, so a redelivery is a no-op. Anything verified answers 200, including an event we do not act on.",
+        "security": [],
+        "parameters": [
+          {
+            "name": "Stripe-Signature",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "`t=<unix seconds>,v1=<hex hmac-sha256 of `t.body`>`."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "description": "A Stripe Event."
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Verified. `outcome` is `applied`, `ignored`, `unmatched` or `duplicate`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "received",
+                    "id",
+                    "type",
+                    "outcome"
+                  ],
+                  "properties": {
+                    "received": {
+                      "type": "boolean",
+                      "const": true
+                    },
+                    "id": {
+                      "type": "string",
+                      "examples": [
+                        "evt_1UGP…"
+                      ]
+                    },
+                    "type": {
+                      "type": "string",
+                      "examples": [
+                        "customer.subscription.created"
+                      ]
+                    },
+                    "outcome": {
+                      "type": "string",
+                      "enum": [
+                        "applied",
+                        "ignored",
+                        "unmatched",
+                        "duplicate"
+                      ]
+                    },
+                    "account": {
+                      "type": "string"
+                    },
+                    "plan": {
+                      "type": "string"
+                    },
+                    "reason": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`authentication_error` — missing or invalid signature.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/healthz": {
+      "get": {
+        "tags": [
+          "Account"
+        ],
+        "operationId": "getHealth",
+        "summary": "Liveness and a cheap dependency probe",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Healthy."
+          },
+          "503": {
+            "description": "A dependency is unreachable."
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "An API key, `glr_sk_…`. Send it as `Authorization: Bearer glr_sk_…` or `X-API-Key: glr_sk_…`. A keyless trial token from the MCP server is an ordinary key and works here."
+      },
+      "apiKeyHeader": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-API-Key"
+      }
+    },
+    "parameters": {
+      "TemplateRef": {
+        "name": "ref",
+        "in": "path",
+        "required": true,
+        "description": "`invoice` for the latest version, or `invoice@3` to pin one.",
+        "schema": {
+          "type": "string",
+          "examples": [
+            "invoice",
+            "invoice@3"
+          ]
+        }
+      },
+      "TemplateName": {
+        "name": "name",
+        "in": "path",
+        "required": true,
+        "description": "The template name, without a version.",
+        "schema": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9._-]{0,62}$",
+          "examples": [
+            "invoice"
+          ]
+        }
+      },
+      "ImportId": {
+        "name": "id",
+        "in": "path",
+        "required": true,
+        "description": "The import id returned by `POST /v1/imports`.",
+        "schema": {
+          "type": "string",
+          "pattern": "^imp_[a-z0-9]+$",
+          "examples": [
+            "imp_4tq8m2x7k1bv"
+          ]
+        }
+      }
+    },
+    "schemas": {
+      "RenderRequest": {
+        "type": "object",
+        "required": [
+          "template"
+        ],
+        "properties": {
+          "template": {
+            "type": "string",
+            "description": "`invoice` for the latest version, or `invoice@3` to pin one. Pin it in anything you ship.",
+            "examples": [
+              "invoice@3"
+            ]
+          },
+          "version": {
+            "type": [
+              "integer",
+              "string"
+            ],
+            "description": "Version number, if you would rather not put `@3` in `template`."
+          },
+          "data": {
+            "description": "The payload, validated against the template's JSON Schema. `lang` and `labels` at the root of `data` are read by the language engine only where the template's schema declares a root property of that name, as a direct property (a `$ref` or `allOf` declaration does not count). The starter library's templates declare them for new accounts and for existing accounts once the library refresh has been run; on a template that does not, they are ordinary unknown fields (an `unknown_field` warning on an open schema, a 422 on a closed one), and the template's own schema decides what they may hold. Fields the template does not use are never an error; they come back in `warnings`.",
+            "default": {},
+            "properties": {
+              "lang": {
+                "type": "string",
+                "maxLength": 100,
+                "pattern": "^[A-Za-z]{2,3}(-[A-Za-z0-9]{1,8})*$",
+                "description": "Only where the template's schema declares `lang`. Language of the document's fixed text — titles, labels, headings, default sentences — and the locale dates and money are formatted in, as a BCP 47 tag (the languages with translated text are listed at /docs/templates/languages). The library's schemas accept a tag of up to 35 characters matching the pattern below, and refuse anything else with a 422 at `data.lang`; the engine itself reads up to 100. A tag that passes the pattern but that `Intl` cannot canonicalise (for example `en-a`) is not an error: it is ignored, as if `lang` had not been sent, with no warning. A tag with no translated text formats dates and money for that locale, keeps the English text, and adds an `unsupported_language` warning. Omit it and nothing changes.",
+                "examples": [
+                  "pt-BR"
+                ]
+              },
+              "labels": {
+                "type": "object",
+                "description": "Your own wording for any of the document's fixed strings, by key. Wins over `lang`. Use it for a house term (\"Quotation\" instead of \"Estimate\"), or for a language we do not ship.",
+                "additionalProperties": {
+                  "type": "string",
+                  "maxLength": 500
+                }
+              }
+            }
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "pdf",
+              "png",
+              "jpg",
+              "jpeg"
+            ],
+            "description": "Defaults to `pdf` for chromium templates and `png` for satori ones. `webp` is not in v1."
+          },
+          "options": {
+            "$ref": "#/components/schemas/RenderOptions"
+          },
+          "webhook_url": {
+            "type": "string",
+            "format": "uri",
+            "description": "Absolute https URL to POST on completion. Supplying one forces the queued path. The body is signed with `X-Galley-Signature` (HMAC-SHA256 over the raw body, using the secret from `GET /v1/account`), and delivery is retried up to five times with exponential backoff over about a quarter of an hour.",
+            "examples": [
+              "https://example.com/hooks/galley"
+            ]
+          },
+          "async": {
+            "type": "boolean",
+            "default": false,
+            "description": "Force the queued path even for a small job."
+          }
+        }
+      },
+      "BatchRequest": {
+        "type": "object",
+        "required": [
+          "renders"
+        ],
+        "properties": {
+          "renders": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 50,
+            "items": {
+              "$ref": "#/components/schemas/RenderRequest"
+            }
+          },
+          "webhook_url": {
+            "type": "string",
+            "format": "uri",
+            "description": "Applied to every item that does not carry its own."
+          }
+        }
+      },
+      "RenderOptions": {
+        "type": "object",
+        "description": "Merged over the template's own defaults. Options are part of the cache key, so two calls that differ only here are two different renders.",
+        "properties": {
+          "page_size": {
+            "type": "string",
+            "description": "PDF page size: `Letter`, `A4`, `Legal`, or `210mm x 297mm`."
+          },
+          "landscape": {
+            "type": "boolean",
+            "default": false,
+            "description": "PDF only."
+          },
+          "margin": {
+            "description": "PDF margins as a CSS length, or per side. Each value is a non-negative number with an optional unit (in, px, cm, mm) — these four and no others, because they are the four Chromium takes. A bare number is pixels: 48, \"48\", \"48px\" and \"0.5in\" are the same margin. A value that is not a length, or a negative one, is refused with 400 invalid_request before the render starts, as are margins larger than the sheet — the one named by page_size, or the largest Chromium knows when there is none, since the page then comes from the template's own CSS. Margins too large for the page a template actually prints on come back as render_failed 422 with cause template.",
+            "oneOf": [
+              {
+                "type": "string",
+                "examples": [
+                  "18mm"
+                ]
+              },
+              {
+                "type": "number",
+                "examples": [
+                  48
+                ]
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "top": {
+                    "type": [
+                      "string",
+                      "number"
+                    ]
+                  },
+                  "right": {
+                    "type": [
+                      "string",
+                      "number"
+                    ]
+                  },
+                  "bottom": {
+                    "type": [
+                      "string",
+                      "number"
+                    ]
+                  },
+                  "left": {
+                    "type": [
+                      "string",
+                      "number"
+                    ]
+                  }
+                }
+              }
+            ]
+          },
+          "width": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Viewport width in px for png/jpg. Default 1200."
+          },
+          "height": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Viewport height in px for png/jpg. Default 630."
+          },
+          "scale": {
+            "type": "number",
+            "minimum": 0.1,
+            "maximum": 3,
+            "description": "Device pixel ratio for png/jpg; a CSS zoom on PDF, where it is capped at 2. Values above the cap are clamped, not rejected, and the cap is 3 on both engines."
+          },
+          "full_page": {
+            "type": "boolean",
+            "description": "png/jpg: capture the whole document, not just the viewport. The capture is limited to 16,384 device pixels on either side, measured after `scale`; a larger page is refused with render_failed 422 and cause `template`."
+          },
+          "quality": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "description": "jpg only. Default 90."
+          },
+          "background": {
+            "type": "string",
+            "description": "CSS colour painted under the document."
+          },
+          "print_background": {
+            "type": "boolean",
+            "description": "PDF: print background colours and images. Default true."
+          },
+          "css": {
+            "type": "string",
+            "description": "Extra CSS appended after the template's own styles."
+          },
+          "on_blocked_asset": {
+            "type": "string",
+            "enum": [
+              "fail",
+              "skip"
+            ],
+            "default": "fail",
+            "description": "What to do when an image, font or other subresource is refused by the egress policy or fails to fetch. `fail` fails the render with `asset_blocked` naming the URL; `skip` drops the asset and renders without it. Both engines behave identically."
+          }
+        },
+        "additionalProperties": true
+      },
+      "Render": {
+        "type": "object",
+        "required": [
+          "object",
+          "id",
+          "status",
+          "template",
+          "format",
+          "engine",
+          "cached",
+          "url",
+          "created_at"
+        ],
+        "properties": {
+          "object": {
+            "type": "string",
+            "const": "render"
+          },
+          "id": {
+            "type": "string",
+            "examples": [
+              "rnd_7hq2m4x8k1bv"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "queued",
+              "processing",
+              "succeeded",
+              "failed"
+            ]
+          },
+          "template": {
+            "type": "string",
+            "description": "The resolved `name@version`.",
+            "examples": [
+              "invoice@1"
+            ]
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "pdf",
+              "png",
+              "jpg"
+            ]
+          },
+          "engine": {
+            "type": "string",
+            "enum": [
+              "chromium",
+              "satori"
+            ]
+          },
+          "cached": {
+            "type": "boolean",
+            "description": "True when the stored object was reused. A cache hit is never billed."
+          },
+          "url": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uri",
+            "description": "Signed URL to the file. Expires in an hour by default; the stored file lasts until `expires_at`. `null` while the render is unfinished, when it failed, and once `expires_at` has passed."
+          },
+          "expires_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "The end of the file's retention, fixed when the render is made from the account's plan. After it the render is no longer a cache hit, `GET /v1/renders/{id}` answers `410 retention_expired`, and the file is deleted by a daily sweep. Not the signed URL's expiry."
+          },
+          "page_count": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "Pages in the PDF; 1 for raster output."
+          },
+          "billable_units": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "1 per PNG/JPG, 1 per PDF page."
+          },
+          "byte_size": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "content_type": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "completed_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "error": {
+            "description": "The error envelope for a failed render, else null."
+          },
+          "webhook_status": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "pending",
+              "delivered",
+              "failed",
+              null
+            ],
+            "description": "`null` when no `webhook_url` was given. `pending` while delivery is still being attempted, `delivered` once your endpoint answered 2xx, `failed` once all attempts were used."
+          },
+          "webhook_attempts": {
+            "type": "integer",
+            "description": "Delivery attempts made so far."
+          },
+          "batch_id": {
+            "type": "string",
+            "description": "Present only for batch items."
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Warning"
+            },
+            "description": "What the request carried that the template did not use, possibly empty. Present on the `POST /v1/render` response (200 and 202) and on every batch item that is not an error. It describes the request, not the render: it is not stored, so `GET /v1/renders/{id}`, `GET /v1/renders` and webhook bodies do not carry it."
+          },
+          "file_deleted_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When the file was deleted because its retention had passed. `null` until then. The render record itself is kept; the `data` and `options` it was made from are deleted with the file."
+          }
+        }
+      },
+      "Warning": {
+        "description": "Something about the request that did not stop it. Paths and schema key names only, never a value; at most 20 per response. Discriminated by `type`.",
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "type",
+              "path",
+              "message"
+            ],
+            "properties": {
+              "type": {
+                "type": "string",
+                "const": "unknown_field"
+              },
+              "path": {
+                "type": "string",
+                "description": "Where the field is, e.g. `data.deposit`.",
+                "examples": [
+                  "data.deposit"
+                ]
+              },
+              "message": {
+                "type": "string"
+              },
+              "did_you_mean": {
+                "type": "string",
+                "description": "The path of the field the template does have, when one is close or a known alias.",
+                "examples": [
+                  "data.deposit_amount"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "type",
+              "path",
+              "message",
+              "supported"
+            ],
+            "properties": {
+              "type": {
+                "type": "string",
+                "const": "unsupported_language"
+              },
+              "path": {
+                "type": "string",
+                "examples": [
+                  "data.lang"
+                ]
+              },
+              "message": {
+                "type": "string"
+              },
+              "supported": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "The languages this template has translated text for."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "type",
+              "path",
+              "message"
+            ],
+            "description": "Language support is switched off on this service, so `data.lang` and `data.labels` were not applied: the fixed text is English, dates and money are formatted for en-US and the paper size is the template's own. Send the same request again later for the document in your language.",
+            "properties": {
+              "type": {
+                "type": "string",
+                "const": "i18n_disabled"
+              },
+              "path": {
+                "type": "string",
+                "description": "`data.lang`, or `data.labels` when only labels were sent.",
+                "examples": [
+                  "data.lang"
+                ]
+              },
+              "message": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "type",
+              "path",
+              "message"
+            ],
+            "description": "A PNG made with the Satori engine whose data holds characters outside the Latin fonts the template embeds. Satori has no fallback face, so they render as empty boxes; render with `format: \"pdf\"` to have them drawn with system fonts.",
+            "properties": {
+              "type": {
+                "type": "string",
+                "const": "font_coverage"
+              },
+              "path": {
+                "type": "string",
+                "description": "The first field that holds such text. The text itself is never quoted.",
+                "examples": [
+                  "data.title"
+                ]
+              },
+              "message": {
+                "type": "string"
+              }
+            }
+          }
+        ]
+      },
+      "Batch": {
+        "type": "object",
+        "required": [
+          "object",
+          "id",
+          "count",
+          "queued",
+          "cached",
+          "renders"
+        ],
+        "properties": {
+          "object": {
+            "type": "string",
+            "const": "batch"
+          },
+          "id": {
+            "type": "string",
+            "examples": [
+              "bat_3k9dm2p1xq4v"
+            ]
+          },
+          "count": {
+            "type": "integer"
+          },
+          "queued": {
+            "type": "integer"
+          },
+          "cached": {
+            "type": "integer"
+          },
+          "renders": {
+            "type": "array",
+            "description": "One entry per item, in order, each carrying its `index`. A render item is a `Render` with its `warnings`; a failed item is an error envelope.",
+            "items": {}
+          }
+        }
+      },
+      "TemplateInput": {
+        "type": "object",
+        "required": [
+          "name",
+          "source"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9._-]{0,62}$",
+            "examples": [
+              "invoice"
+            ]
+          },
+          "source": {
+            "type": "string",
+            "description": "One self-contained HTML document with inline CSS and Liquid expressions. No file includes."
+          },
+          "engine": {
+            "type": "string",
+            "enum": [
+              "chromium",
+              "satori"
+            ],
+            "default": "chromium"
+          },
+          "schema": {
+            "type": "object",
+            "description": "JSON Schema for the `data` payload. Strongly recommended: it is what turns a bad payload into a field-level error."
+          },
+          "options": {
+            "$ref": "#/components/schemas/RenderOptions"
+          },
+          "expected_pages": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2000,
+            "default": 1,
+            "description": "How many PDF pages a typical payload renders. This is the pre-flight estimate the free tier and the spend cap are checked against, so a multi-page template must declare it or a render that cannot fit the allowance will be allowed to start. It is not a limit: the render is metered on the pages it actually produced, and an under-estimate is corrected afterwards from that count. Ignored for png/jpg, which are always one unit."
+          },
+          "example": {
+            "description": "A payload that renders correctly. Echoed back in validation errors."
+          },
+          "description": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string",
+            "description": "Change note for this version, like a commit message."
+          }
+        }
+      },
+      "TemplateVersionInput": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/TemplateInput"
+          }
+        ],
+        "description": "Same body as creating a template, minus `name` — the name comes from the path. Only `source` is required: `engine`, `schema`, `options`, `expected_pages` and `example` are inherited from the previous version unless this body sets them."
+      },
+      "SignupStatus": {
+        "type": "object",
+        "required": [
+          "object",
+          "status",
+          "poll_after_seconds",
+          "next_step"
+        ],
+        "properties": {
+          "object": {
+            "type": "string",
+            "const": "signup_status"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "verified",
+              "issued",
+              "cancelled"
+            ],
+            "description": "`pending` — the email is out and the owner hasn't answered it. `verified` — the owner confirmed this request; the next `create_account` from the client that made it hands over the key, and no other client's does. `issued` — the key is out, collected by that call or shown to the owner on the verify page; keys are shown once. `cancelled` — the owner said the request wasn't theirs, or verified the address from another request; stop polling."
+          },
+          "poll_after_seconds": {
+            "type": "integer",
+            "examples": [
+              5
+            ]
+          },
+          "next_step": {
+            "type": "string"
+          }
+        }
+      },
+      "Library": {
+        "type": "object",
+        "required": [
+          "object",
+          "pack",
+          "packs",
+          "data"
+        ],
+        "properties": {
+          "object": {
+            "type": "string",
+            "const": "library"
+          },
+          "pack": {
+            "description": "The kit that was asked for, or null when the whole library was.",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Pack"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "packs": {
+            "type": "array",
+            "description": "All six kits, always, so one request draws the whole picker.",
+            "items": {
+              "$ref": "#/components/schemas/Pack"
+            }
+          },
+          "data": {
+            "type": "array",
+            "description": "Picker order when `pack` was given (lead first), otherwise name order.",
+            "items": {
+              "$ref": "#/components/schemas/StarterTemplate"
+            }
+          }
+        }
+      },
+      "Pack": {
+        "type": "object",
+        "required": [
+          "object",
+          "id",
+          "title",
+          "blurb",
+          "lead",
+          "templates",
+          "count"
+        ],
+        "properties": {
+          "object": {
+            "type": "string",
+            "const": "pack"
+          },
+          "id": {
+            "type": "string",
+            "examples": [
+              "hoa"
+            ]
+          },
+          "title": {
+            "type": "string",
+            "examples": [
+              "HOA and condo board"
+            ]
+          },
+          "blurb": {
+            "type": "string"
+          },
+          "lead": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The template shown first when this kit is chosen.",
+            "examples": [
+              "meeting-minutes"
+            ]
+          },
+          "templates": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Member names in picker order, the lead first."
+          },
+          "count": {
+            "type": "integer",
+            "examples": [
+              8
+            ]
+          }
+        }
+      },
+      "StarterTemplate": {
+        "type": "object",
+        "required": [
+          "object",
+          "name",
+          "title",
+          "engine",
+          "format",
+          "expected_pages",
+          "packs",
+          "preview",
+          "demo",
+          "example"
+        ],
+        "properties": {
+          "object": {
+            "type": "string",
+            "const": "starter_template"
+          },
+          "name": {
+            "type": "string",
+            "examples": [
+              "meeting-minutes"
+            ]
+          },
+          "title": {
+            "type": "string",
+            "description": "The human name, from the schema's root `title`.",
+            "examples": [
+              "HOA / board meeting minutes"
+            ]
+          },
+          "description": {
+            "type": "string"
+          },
+          "engine": {
+            "type": "string",
+            "enum": [
+              "chromium",
+              "satori"
+            ]
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "pdf",
+              "png"
+            ],
+            "description": "What this template produces by default."
+          },
+          "expected_pages": {
+            "type": "integer",
+            "examples": [
+              3
+            ]
+          },
+          "packs": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "examples": [
+              [
+                "hoa"
+              ]
+            ]
+          },
+          "lead_for": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The kits this template leads. Usually empty; never more than one in practice."
+          },
+          "order": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "description": "Position within each kit, 1-based, `1` being the lead. `{}` for one of the 14 staples, which belong to no kit. A template in two kits does not lead both: `invoice` is `{ \"trades\": 3, \"freelancer\": 1 }`.",
+            "examples": [
+              {
+                "hoa": 1
+              }
+            ]
+          },
+          "preview": {
+            "type": "object",
+            "required": [
+              "url",
+              "thumbnail_url",
+              "width",
+              "height"
+            ],
+            "description": "The committed preview, served by the website. `width`/`height` are the PNG's own.",
+            "properties": {
+              "url": {
+                "type": "string",
+                "examples": [
+                  "https://galleyrender.com/templates/meeting-minutes.png"
+                ]
+              },
+              "thumbnail_url": {
+                "type": "string"
+              },
+              "width": {
+                "type": "integer",
+                "examples": [
+                  1632
+                ]
+              },
+              "height": {
+                "type": "integer",
+                "examples": [
+                  2112
+                ]
+              }
+            }
+          },
+          "demo": {
+            "description": "What the picker puts in front of a reader. `fields` is exactly three, or empty with `no_fields` saying why this template has no good three — `shipping-label` is the only one, because its barcode is precomputed from its tracking number. Labels are written for the person, not derived from the key.",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TemplateDemo"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "example": {
+            "description": "The payload the preview was rendered from. The picker's prefill."
+          }
+        }
+      },
+      "TemplateDemo": {
+        "type": "object",
+        "required": [
+          "noun",
+          "make",
+          "keep",
+          "fields",
+          "no_fields"
+        ],
+        "properties": {
+          "noun": {
+            "type": "string",
+            "examples": [
+              "these minutes"
+            ]
+          },
+          "make": {
+            "type": "string",
+            "description": "The render button's label.",
+            "examples": [
+              "Make the minutes"
+            ]
+          },
+          "keep": {
+            "type": "string",
+            "description": "The keep-this button's label.",
+            "examples": [
+              "Save these minutes"
+            ]
+          },
+          "fields": {
+            "type": "array",
+            "maxItems": 3,
+            "items": {
+              "type": "object",
+              "required": [
+                "path",
+                "label",
+                "type"
+              ],
+              "properties": {
+                "path": {
+                  "type": "string",
+                  "description": "Dotted path into the payload.",
+                  "examples": [
+                    "meeting.date"
+                  ]
+                },
+                "label": {
+                  "type": "string",
+                  "examples": [
+                    "Meeting date"
+                  ]
+                },
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "text",
+                    "date",
+                    "number"
+                  ]
+                }
+              }
+            }
+          },
+          "no_fields": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why there are no fields, or null when there are three."
+          }
+        }
+      },
+      "Template": {
+        "type": "object",
+        "required": [
+          "object",
+          "id",
+          "name",
+          "latest_version",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "object": {
+            "type": "string",
+            "const": "template"
+          },
+          "id": {
+            "type": "string",
+            "examples": [
+              "tpl_5m2k8q1xv7bd"
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "latest_version": {
+            "type": "integer"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "version": {
+            "type": "integer",
+            "description": "Present when a version was resolved."
+          },
+          "ref": {
+            "type": "string",
+            "examples": [
+              "invoice@1"
+            ]
+          },
+          "engine": {
+            "type": "string",
+            "enum": [
+              "chromium",
+              "satori"
+            ]
+          },
+          "schema": {
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "options": {
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "expected_pages": {
+            "type": "integer",
+            "description": "The version's declared PDF page estimate."
+          },
+          "example": {},
+          "source": {
+            "type": "string"
+          },
+          "checksum": {
+            "type": "string",
+            "description": "SHA-256 of engine, source, schema and options. Part of the render cache key."
+          },
+          "message": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "version_created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "origin": {
+            "type": "string",
+            "enum": [
+              "library",
+              "import",
+              "own"
+            ],
+            "description": "On `GET /v1/templates`: a starter from the library, a template saved from a document import, or one of the account's own."
+          }
+        }
+      },
+      "TemplateVersion": {
+        "type": "object",
+        "required": [
+          "object",
+          "id",
+          "template",
+          "ref",
+          "version",
+          "engine",
+          "checksum",
+          "created_at"
+        ],
+        "properties": {
+          "object": {
+            "type": "string",
+            "const": "template_version"
+          },
+          "id": {
+            "type": "string"
+          },
+          "template": {
+            "type": "string"
+          },
+          "ref": {
+            "type": "string",
+            "examples": [
+              "invoice@3"
+            ]
+          },
+          "version": {
+            "type": "integer"
+          },
+          "engine": {
+            "type": "string",
+            "enum": [
+              "chromium",
+              "satori"
+            ]
+          },
+          "expected_pages": {
+            "type": "integer"
+          },
+          "checksum": {
+            "type": "string"
+          },
+          "message": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "Usage": {
+        "type": "object",
+        "required": [
+          "object",
+          "account",
+          "plan",
+          "period",
+          "renders",
+          "billable_units",
+          "cost_usd",
+          "limits",
+          "prices"
+        ],
+        "properties": {
+          "object": {
+            "type": "string",
+            "const": "usage"
+          },
+          "account": {
+            "type": "string",
+            "examples": [
+              "acct_hj8kpw14xk1v"
+            ]
+          },
+          "plan": {
+            "type": "string",
+            "enum": [
+              "free",
+              "solo",
+              "starter",
+              "growth",
+              "scale"
+            ]
+          },
+          "period": {
+            "type": "string",
+            "description": "The period the numbers cover. On a paid plan, the Stripe billing period — the one its invoice and spend cap cover — named by the instant it began, `YYYY-MM-DDTHH:MM:SSZ` in UTC. On a free account or a keyless trial, the calendar month, `YYYY-MM` in UTC.",
+            "examples": [
+              "2026-09-15T00:00:00Z",
+              "2026-09"
+            ]
+          },
+          "period_resets_on": {
+            "type": "string",
+            "format": "date",
+            "description": "The day the period turns over, in UTC: the renewal date on a paid plan, the 1st of next month otherwise."
+          },
+          "renders": {
+            "type": "integer"
+          },
+          "billable_units": {
+            "type": "integer"
+          },
+          "by_format": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "object",
+              "properties": {
+                "billable_units": {
+                  "type": "integer"
+                },
+                "cost_usd": {
+                  "type": "number"
+                }
+              }
+            }
+          },
+          "cost_usd": {
+            "type": "number"
+          },
+          "limits": {
+            "type": "object",
+            "properties": {
+              "free_renders_per_month": {
+                "type": "integer"
+              },
+              "free_renders_used": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "description": "Billable units charged against the free allowance this period. On an account that came up from a keyless trial this is lower than `billable_units`: the trial's renders stay in the period counters and are credited back (`trial_units_credited`). Null on a paid plan."
+              },
+              "free_renders_remaining": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "trial_units_credited": {
+                "type": "integer",
+                "description": "Units spent before this account verified, which the free tier does not count. 0 for an account that never had a keyless trial, and reset when the period rolls over."
+              },
+              "monthly_spend_cap_usd": {
+                "type": "number",
+                "description": "The monthly spend cap on overage — usage past the plan's included units, at the plan's own rate. An annual plan's cap is twelve of these over its billing year. Not enforced on a free account or a keyless trial, which cannot be billed."
+              },
+              "spend_remaining_usd": {
+                "type": "number",
+                "description": "This period's cap less the overage run up so far, floored at 0. Included units spend none of it; on a free account or a trial it is always the whole cap."
+              }
+            }
+          },
+          "trial": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "Present only on a keyless trial account.",
+            "properties": {
+              "renders_limit": {
+                "type": "integer"
+              },
+              "renders_used": {
+                "type": "integer"
+              },
+              "renders_remaining": {
+                "type": "integer"
+              },
+              "upgrade": {
+                "type": "string"
+              }
+            }
+          },
+          "prices": {
+            "type": "object",
+            "properties": {
+              "png_usd": {
+                "type": "number",
+                "examples": [
+                  0.006
+                ]
+              },
+              "pdf_page_usd": {
+                "type": "number",
+                "examples": [
+                  0.015
+                ]
+              },
+              "meter_event_name": {
+                "type": "string",
+                "examples": [
+                  "galley_render"
+                ]
+              }
+            }
+          },
+          "imports": {
+            "type": "object",
+            "description": "Document imports this period against the plan's count. Failed and refused imports are not counted.",
+            "properties": {
+              "used": {
+                "type": "integer"
+              },
+              "included": {
+                "type": "integer",
+                "description": "0 on Free: import is for paid plans."
+              },
+              "resets_on": {
+                "type": "string",
+                "format": "date"
+              }
+            }
+          },
+          "lifetime_renders": {
+            "type": "integer"
+          },
+          "current_period": {
+            "type": "string",
+            "description": "The period at the moment of the call. Identical to `period`."
+          }
+        }
+      },
+      "Account": {
+        "type": "object",
+        "required": [
+          "object",
+          "id",
+          "plan",
+          "status"
+        ],
+        "properties": {
+          "object": {
+            "type": "string",
+            "const": "account"
+          },
+          "id": {
+            "type": "string",
+            "examples": [
+              "acct_hj8kpw14xk1v"
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "email": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Null until the address is verified."
+          },
+          "plan": {
+            "type": "string",
+            "enum": [
+              "free",
+              "solo",
+              "starter",
+              "growth",
+              "scale"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "suspended"
+            ]
+          },
+          "verified": {
+            "type": "boolean"
+          },
+          "trial": {
+            "type": "boolean"
+          },
+          "webhook_secret": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Shown once, on the first call. Null afterwards — rotate if you no longer have it.",
+            "examples": [
+              "whsec_9Fb2…"
+            ]
+          },
+          "webhook_secret_prefix": {
+            "type": "string",
+            "description": "Identifies the stored secret without revealing it."
+          },
+          "webhook_secret_shown_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "webhook_signature_header": {
+            "type": "string",
+            "const": "X-Galley-Signature"
+          },
+          "webhook_signature_scheme": {
+            "type": "string",
+            "examples": [
+              "sha256=<hex hmac-sha256 of the raw request body>"
+            ]
+          },
+          "rate_limit": {
+            "type": "object",
+            "description": "Renders this account's keys may start per window. Counted per API key.",
+            "properties": {
+              "renders_per_minute": {
+                "type": "integer",
+                "examples": [
+                  60
+                ]
+              },
+              "window_seconds": {
+                "type": "integer",
+                "examples": [
+                  60
+                ]
+              }
+            }
+          },
+          "limits": {
+            "type": "object",
+            "properties": {
+              "free_renders_per_month": {
+                "type": "integer"
+              },
+              "free_renders_used": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "free_renders_remaining": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "trial_units_credited": {
+                "type": "integer"
+              },
+              "monthly_spend_cap_usd": {
+                "type": "number"
+              }
+            }
+          },
+          "subscription": {
+            "$ref": "#/components/schemas/Subscription"
+          },
+          "billing": {
+            "type": "object",
+            "description": "How to change the plan from here. `upgrade` and `manage` are POSTs that return a URL to open — but they are present **only when `available` is true**. On a deployment with no Stripe configured both endpoints refuse with `billing_unavailable` (503), so offering the call and then refusing it would send an agent to a dead end. Check `available` first.",
+            "required": [
+              "available"
+            ],
+            "properties": {
+              "available": {
+                "type": "boolean",
+                "description": "Whether this deployment can produce a Stripe checkout or portal link at all."
+              },
+              "upgrade": {
+                "type": "string",
+                "description": "Present only when `available` is true."
+              },
+              "manage": {
+                "type": "string",
+                "description": "Present only when `available` is true."
+              },
+              "unavailable_reason": {
+                "type": "string",
+                "description": "Present only when `available` is false: why, in one sentence."
+              },
+              "next_step": {
+                "type": "string",
+                "description": "Present only when `available` is false: what to tell the person instead."
+              },
+              "pricing_url": {
+                "type": "string"
+              },
+              "dashboard_url": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "Subscription": {
+        "type": "object",
+        "description": "What Stripe last said about this account's subscription. Written only by the webhook.",
+        "properties": {
+          "plan": {
+            "type": "string",
+            "enum": [
+              "free",
+              "solo",
+              "starter",
+              "growth",
+              "scale"
+            ]
+          },
+          "plan_name": {
+            "type": "string",
+            "examples": [
+              "Solo"
+            ]
+          },
+          "interval": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "month",
+              "year",
+              null
+            ]
+          },
+          "status": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Stripe's own status, unchanged: `active`, `trialing`, `past_due`, `unpaid`, `canceled`, `incomplete`, `incomplete_expired`, `paused`. Null on an account that has never subscribed.",
+            "examples": [
+              "active"
+            ]
+          },
+          "included_units": {
+            "type": "integer",
+            "description": "The plan's included quantity each billing period, as sold — the first tier of its Stripe price, counted in meter units (`meter_units`: a PDF page is 2.5, an image 1). Monthly Solo's 500 is 200 PDF pages or 500 images; an annual plan's period is a year, so it includes twelve times the monthly figure. On Free it is the monthly allowance, one per PDF page or image."
+          },
+          "retention_days": {
+            "type": "integer",
+            "description": "Days a render is kept, as sold: 7 on Free and the keyless trial, 30 on Solo and Starter, 90 on Growth and Scale."
+          },
+          "current_period_end": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "cancel_at_period_end": {
+            "type": "boolean",
+            "description": "Cancelled in the portal; drops to Free at `current_period_end`."
+          },
+          "has_stripe_customer": {
+            "type": "boolean"
+          },
+          "features": {
+            "type": "object",
+            "properties": {
+              "webhooks": {
+                "type": "boolean"
+              },
+              "cloud_delivery": {
+                "type": "boolean"
+              }
+            }
+          }
+        }
+      },
+      "CheckoutRequest": {
+        "type": "object",
+        "required": [
+          "plan"
+        ],
+        "properties": {
+          "plan": {
+            "type": "string",
+            "enum": [
+              "solo",
+              "starter",
+              "growth",
+              "scale"
+            ],
+            "description": "The paid plan to subscribe to. `free` is not a checkout — it is a portal cancellation."
+          },
+          "interval": {
+            "type": "string",
+            "enum": [
+              "month",
+              "year"
+            ],
+            "default": "month",
+            "description": "Annual is ten months for twelve."
+          },
+          "success_url": {
+            "type": "string",
+            "description": "Where Stripe returns on success. https on galleyrender.com only."
+          },
+          "cancel_url": {
+            "type": "string",
+            "description": "Where Stripe returns if the customer backs out."
+          }
+        }
+      },
+      "CheckoutSession": {
+        "type": "object",
+        "required": [
+          "object",
+          "id",
+          "url",
+          "plan",
+          "interval"
+        ],
+        "properties": {
+          "object": {
+            "type": "string",
+            "const": "checkout_session"
+          },
+          "id": {
+            "type": "string",
+            "examples": [
+              "cs_test_a1b2c3"
+            ]
+          },
+          "url": {
+            "type": "string",
+            "description": "The hosted page. Open it in a browser.",
+            "examples": [
+              "https://checkout.stripe.com/c/pay/cs_test_a1b2c3"
+            ]
+          },
+          "expires_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "account": {
+            "type": "string"
+          },
+          "plan": {
+            "type": "string",
+            "enum": [
+              "solo",
+              "starter",
+              "growth",
+              "scale"
+            ]
+          },
+          "interval": {
+            "type": "string",
+            "enum": [
+              "month",
+              "year"
+            ]
+          },
+          "price_usd": {
+            "type": "number",
+            "examples": [
+              5
+            ]
+          },
+          "included_renders": {
+            "type": "integer",
+            "description": "The plan's included quantity each month, in meter units: a PDF page is 2.5, an image 1. Solo's 500 is 200 PDF pages or 500 images. The name predates the page weighting and is kept for compatibility.",
+            "examples": [
+              500
+            ]
+          },
+          "overage_usd_per_render": {
+            "type": "number",
+            "description": "Dollars per meter unit past the allowance — the price of one image. A PDF page is 2.5 of them: $0.015 on Solo, $0.01 on the larger plans.",
+            "examples": [
+              0.006
+            ]
+          },
+          "current_plan": {
+            "type": "string"
+          },
+          "next_step": {
+            "type": "string"
+          },
+          "note": {
+            "type": "string"
+          }
+        }
+      },
+      "PortalSession": {
+        "type": "object",
+        "required": [
+          "object",
+          "id",
+          "url"
+        ],
+        "properties": {
+          "object": {
+            "type": "string",
+            "const": "portal_session"
+          },
+          "id": {
+            "type": "string",
+            "examples": [
+              "bps_1UGP…"
+            ]
+          },
+          "url": {
+            "type": "string",
+            "examples": [
+              "https://billing.stripe.com/p/session/…"
+            ]
+          },
+          "account": {
+            "type": "string"
+          },
+          "subscription": {
+            "$ref": "#/components/schemas/Subscription"
+          },
+          "can": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "next_step": {
+            "type": "string"
+          }
+        }
+      },
+      "ImportRequest": {
+        "description": "The JSON body of `POST /v1/imports`: exactly one of `file_url` or `upload: true`. A multipart `file` is the third way in.",
+        "type": "object",
+        "properties": {
+          "file_url": {
+            "type": "string",
+            "maxLength": 2048,
+            "description": "A public https URL to a PDF. Fetched by the API under the same egress policy as template assets, up to 20 MB and 10 seconds."
+          },
+          "upload": {
+            "type": "boolean",
+            "const": true,
+            "description": "Ask for a one-time upload link instead of sending the file."
+          },
+          "options": {
+            "type": "object",
+            "properties": {
+              "auto": {
+                "type": "boolean",
+                "default": false,
+                "description": "Take the recommended answer to every question instead of asking."
+              },
+              "name": {
+                "type": "string",
+                "pattern": "^[a-z0-9][a-z0-9._-]{0,62}$",
+                "description": "The name the template is saved under, unless `save` is given another.",
+                "examples": [
+                  "ashcroft-invoice"
+                ]
+              },
+              "hint": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9_-]{0,39}$",
+                "description": "What you expect the document to be, such as `invoice`. A prior for the classifier, never a command.",
+                "examples": [
+                  "invoice"
+                ]
+              }
+            }
+          },
+          "force": {
+            "type": "boolean",
+            "description": "Import the same bytes again inside 24 hours instead of returning the earlier import."
+          }
+        }
+      },
+      "Import": {
+        "type": "object",
+        "description": "One document being turned into a template. It never carries a filename or a word of the document, except a question's `evidence.text` (at most 200 characters of what you uploaded) and the draft, which is read with `GET /v1/imports/{id}/draft`.",
+        "required": [
+          "object",
+          "id",
+          "status",
+          "questions",
+          "answers",
+          "notes",
+          "fonts_substituted",
+          "created_at"
+        ],
+        "properties": {
+          "object": {
+            "type": "string",
+            "const": "import"
+          },
+          "id": {
+            "type": "string",
+            "pattern": "^imp_[a-z0-9]+$",
+            "examples": [
+              "imp_4tq8m2x7k1bv"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "awaiting_upload",
+              "uploaded",
+              "reading",
+              "analysing",
+              "awaiting_answers",
+              "answered",
+              "synthesising",
+              "checking",
+              "ready",
+              "saved",
+              "failed",
+              "refused"
+            ],
+            "description": "`awaiting_upload` waits for a file at the upload link. `awaiting_answers` waits for you. `ready` is the moment to look at the preview; nothing is a template until `saved`. `failed` and `refused` are final and are not counted against the plan."
+          },
+          "kind": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "pdf",
+              null
+            ],
+            "description": "The file type. PDF only for now."
+          },
+          "pages": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "bytes": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "document_kind": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "What the analysis took the document to be: `invoice`, `letter`, `other`, and so on.",
+            "examples": [
+              "invoice"
+            ]
+          },
+          "closest_starter": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The starter template whose data contract the draft borrows, when one fits. See the docs for what that promises.",
+            "examples": [
+              "invoice"
+            ]
+          },
+          "language": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The document's language, a BCP 47 tag.",
+            "examples": [
+              "en"
+            ]
+          },
+          "questions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Question"
+            },
+            "description": "At most three, and only while `status` is `awaiting_answers` or after: empty when the document needed none."
+          },
+          "answers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Answer"
+            }
+          },
+          "delayed_until": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When an import waiting to start will be picked up, if the service's daily capacity is used. `null` when nothing holds it."
+          },
+          "check": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Check"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "notes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Things worth knowing, in plain sentences: a font that was substituted, a question that took its recommendation."
+          },
+          "fonts_substituted": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "from",
+                "to"
+              ],
+              "properties": {
+                "from": {
+                  "type": "string",
+                  "description": "The face the document used.",
+                  "examples": [
+                    "Helvetica"
+                  ]
+                },
+                "to": {
+                  "type": "string",
+                  "description": "The bundled face the template uses instead.",
+                  "examples": [
+                    "public-sans"
+                  ]
+                }
+              }
+            }
+          },
+          "draft_summary": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "Field paths and counts, never values. `null` until `ready`.",
+            "properties": {
+              "name": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "fields": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "examples": [
+                  [
+                    "buyer.name",
+                    "invoice_number",
+                    "line_items[]"
+                  ]
+                ]
+              },
+              "string_keys": {
+                "type": "integer"
+              },
+              "expected_pages": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              }
+            }
+          },
+          "preview_url": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uri",
+            "description": "A PDF of the draft rendered from its example, signed for 15 minutes. `null` until `ready`."
+          },
+          "preview_png_url": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uri",
+            "description": "Page 1 of the preview as a PNG at 1x, signed for 15 minutes, for a client that shows an image rather than a PDF. `null` until `ready`, and when none was stored."
+          },
+          "preview_expires_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "template": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "The template this import was saved as. `null` until `saved`.",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "ref": {
+                "type": "string",
+                "examples": [
+                  "ashcroft-invoice@1"
+                ]
+              }
+            }
+          },
+          "usage": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "Model tokens used, summed over the stages.",
+            "properties": {
+              "input_tokens": {
+                "type": "integer"
+              },
+              "output_tokens": {
+                "type": "integer"
+              },
+              "cache_read_input_tokens": {
+                "type": "integer"
+              },
+              "stages": {
+                "type": "integer"
+              }
+            }
+          },
+          "error": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "Why a `failed` or `refused` import ended: an error envelope with `type` `import_failed`, `import_unsupported` or `import_refused`, and `details.reason` or `details.cause` naming which. Never any text of the document.",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "import_failed",
+                  "import_unsupported",
+                  "import_refused"
+                ]
+              },
+              "message": {
+                "type": "string"
+              },
+              "docs_url": {
+                "type": "string",
+                "format": "uri"
+              },
+              "details": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          },
+          "existing": {
+            "type": "boolean",
+            "const": true,
+            "description": "Present, and true, only when this is an earlier import returned for the same bytes."
+          },
+          "upload": {
+            "type": "object",
+            "description": "Present only on the response that made the link; the token is shown once.",
+            "required": [
+              "url",
+              "curl",
+              "expires_at"
+            ],
+            "properties": {
+              "url": {
+                "type": "string",
+                "format": "uri",
+                "description": "A page where a person can drop the file. The token rides in the fragment."
+              },
+              "curl": {
+                "type": "string",
+                "description": "A `curl` command that uploads `document.pdf` to the link."
+              },
+              "expires_at": {
+                "type": "string",
+                "format": "date-time"
+              }
+            }
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "completed_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "expires_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When the source and its page images are deleted: 7 days after the import finished."
+          }
+        }
+      },
+      "Question": {
+        "type": "object",
+        "description": "One thing the analysis could not decide. The list of kinds is closed, and so are the options; an answer is one of them.",
+        "required": [
+          "id",
+          "kind",
+          "prompt",
+          "options"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "examples": [
+              "q1"
+            ]
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "field_or_fixed",
+              "table_rows",
+              "which_is",
+              "document_kind",
+              "keep_image"
+            ]
+          },
+          "prompt": {
+            "type": "string",
+            "examples": [
+              "Is this paragraph printed the same on every document, or does it change?"
+            ]
+          },
+          "options": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "value",
+                "label"
+              ],
+              "properties": {
+                "value": {
+                  "type": "string",
+                  "examples": [
+                    "field_with_default"
+                  ]
+                },
+                "label": {
+                  "type": "string"
+                },
+                "recommended": {
+                  "type": "boolean",
+                  "description": "The answer taken when nobody answers."
+                }
+              }
+            }
+          },
+          "evidence": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "properties": {
+              "text": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "maxLength": 200,
+                "description": "At most 200 characters of the region, as printed in your document."
+              },
+              "page": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "box": {
+                "type": [
+                  "array",
+                  "null"
+                ],
+                "items": {
+                  "type": "number"
+                },
+                "minItems": 4,
+                "maxItems": 4,
+                "description": "`[x0, y0, x1, y1]` in points from the page's top left."
+              },
+              "crop": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "uri",
+                "description": "An image of the region, signed for 15 minutes."
+              }
+            }
+          }
+        }
+      },
+      "Answer": {
+        "type": "object",
+        "description": "A recorded answer.",
+        "required": [
+          "question_id",
+          "value",
+          "answered_by"
+        ],
+        "properties": {
+          "question_id": {
+            "type": "string"
+          },
+          "value": {
+            "type": "string",
+            "description": "One of the question's option values."
+          },
+          "path": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)*$",
+            "description": "The field the paragraph becomes, for `field` and `field_with_default`."
+          },
+          "answered_by": {
+            "type": "string",
+            "enum": [
+              "agent",
+              "user",
+              "auto"
+            ],
+            "description": "`auto` is the recommendation, taken because nobody answered or `options.auto` was set."
+          }
+        }
+      },
+      "AnswerRequest": {
+        "type": "object",
+        "required": [
+          "answers"
+        ],
+        "properties": {
+          "answers": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "question_id",
+                "value"
+              ],
+              "properties": {
+                "question_id": {
+                  "type": "string"
+                },
+                "value": {
+                  "type": "string",
+                  "description": "One of that question's option values."
+                },
+                "path": {
+                  "type": "string",
+                  "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)*$",
+                  "description": "Only with `field` or `field_with_default`."
+                },
+                "answered_by": {
+                  "type": "string",
+                  "enum": [
+                    "agent",
+                    "user"
+                  ],
+                  "description": "Who chose this answer, over the request's `answered_by`: one call can carry a program's answers and a person's."
+                }
+              }
+            }
+          },
+          "answered_by": {
+            "type": "string",
+            "enum": [
+              "agent",
+              "user"
+            ],
+            "default": "user",
+            "description": "Recorded per answer, unless the answer names its own. Say `agent` when a program chose the answer itself."
+          }
+        }
+      },
+      "Check": {
+        "type": "object",
+        "description": "What Galley checked before calling the import `ready`. Present from `ready` on. The numbers are measured against the uploaded document and are there to be read, not trusted blindly: `review_recommended` says whether to compare the preview with the original before saving.",
+        "properties": {
+          "checks": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The checks that ran, in order."
+          },
+          "review_recommended": {
+            "type": "boolean",
+            "description": "`true` when a check still missed after the one automatic revision. Look at the preview before you save."
+          },
+          "review_reasons": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "verdict": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "accept",
+              "revise",
+              "reject",
+              null
+            ],
+            "description": "The visual judge's verdict on the final draft."
+          },
+          "differences": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "page": {
+                  "type": "integer"
+                },
+                "where": {
+                  "type": "string"
+                },
+                "what": {
+                  "type": "string"
+                },
+                "severity": {
+                  "type": "string",
+                  "enum": [
+                    "minor",
+                    "major",
+                    "critical"
+                  ]
+                }
+              }
+            }
+          },
+          "layout_score": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            },
+            "description": "Per page, 0 to 1: how closely the preview's layout correlates with the original's."
+          },
+          "text_recall": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "description": "The share of the document's words that the preview prints, 0 to 1."
+          },
+          "page_count": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "overflow": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": true
+          },
+          "recall": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "coverage": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": true
+          },
+          "layout": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": true
+          },
+          "judge": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": true
+          },
+          "repairs": {
+            "type": "integer",
+            "description": "Automatic revisions made: 0 or 1."
+          },
+          "repaired_for": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "additionalProperties": true
+      },
+      "ImportDraft": {
+        "type": "object",
+        "required": [
+          "object",
+          "import_id",
+          "source"
+        ],
+        "properties": {
+          "object": {
+            "type": "string",
+            "const": "import_draft"
+          },
+          "import_id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string",
+            "description": "The template: one self-contained HTML document with Liquid expressions."
+          },
+          "schema": {
+            "type": "object",
+            "description": "JSON Schema for the data it takes."
+          },
+          "example": {
+            "description": "A payload that renders the draft."
+          },
+          "strings": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            },
+            "description": "The template's text, by language."
+          },
+          "options": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "expected_pages": {
+            "type": "integer"
+          },
+          "fonts": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "SavedImportTemplate": {
+        "description": "The saved template, with the import it came from.",
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/Template"
+          },
+          {
+            "type": "object",
+            "required": [
+              "import_id"
+            ],
+            "properties": {
+              "import_id": {
+                "type": "string"
+              },
+              "saved": {
+                "type": "boolean",
+                "const": true,
+                "description": "Present, and true, on a repeat call that returned the template saved before."
+              }
+            }
+          }
+        ]
+      },
+      "FieldError": {
+        "type": "object",
+        "required": [
+          "path",
+          "message",
+          "expected"
+        ],
+        "description": "Written so a caller can fix the payload without guessing.",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Dotted path into the submitted data.",
+            "examples": [
+              "data.line_items[1].quantity"
+            ]
+          },
+          "message": {
+            "type": "string"
+          },
+          "expected": {
+            "type": "string",
+            "description": "The type or constraint the field must satisfy.",
+            "examples": [
+              "number"
+            ]
+          },
+          "received": {
+            "type": "string",
+            "description": "What arrived, described briefly.",
+            "examples": [
+              "string"
+            ]
+          },
+          "example": {
+            "description": "A value that would be accepted."
+          }
+        }
+      },
+      "Error": {
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "type": "object",
+            "required": [
+              "type",
+              "message",
+              "docs_url"
+            ],
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "invalid_request",
+                  "validation_error",
+                  "authentication_error",
+                  "permission_error",
+                  "plan_required",
+                  "not_found",
+                  "retention_expired",
+                  "conflict",
+                  "quota_exceeded",
+                  "spend_cap_exceeded",
+                  "rate_limited",
+                  "asset_blocked",
+                  "render_failed",
+                  "internal_error",
+                  "import_disabled",
+                  "import_unsupported",
+                  "link_expired"
+                ]
+              },
+              "message": {
+                "type": "string"
+              },
+              "docs_url": {
+                "type": "string",
+                "format": "uri",
+                "examples": [
+                  "https://galleyrender.com/docs/errors/validation_error"
+                ]
+              },
+              "errors": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/FieldError"
+                }
+              },
+              "details": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
