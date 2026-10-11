@@ -1,0 +1,557 @@
+openapi: 3.1.0
+info:
+  title: Streamable Third-Party API
+  version: 1.0.0
+  description: |
+    Read-only access to ingests owned by the authorized Streamable user.
+
+    ## Scopes
+
+    Scopes control the API permissions for an access token.
+    Each endpoint lists its required scopes.
+
+    During application creation, select the scopes that your integration needs.
+    An authorization request can include one or more approved scopes.
+    Separate multiple scopes with spaces in the `scope` parameter.
+    Request only the scopes required for your API calls.
+
+    | Scope | Access |
+    | --- | --- |
+    | `ingests:read` | Read owned ingests, publishing URLs, and stream keys. |
+
+    The examples in this guide call the ingest endpoints.
+    Therefore, they request `ingests:read`.
+    This table will list additional scopes when new API features require them.
+
+    ## Authenticate
+
+    Streamable uses OAuth 2.1 Authorization Code with S256 PKCE.
+
+    Create the authorization request and exchange the code on your server.
+    Keep the client secret, PKCE verifier, and all tokens on that server.
+
+    ### 1. Create a Streamable application
+
+    1. Sign in to Streamable.
+    2. Open [Developer applications](https://streamable.run/developers/apps).
+    3. Select **Create application**.
+    4. Enter the app name, description, homepage, privacy policy, and terms URL.
+    5. Register each callback URI exactly.
+    6. Use HTTPS except for `localhost` or loopback development callbacks.
+    7. Do not use fragments or wildcards.
+    8. Select `ingests:read` for the ingest example in this guide.
+    9. Create the application.
+    10. When Streamable displays the client ID and client secret, save them in
+        your server-side secret manager.
+    11. Wait until Streamable approves the application.
+
+    ### 2. Start authorization
+
+    Use these values:
+
+    | Setting | Value |
+    | --- | --- |
+    | Authorization endpoint | `https://auth.streamable.run/oauth2/auth` |
+    | Token endpoint | `https://auth.streamable.run/oauth2/token` |
+    | API audience | `https://api.streamable.run/v1` |
+    | Scopes in this example | `ingests:read` |
+    | Response type | `code` |
+    | PKCE method | `S256` |
+    | Client authentication | HTTP Basic |
+
+    For each authorization attempt, complete these steps:
+
+    1. Generate `state` from 32 random bytes encoded as unpadded base64url.
+    2. Generate a PKCE verifier from 32 or more random bytes encoded as
+       unpadded base64url.
+    3. Store both values in the server-side session for the browser.
+    4. Set the session to expire after 10 minutes.
+    5. Create `code_challenge` from the unpadded base64url encoding of
+       `SHA-256(verifier)`.
+    6. Redirect the browser to this URL:
+
+    ```text
+    https://auth.streamable.run/oauth2/auth
+      ?response_type=code
+      &client_id=<client_id>
+      &redirect_uri=<exact_registered_callback>
+      &scope=ingests%3Aread
+      &audience=https%3A%2F%2Fapi.streamable.run%2Fv1
+      &state=<single_use_random_state>
+      &code_challenge=<s256_challenge>
+      &code_challenge_method=S256
+    ```
+
+    ### 3. Process the callback
+
+    Streamable sends an HTTP `GET` request to the registered callback URI.
+
+    A successful callback contains `code` and `state`:
+
+    ```http
+    GET /oauth/callback?code=<single_use_authorization_code>&state=<single_use_random_state> HTTP/1.1
+    Host: partner.example
+    ```
+
+    An unsuccessful callback contains `error` and `state`:
+
+    ```http
+    GET /oauth/callback?error=access_denied&error_description=<url_encoded_description>&state=<single_use_random_state> HTTP/1.1
+    Host: partner.example
+    ```
+
+    For every callback, complete these steps:
+
+    1. Require the `state` parameter.
+    2. Compare `state` with the stored value by an exact, timing-safe comparison.
+    3. Reject a missing, different, expired, or previously used value.
+    4. Consume the stored authorization attempt.
+    5. If the callback contains `error`, stop the authorization flow.
+    6. Require the `code` parameter.
+    7. Exchange the code and PKCE verifier from your server:
+
+    ```http
+    POST https://auth.streamable.run/oauth2/token HTTP/1.1
+    Authorization: Basic <base64(client_id:client_secret)>
+    Content-Type: application/x-www-form-urlencoded
+
+    grant_type=authorization_code&code=<code>&redirect_uri=<exact_registered_callback>&code_verifier=<verifier>
+    ```
+
+    Ignore unknown callback parameters.
+    Escape `error_description` before you display it.
+    Do not record the complete callback URL.
+
+    ### Node.js example
+
+    This example requires Node.js 22 or later and a server-side session.
+
+    1. Set `STREAMABLE_CLIENT_ID` and `STREAMABLE_CLIENT_SECRET` in the server environment.
+    2. Replace `redirectUri` with a registered callback URI.
+    3. Call `createAuthorizationUrl` from your authorization route.
+    4. Redirect the browser to the returned URL.
+    5. Call `exchangeCallback` from the registered callback route.
+    6. Store the returned tokens on your server.
+
+    ```js
+    import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
+
+    const clientId = process.env.STREAMABLE_CLIENT_ID;
+    const clientSecret = process.env.STREAMABLE_CLIENT_SECRET;
+    const redirectUri = "https://partner.example/oauth/callback";
+    const authorizationEndpoint = "https://auth.streamable.run/oauth2/auth";
+    const tokenEndpoint = "https://auth.streamable.run/oauth2/token";
+
+    if (!clientId || !clientSecret) {
+      throw new Error("Missing Streamable OAuth credentials.");
+    }
+
+    function formEncode(value) {
+      return new URLSearchParams({ value }).toString().slice("value=".length);
+    }
+
+    function basicClientAuthorization() {
+      const credentials = `${formEncode(clientId)}:${formEncode(clientSecret)}`;
+      return `Basic ${Buffer.from(credentials).toString("base64")}`;
+    }
+
+    function matchesState(expectedState, suppliedState) {
+      const expected = Buffer.from(expectedState);
+      const supplied = Buffer.from(suppliedState ?? "");
+      return (
+        expected.length === supplied.length &&
+        timingSafeEqual(expected, supplied)
+      );
+    }
+
+    export function createAuthorizationUrl(session) {
+      const state = randomBytes(32).toString("base64url");
+      const verifier = randomBytes(64).toString("base64url");
+      const challenge = createHash("sha256")
+        .update(verifier)
+        .digest("base64url");
+
+      // Store this only in a short-lived server-side session.
+      session.streamableOAuth = {
+        state,
+        verifier,
+        expiresAt: Date.now() + 10 * 60 * 1_000,
+      };
+
+      const url = new URL(authorizationEndpoint);
+      url.search = new URLSearchParams({
+        response_type: "code",
+        client_id: clientId,
+        redirect_uri: redirectUri,
+        scope: "ingests:read",
+        audience: "https://api.streamable.run/v1",
+        state,
+        code_challenge: challenge,
+        code_challenge_method: "S256",
+      }).toString();
+      return url.toString();
+    }
+
+    export async function exchangeCallback(callbackUrl, session) {
+      const callback = new URL(callbackUrl, redirectUri);
+      const attempt = session.streamableOAuth;
+
+      if (
+        !attempt ||
+        attempt.expiresAt < Date.now() ||
+        !matchesState(attempt.state, callback.searchParams.get("state"))
+      ) {
+        throw new Error("The OAuth callback state is invalid or expired.");
+      }
+      delete session.streamableOAuth; // Consume the validated attempt once.
+
+      if (callback.searchParams.has("error")) {
+        throw new Error("Streamable authorization was not completed.");
+      }
+      const code = callback.searchParams.get("code");
+      if (!code) throw new Error("The OAuth callback is missing its code.");
+
+      const response = await fetch(tokenEndpoint, {
+        method: "POST",
+        headers: {
+          Accept: "application/json",
+          Authorization: basicClientAuthorization(),
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+        body: new URLSearchParams({
+          grant_type: "authorization_code",
+          code,
+          redirect_uri: redirectUri,
+          code_verifier: attempt.verifier,
+        }),
+      });
+      const tokens = await response.json().catch(() => null);
+      if (
+        !response.ok ||
+        typeof tokens?.access_token !== "string" ||
+        typeof tokens?.refresh_token !== "string"
+      ) {
+        throw new Error("The authorization-code exchange failed.");
+      }
+      return tokens;
+    }
+    ```
+
+    Use `expires_in` to set the access-token expiration time.
+    Do not inspect the token format.
+
+    ### 4. Call the API
+
+    Send the access token as an HTTP bearer credential:
+
+    ```http
+    GET https://api.streamable.run/v1/ingests HTTP/1.1
+    Authorization: Bearer <access_token>
+    Accept: application/json
+    ```
+
+    The token must grant `ingests:read`.
+    The user must have an active Streamable subscription.
+    A successful response contains the user's publishing credentials.
+    The response uses `Cache-Control: private, no-store`.
+
+    ### 5. Refresh the access token
+
+    Each authorization-code exchange returns an access token and a rotating refresh token.
+    Send the stored refresh token to get new tokens:
+
+    ```http
+    POST https://auth.streamable.run/oauth2/token HTTP/1.1
+    Authorization: Basic <base64(client_id:client_secret)>
+    Content-Type: application/x-www-form-urlencoded
+
+    grant_type=refresh_token&refresh_token=<refresh_token>
+    ```
+
+    After each successful refresh, replace both stored tokens in one operation.
+    Do not reuse the old refresh token.
+
+    ### 6. Revoke tokens
+
+    When a user disconnects the app, revoke the access token:
+
+    ```http
+    POST https://auth.streamable.run/oauth2/revoke HTTP/1.1
+    Authorization: Basic <base64(client_id:client_secret)>
+    Content-Type: application/x-www-form-urlencoded
+
+    token=<access_token>&token_type_hint=access_token
+    ```
+
+    Then revoke the refresh token with `token_type_hint=refresh_token`.
+    Delete all stored copies after both requests.
+
+    Revocation succeeds if the token is already inactive.
+    Access-token revocation can take up to 30 seconds to reach the API.
+
+    ### 7. Protect credentials
+
+    Do not record these values in browser code, URLs, logs, analytics, traces,
+    crash reports, or shared caches:
+
+    - Client secrets
+    - Access tokens and refresh tokens
+    - Authorization codes and PKCE values
+    - Response bodies
+    - Stream keys and complete publishing URLs
+
+    Store `X-Request-Id` for support.
+  contact:
+    name: Streamable Support
+    email: team@streamable.run
+servers:
+  - url: https://api.streamable.run
+    description: Current environment
+tags:
+  - name: Ingests
+    description: Read the authorized user's owned RTMP, SRT, and SRTLA publishing endpoints.
+security:
+  - oauthAccessToken: [ingests:read]
+paths:
+  /v1/ingests:
+    get:
+      operationId: listIngests
+      summary: List the authorized user's owned ingests
+      description: >-
+        Returns every ingest owned directly by the token subject, up to the
+        product's bounded ingest limit. Publishing credentials are included in
+        successful responses, which are always marked private and no-store.
+      tags: [Ingests]
+      responses:
+        "200":
+          description: All owned ingests within the product's bounded ingest limit.
+          headers:
+            Cache-Control: { $ref: "#/components/headers/CacheControl" }
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [ingests]
+                properties:
+                  ingests:
+                    type: array
+                    maxItems: 100
+                    items: { $ref: "#/components/schemas/Ingest" }
+              example:
+                ingests:
+                  - id: jh75e2m4whr8cny7hgt9y4r7ns7fkt1q
+                    title: Primary Ingest
+                    endpoints:
+                      - protocol: rtmp
+                        url: rtmp://in.streamable.run:1935/live
+                        host: in.streamable.run
+                        port: 1935
+                        stream_key: input_live_example
+                      - protocol: rtmp
+                        url: rtmp://jp.in.streamable.run:1935/live
+                        host: jp.in.streamable.run
+                        port: 1935
+                        stream_key: input_live_example
+                      - protocol: srt
+                        url: srt://in.streamable.run:9000
+                        host: in.streamable.run
+                        port: 9000
+                        stream_id: input_live_example
+                      - protocol: srtla
+                        url: srtla://in.streamable.run:5000
+                        host: in.streamable.run
+                        port: 5000
+                        stream_id: input_live_example
+        "401": { $ref: "#/components/responses/InvalidToken" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "503": { $ref: "#/components/responses/Unavailable" }
+  /v1/ingests/{ingest_id}:
+    get:
+      operationId: getIngest
+      summary: Get one owned ingest
+      description: >-
+        Returns one ingest only when it is owned directly by the token subject.
+        A missing ingest and an ingest owned by another user produce the same
+        not-found response.
+      tags: [Ingests]
+      parameters:
+        - name: ingest_id
+          in: path
+          required: true
+          description: Unique ID of the ingest
+          schema:
+            type: string
+            pattern: "^[A-Za-z0-9_-]{1,256}$"
+      responses:
+        "200":
+          description: The owned ingest and its publishing endpoints.
+          headers:
+            Cache-Control: { $ref: "#/components/headers/CacheControl" }
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [ingest]
+                properties:
+                  ingest: { $ref: "#/components/schemas/Ingest" }
+        "401": { $ref: "#/components/responses/InvalidToken" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "503": { $ref: "#/components/responses/Unavailable" }
+components:
+  securitySchemes:
+    oauthAccessToken:
+      type: oauth2
+      description: Opaque access token issued by Streamable OAuth.
+      flows:
+        authorizationCode:
+          authorizationUrl: https://auth.streamable.run/oauth2/auth
+          tokenUrl: https://auth.streamable.run/oauth2/token
+          refreshUrl: https://auth.streamable.run/oauth2/token
+          scopes:
+            ingests:read: Read owned ingests, publishing URLs, and stream keys.
+  headers:
+    CacheControl:
+      description: Credential-bearing responses are private and must not be stored.
+      schema: { type: string, const: "private, no-store" }
+    RequestId:
+      description: Correlation identifier for support and incident investigation.
+      schema: { type: string, maxLength: 128 }
+    WwwAuthenticate:
+      description: OAuth bearer-token challenge for token or scope failures.
+      schema: { type: string }
+  schemas:
+    Ingest:
+      type: object
+      additionalProperties: false
+      required: [id, title, endpoints]
+      properties:
+        id: { type: string, maxLength: 256 }
+        title: { type: string, maxLength: 500 }
+        endpoints:
+          type: array
+          maxItems: 100
+          items: { $ref: "#/components/schemas/IngestEndpoint" }
+    IngestEndpoint:
+      oneOf:
+        - { $ref: "#/components/schemas/RtmpIngestEndpoint" }
+        - { $ref: "#/components/schemas/SrtIngestEndpoint" }
+        - { $ref: "#/components/schemas/SrtlaIngestEndpoint" }
+    RtmpIngestEndpoint:
+      type: object
+      additionalProperties: false
+      required: [protocol, url, host, port, stream_key]
+      properties:
+        protocol: { type: string, const: rtmp }
+        url:
+          type: string
+          format: uri
+          description: RTMP publishing URL, including the application path.
+          example: rtmp://in.streamable.run:1935/live
+        host:
+          {
+            type: string,
+            minLength: 1,
+            maxLength: 253,
+            example: in.streamable.run,
+          }
+        port: { type: integer, minimum: 1, maximum: 65535, example: 1935 }
+        stream_key:
+          type: string
+          description: RTMP publishing stream key.
+    SrtIngestEndpoint:
+      type: object
+      additionalProperties: false
+      required: [protocol, url, host, port, stream_id]
+      properties:
+        protocol: { type: string, const: srt }
+        url:
+          type: string
+          format: uri
+          description: SRT publishing URL without credential-bearing query parameters.
+          example: srt://in.streamable.run:9000
+        host:
+          {
+            type: string,
+            minLength: 1,
+            maxLength: 253,
+            example: in.streamable.run,
+          }
+        port: { type: integer, minimum: 1, maximum: 65535, example: 9000 }
+        stream_id:
+          type: string
+          description: SRT publishing stream ID.
+    SrtlaIngestEndpoint:
+      type: object
+      additionalProperties: false
+      required: [protocol, url, host, port, stream_id]
+      properties:
+        protocol: { type: string, const: srtla }
+        url:
+          type: string
+          format: uri
+          description: SRTLA regional relay URL without credential-bearing query parameters.
+          example: srtla://in.streamable.run:5000
+        host:
+          {
+            type: string,
+            minLength: 1,
+            maxLength: 253,
+            example: in.streamable.run,
+          }
+        port: { type: integer, minimum: 1, maximum: 65535, example: 5000 }
+        stream_id:
+          type: string
+          description: SRTLA publishing stream ID.
+    ErrorEnvelope:
+      type: object
+      additionalProperties: false
+      required: [error]
+      properties:
+        error:
+          type: object
+          additionalProperties: false
+          required: [code, message, requestId]
+          properties:
+            code: { type: string }
+            message: { type: string }
+            requestId: { type: string, maxLength: 128 }
+  responses:
+    InvalidToken:
+      description: The token is missing, invalid, expired, revoked, or not valid for this API.
+      headers:
+        Cache-Control: { $ref: "#/components/headers/CacheControl" }
+        X-Request-Id: { $ref: "#/components/headers/RequestId" }
+        WWW-Authenticate: { $ref: "#/components/headers/WwwAuthenticate" }
+      content:
+        application/json:
+          { schema: { $ref: "#/components/schemas/ErrorEnvelope" } }
+    Forbidden:
+      description: Insufficient scope or an active Streamable subscription is required.
+      headers:
+        Cache-Control: { $ref: "#/components/headers/CacheControl" }
+        X-Request-Id: { $ref: "#/components/headers/RequestId" }
+        WWW-Authenticate: { $ref: "#/components/headers/WwwAuthenticate" }
+      content:
+        application/json:
+          { schema: { $ref: "#/components/schemas/ErrorEnvelope" } }
+    NotFound:
+      description: The ingest is missing or is not owned by the token subject.
+      headers:
+        Cache-Control: { $ref: "#/components/headers/CacheControl" }
+        X-Request-Id: { $ref: "#/components/headers/RequestId" }
+      content:
+        application/json:
+          { schema: { $ref: "#/components/schemas/ErrorEnvelope" } }
+    Unavailable:
+      description: A required service is temporarily unavailable.
+      headers:
+        Cache-Control: { $ref: "#/components/headers/CacheControl" }
+        X-Request-Id: { $ref: "#/components/headers/RequestId" }
+      content:
+        application/json:
+          { schema: { $ref: "#/components/schemas/ErrorEnvelope" } }
