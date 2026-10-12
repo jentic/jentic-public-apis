@@ -177,11 +177,11 @@ For detailed information, please refer to the [structure documentation](STRUCTUR
 
 ## Run any of these APIs with Jentic One
 
-The specs in this directory aren't just for reading — an AI agent can **execute** any of them through [**Jentic One**](https://github.com/jentic/jentic-one), a self-hosted execution layer for AI agents. You register the APIs an agent may use and store the credentials once; the agent makes its calls through the credential-injecting **Broker**, which checks the agent's permissions, attaches the credential at execution time, and logs the call. Your agent never sees your keys, and nothing leaves your own infrastructure.
+The specs in this directory aren't just for reading. An AI agent can **execute** any of them through [**Jentic One**](https://github.com/jentic/jentic-one), a self-hosted execution layer for AI agents. You register the APIs an agent may use and store the credentials once; the agent makes its calls through the credential-injecting **Broker**, which checks the agent's permissions, attaches the credential at execution time, and logs the call. Your agent never sees your keys, and nothing leaves your own infrastructure.
 
 Stand up an instance and install the CLI by following the [Jentic One Quickstart](https://github.com/jentic/jentic-one#quickstart), then walk through [making your first brokered call](https://github.com/jentic/jentic-one/blob/main/docs/guides/first-call.md).
 
-With a running instance, point the `jentic` CLI at any vendor in this catalog and call it:
+With a running instance, point the `jentic` CLI at any vendor in this catalog and call it. The same steps are available through the Jentic One UI, or by an agent calling the `jentic` CLI tools directly:
 
 ```bash
 jentic catalog import stripe.com   # import an API from this directory (auto-promotes to live)
