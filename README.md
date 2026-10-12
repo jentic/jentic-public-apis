@@ -10,9 +10,9 @@
 
 ## Explore the API Directory
 
-[![Browse the API Directory](https://img.shields.io/badge/🔎_Browse_the_full_API_Directory-jentic.com%2Fapis-6C47FF?style=for-the-badge)](https://jentic.com/apis)
+[![Browse the API Index](https://img.shields.io/badge/🔎_Browse_the_full_API_Index-OpenAPI_specs-6C47FF?style=for-the-badge)](#jentic-public-apis)
 
-[![Categories](https://img.shields.io/badge/categories-22-6C47FF?style=flat-square)](https://jentic.com/apis)
+[![Categories](https://img.shields.io/badge/categories-22-6C47FF?style=flat-square)](#browse-by-category)
 [![AI-Readiness scored](https://img.shields.io/badge/AI--readiness-scored-40c463?style=flat-square)](https://github.com/jentic/jentic-api-scorecard)
 [![OpenAPI](https://img.shields.io/badge/format-OpenAPI_%2B_Arazzo-85EA2D?style=flat-square&logo=openapiinitiative&logoColor=black)](https://www.openapis.org/)
 [![License: CC0-1.0](https://img.shields.io/badge/license-CC0_1.0-blue?style=flat-square)](LICENSE.md)
@@ -38,7 +38,7 @@ Every API has a machine-readable **OpenAPI spec** in this repository, and most c
 
 ### Browse by category
 
-The directory is organized into 22 categories. Below is a small sample from a few. Expand a section, then follow **View all** for every API in that category on [jentic.com/apis](https://jentic.com/apis).
+The directory is organized into 22 categories. Below is a small sample from a few. Each API links to its OpenAPI spec in this repository; browse the full set via the [Quick access API Index](#jentic-public-apis) above.
 
 <details>
 <summary><b>🛠️ Developer Tools</b></summary>
@@ -50,7 +50,7 @@ The directory is organized into 22 categories. Below is a small sample from a fe
 | <img src="https://icons.duckduckgo.com/ip3/cloudflare.com.ico" width="16" height="16" align="top" /> **Cloudflare** | [📄 OpenAPI](apis/openapi/cloudflare.com/main/4.0.0/openapi.json) |
 | <img src="https://icons.duckduckgo.com/ip3/digitalocean.com.ico" width="16" height="16" align="top" /> **DigitalOcean** | [📄 OpenAPI](apis/openapi/digitalocean.com/main/2.0/openapi.json) |
 
-➡️ **[View all Developer Tools APIs →](https://jentic.com/apis?category=developer-tools)**
+➡️ More Developer Tools APIs are in the [Quick access API Index](#jentic-public-apis).
 
 </details>
 
@@ -62,7 +62,7 @@ The directory is organized into 22 categories. Below is a small sample from a fe
 | <img src="https://icons.duckduckgo.com/ip3/openai.com.ico" width="16" height="16" align="top" /> **OpenAI** | [📄 OpenAPI](apis/openapi/openai.com/main/2.3.0/openapi.json) |
 | <img src="https://icons.duckduckgo.com/ip3/anthropic.com.ico" width="16" height="16" align="top" /> **Anthropic** (Messages) | [📄 OpenAPI](apis/openapi/anthropic.com/messages/1.0.0/openapi.json) |
 
-➡️ **[View all AI/ML APIs →](https://jentic.com/apis?category=ai-ml)**
+➡️ More AI/ML APIs are in the [Quick access API Index](#jentic-public-apis).
 
 </details>
 
@@ -75,7 +75,7 @@ The directory is organized into 22 categories. Below is a small sample from a fe
 | <img src="https://icons.duckduckgo.com/ip3/plaid.com.ico" width="16" height="16" align="top" /> **Plaid** | [📄 OpenAPI](apis/openapi/plaid.com/main/2020-09-14_1.631.0/openapi.json) |
 | <img src="https://icons.duckduckgo.com/ip3/xero.com.ico" width="16" height="16" align="top" /> **Xero** Accounting | [📄 OpenAPI](apis/openapi/xero.com/xero_accounting/7.0.0/openapi.json) |
 
-➡️ **[View all Payments](https://jentic.com/apis?category=payments)** · **[Finance APIs →](https://jentic.com/apis?category=finance)**
+➡️ More Payments &amp; Finance APIs are in the [Quick access API Index](#jentic-public-apis).
 
 </details>
 
@@ -89,7 +89,7 @@ The directory is organized into 22 categories. Below is a small sample from a fe
 | <img src="https://icons.duckduckgo.com/ip3/twilio.com.ico" width="16" height="16" align="top" /> **Twilio** Messaging | [📄 OpenAPI](apis/openapi/twilio.com/twilio_messaging_v1/1.0.0/openapi.json) |
 | <img src="https://icons.duckduckgo.com/ip3/sendgrid.com.ico" width="16" height="16" align="top" /> **SendGrid** Mail | [📄 OpenAPI](apis/openapi/sendgrid.com/mail/1.0.0/openapi.json) |
 
-➡️ **[View all Communications APIs →](https://jentic.com/apis?category=communications)**
+➡️ More Communications APIs are in the [Quick access API Index](#jentic-public-apis).
 
 </details>
 
@@ -103,7 +103,7 @@ The directory is organized into 22 categories. Below is a small sample from a fe
 | <img src="https://icons.duckduckgo.com/ip3/google.com.ico" width="16" height="16" align="top" /> **Google Sheets** | [📄 OpenAPI](apis/openapi/googleapis.com/sheets/v4/openapi.json) |
 | <img src="https://icons.duckduckgo.com/ip3/notion.so.ico" width="16" height="16" align="top" /> **Notion** | [📄 OpenAPI](apis/openapi/notion.com/notion-api/2026-03-11/openapi.json) |
 
-➡️ **[View all Productivity APIs →](https://jentic.com/apis?category=productivity)**
+➡️ More Productivity APIs are in the [Quick access API Index](#jentic-public-apis).
 
 </details>
 
@@ -111,20 +111,20 @@ The directory is organized into 22 categories. Below is a small sample from a fe
 
 The directory goes well beyond the usual suspects. Here's a taste of the long tail:
 
-| API | What it's for | OpenAPI spec | jentic.com page |
-|-----|---------------|:------------:|-----------------|
-| <img src="https://icons.duckduckgo.com/ip3/facecheck.id.ico" width="16" height="16" align="top" /> **FaceCheck.ID** | Reverse face search | [📄 OpenAPI](apis/openapi/facecheck.id/main/v1.02/openapi.json) | [🔗 page](https://jentic.com/apis/facecheck.id/main) |
-| <img src="https://icons.duckduckgo.com/ip3/beatport.com.ico" width="16" height="16" align="top" /> **Beatport** | Electronic music catalog | [📄 OpenAPI](apis/openapi/beatport.com/main/4.0.0/openapi.json) | [🔗 page](https://jentic.com/apis/beatport.com/main) |
-| <img src="https://icons.duckduckgo.com/ip3/untappd.com.ico" width="16" height="16" align="top" /> **Untappd** | Beer check-ins &amp; ratings | [📄 OpenAPI](apis/openapi/untappd.com/main/4.0.0/openapi.json) | [🔗 page](https://jentic.com/apis/untappd.com/main) |
-| <img src="https://icons.duckduckgo.com/ip3/pokeapi.co.ico" width="16" height="16" align="top" /> **PokéAPI** | Pokémon data | [📄 OpenAPI](apis/openapi/pokeapi.co/main/2.7.0/openapi.json) | [🔗 page](https://jentic.com/apis/pokeapi.co/main) |
-| <img src="https://icons.duckduckgo.com/ip3/nasa.gov.ico" width="16" height="16" align="top" /> **NASA APOD** | Astronomy Picture of the Day | [📄 OpenAPI](apis/openapi/nasa.gov/apod/1.0.0/openapi.json) | [🔗 page](https://jentic.com/apis/nasa.gov/apod) |
-| <img src="https://icons.duckduckgo.com/ip3/musicbrainz.org.ico" width="16" height="16" align="top" /> **MusicBrainz** | Open music metadata | [📄 OpenAPI](apis/openapi/musicbrainz.org/main/2.0/openapi.json) | [🔗 page](https://jentic.com/apis/musicbrainz.org/main) |
-| <img src="https://icons.duckduckgo.com/ip3/openbrewerydb.org.ico" width="16" height="16" align="top" /> **Open Brewery DB** | Brewery directory | [📄 OpenAPI](apis/openapi/openbrewerydb.org/main/1.0/openapi.json) | [🔗 page](https://jentic.com/apis/openbrewerydb.org/main) |
-| <img src="https://icons.duckduckgo.com/ip3/tvmaze.com.ico" width="16" height="16" align="top" /> **TVmaze** | TV show schedules &amp; data | [📄 OpenAPI](apis/openapi/tvmaze.com/main/1.0/openapi.json) | [🔗 page](https://jentic.com/apis/tvmaze.com/main) |
-| <img src="https://icons.duckduckgo.com/ip3/chess.com.ico" width="16" height="16" align="top" /> **Chess.com** | Players, games &amp; stats | [📄 OpenAPI](apis/openapi/chess.com/main/1.0.0/openapi.json) | [🔗 page](https://jentic.com/apis/chess.com/main) |
-| <img src="https://icons.duckduckgo.com/ip3/lichess.org.ico" width="16" height="16" align="top" /> **Lichess** | Open chess platform | [📄 OpenAPI](apis/openapi/lichess.org/main/2.0.130/openapi.json) | [🔗 page](https://jentic.com/apis/lichess.org/main) |
+| API | What it's for | OpenAPI spec |
+|-----|---------------|:------------:|
+| <img src="https://icons.duckduckgo.com/ip3/facecheck.id.ico" width="16" height="16" align="top" /> **FaceCheck.ID** | Reverse face search | [📄 OpenAPI](apis/openapi/facecheck.id/main/v1.02/openapi.json) |
+| <img src="https://icons.duckduckgo.com/ip3/beatport.com.ico" width="16" height="16" align="top" /> **Beatport** | Electronic music catalog | [📄 OpenAPI](apis/openapi/beatport.com/main/4.0.0/openapi.json) |
+| <img src="https://icons.duckduckgo.com/ip3/untappd.com.ico" width="16" height="16" align="top" /> **Untappd** | Beer check-ins &amp; ratings | [📄 OpenAPI](apis/openapi/untappd.com/main/4.0.0/openapi.json) |
+| <img src="https://icons.duckduckgo.com/ip3/pokeapi.co.ico" width="16" height="16" align="top" /> **PokéAPI** | Pokémon data | [📄 OpenAPI](apis/openapi/pokeapi.co/main/2.7.0/openapi.json) |
+| <img src="https://icons.duckduckgo.com/ip3/nasa.gov.ico" width="16" height="16" align="top" /> **NASA APOD** | Astronomy Picture of the Day | [📄 OpenAPI](apis/openapi/nasa.gov/apod/1.0.0/openapi.json) |
+| <img src="https://icons.duckduckgo.com/ip3/musicbrainz.org.ico" width="16" height="16" align="top" /> **MusicBrainz** | Open music metadata | [📄 OpenAPI](apis/openapi/musicbrainz.org/main/2.0/openapi.json) |
+| <img src="https://icons.duckduckgo.com/ip3/openbrewerydb.org.ico" width="16" height="16" align="top" /> **Open Brewery DB** | Brewery directory | [📄 OpenAPI](apis/openapi/openbrewerydb.org/main/1.0/openapi.json) |
+| <img src="https://icons.duckduckgo.com/ip3/tvmaze.com.ico" width="16" height="16" align="top" /> **TVmaze** | TV show schedules &amp; data | [📄 OpenAPI](apis/openapi/tvmaze.com/main/1.0/openapi.json) |
+| <img src="https://icons.duckduckgo.com/ip3/chess.com.ico" width="16" height="16" align="top" /> **Chess.com** | Players, games &amp; stats | [📄 OpenAPI](apis/openapi/chess.com/main/1.0.0/openapi.json) |
+| <img src="https://icons.duckduckgo.com/ip3/lichess.org.ico" width="16" height="16" align="top" /> **Lichess** | Open chess platform | [📄 OpenAPI](apis/openapi/lichess.org/main/2.0.130/openapi.json) |
 
-> Looking for something else? Search the **[full API Directory →](https://jentic.com/apis)**, or jump into the raw specs via the [Quick access API Index](#jentic-public-apis) above.
+> Looking for something else? Jump into the raw specs via the [Quick access API Index](#jentic-public-apis) above.
 
 ## Overview
 
