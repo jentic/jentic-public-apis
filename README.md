@@ -177,23 +177,20 @@ For detailed information, please refer to the [structure documentation](STRUCTUR
 
 ## Run any of these APIs with Jentic One
 
-The specs in this directory aren't just for reading — your AI agent can **execute** any of them through [**Jentic One**](https://github.com/jentic/jentic-one), a self-hosted gateway for secure third-party API execution. You register the APIs an agent may use and store credentials once; the agent calls out through a credential-injecting broker, so your secrets stay on your own infrastructure and never reach the agent or any Jentic cloud.
+The specs in this directory aren't just for reading — an AI agent can **execute** any of them through [**Jentic One**](https://github.com/jentic/jentic-one), a self-hosted execution layer for AI agents. You register the APIs an agent may use and store the credentials once; the agent makes its calls through the credential-injecting **Broker**, which checks the agent's permissions, attaches the credential at execution time, and logs the call. Your agent never sees your keys, and nothing leaves your own infrastructure.
 
-Stand up an instance in one line:
+Stand up an instance and install the CLI by following the [Jentic One Quickstart](https://github.com/jentic/jentic-one#quickstart), then walk through [making your first brokered call](https://github.com/jentic/jentic-one/blob/main/docs/guides/first-call.md).
 
-```bash
-curl -fsSL "https://jentic.com/install.sh?src=claude-connector" | sh
-```
-
-Then point an agent at any vendor in this catalog and run it:
+With a running instance, point the `jentic` CLI at any vendor in this catalog and call it:
 
 ```bash
-jentic catalog import stripe.com   # pull a vendor's APIs from this directory
+jentic catalog import stripe.com   # import an API from this directory (auto-promotes to live)
 jentic search "create a payment"   # find the right operation
-jentic execute ...                 # call it through the broker
+jentic inspect <operation>         # see its method, params, and schemas
+jentic execute <operation> --json  # call it through the Broker
 ```
 
-Any of the thousands of APIs in this repository can be imported and executed this way. See the [Jentic One repository](https://github.com/jentic/jentic-one) to get started.
+Any of the thousands of APIs in this repository can be imported and executed this way.
 
 ## AI-Readiness Scoring
 
