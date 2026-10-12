@@ -1,6 +1,6 @@
 # APIs — I
 
-Browsing 99 APIs starting with **I**.
+Browsing 100 APIs starting with **I**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · **I** · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -8,6 +8,7 @@ Browsing 99 APIs starting with **I**.
 |--------|------|
 | [ibm.com](../../../../apis/openapi/ibm.com) | [8 APIs](../../../../apis/openapi/ibm.com) |
 | [icarusapi.keatext.ai](../../../../apis/openapi/icarusapi.keatext.ai) | [main](../../../../apis/openapi/icarusapi.keatext.ai/main) |
+| [icd10api.com](../../../../apis/openapi/icd10api.com) | [main](../../../../apis/openapi/icd10api.com/main) |
 | [iconfinder.com](../../../../apis/openapi/iconfinder.com) | [main](../../../../apis/openapi/iconfinder.com/main) |
 | [icy.tools](../../../../apis/openapi/icy.tools) | [main](../../../../apis/openapi/icy.tools/main) |
 | [id.me](../../../../apis/openapi/id.me) | [main](../../../../apis/openapi/id.me/main) |
