@@ -1,0 +1,1257 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "pdfs.build API",
+    "version": "2.0",
+    "summary": "Render PDFs from templates, manage templates, webhooks, embedded editor sessions and delegated agent access.",
+    "description": "All requests are authenticated with an organization-scoped API key (`prs_...`) sent as a Bearer token. Create keys under **Settings → API Keys** in the dashboard or with the MCP `create_api_key` tool. Keys are shown once.\n\nThe organization in every `/v2` URL must match the key's organization, otherwise the request fails with `403 organization_scope_mismatch`.\n\n**Errors** are JSON with a top-level `error` string — a machine-readable code for most failures, a phrase for a few legacy ones — usually alongside a human-readable `message`. Data validation and template compilation failures carry `details` / `diagnostics` instead of a `message`.\n\n**Versions.** `/v2` addresses templates by an external id you control. The legacy `/v1` routes identify templates by their generated internal id and remain supported for existing integrations.\n\n**Timestamps.** Objects served by the render service (templates, render jobs, logs, webhook endpoints) carry UTC timestamps in ISO 8601 form without a timezone suffix, e.g. `2026-08-30T12:00:00.123456`. Embedded-editor sessions and delegated access return RFC 3339 with a trailing `Z`.\n\nThe narrative guide — authentication, webhook signatures, the MCP server, migrating from v1 — lives at https://pdfs.build/docs/ (Markdown mirror: https://pdfs.build/docs.md).",
+    "contact": { "name": "pdfs.build", "url": "https://pdfs.build", "email": "hello@pdfs.build" },
+    "termsOfService": "https://pdfs.build/terms/",
+    "license": { "name": "Proprietary", "url": "https://pdfs.build/terms/" }
+  },
+  "externalDocs": { "description": "API guide: authentication, errors, webhooks, MCP, migrating from v1", "url": "https://pdfs.build/docs/" },
+  "servers": [{ "url": "https://api.pdfs.build", "description": "Production" }],
+  "security": [{ "apiKey": [] }],
+  "tags": [
+    { "name": "Templates", "description": "Create, inspect, publish and rename templates. Only published templates can be rendered over the API." },
+    { "name": "Rendering", "description": "Compile a published template with your data. Synchronous renders return the PDF; async renders return a job handle and notify webhooks." },
+    { "name": "Render jobs", "description": "Status and download for async renders." },
+    { "name": "Render logs", "description": "Audit trail of every render — API, app, and MCP." },
+    { "name": "Webhooks", "description": "Outbound endpoints notified when API renders complete or fail. Creating, rotating and testing require the Pro plan or higher; listing, updating, deleting and reading deliveries do not." },
+    { "name": "Embedded editor", "description": "Exchange an API key for a short-lived, template-scoped session token that mounts the editor in your product with `@pdfsbuild/react`. Requires the Scale Plus (or a custom) plan. Guide: https://pdfs.build/embed/" },
+    { "name": "Template gallery", "description": "The pdfs.build design library over the API: list the designs, preview one, and copy one into your organization in a single call. The Odoo module's \"Add designs for Odoo\" button uses these." },
+    { "name": "Delegated agents", "description": "Let your customers connect their own AI assistant (over MCP) to the templates under their tenant scope. Requires the Scale Plus plan, the organization opt-in, and an API key owned by an organization owner or admin." },
+    { "name": "Legacy v1", "description": "Templates addressed by their generated internal id. Supported, but new integrations should use `/v2`." }
+  ],
+  "paths": {
+    "/v2/organizations/{organizationId}/templates": {
+      "parameters": [{ "$ref": "#/components/parameters/organizationId" }],
+      "get": {
+        "tags": ["Templates"],
+        "summary": "List templates",
+        "operationId": "listTemplates",
+        "description": "Returns the published templates in the organization. Drafts created by the key's owner are not listed but remain reachable through the single-template endpoint.",
+        "responses": {
+          "200": { "description": "Published templates.", "content": { "application/json": { "schema": { "type": "array", "items": { "$ref": "#/components/schemas/TemplateSummary" } } } } },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/OrganizationScopeMismatch" }
+        }
+      },
+      "post": {
+        "tags": ["Templates"],
+        "summary": "Create template",
+        "operationId": "createTemplate",
+        "description": "Creates a draft template owned by the user that minted the API key. Drafts are not renderable until published. The source is normalized through the same pipeline the app uses and should define a top-level `#let render(...)` entry function whose named parameters match the schema fields.\n\nExternal ids are case-sensitive and stay reserved after a template is deleted.",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CreateTemplateRequest" } } } },
+        "responses": {
+          "201": { "description": "The created draft, including both the generated `internalId` and your `externalId`.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Template" } } } },
+          "400": { "description": "`invalid_external_id`, `invalid_scope_path`, a missing `name` or `code`, or `schemaLocked` set while `sampleData` contains fields the schema does not declare.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "description": "`organization_scope_mismatch`, or `scope_path_admin_required` when `scopePath` is set with a key that does not belong to an organization owner or admin.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "409": { "description": "`external_id_conflict` — the external id is already reserved in this organization.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      }
+    },
+    "/v2/organizations/{organizationId}/templates/{externalId}": {
+      "parameters": [{ "$ref": "#/components/parameters/organizationId" }, { "$ref": "#/components/parameters/externalId" }],
+      "get": {
+        "tags": ["Templates"],
+        "summary": "Get template",
+        "operationId": "getTemplate",
+        "description": "Returns a template's metadata, JSON Schema, sample data, `schemaLocked` state and tenant `scopePath`. Use `schema` to know which keys your render `data` must include. Published templates are visible to the whole organization; drafts only to their owner. Pass `version` to get the `schema` and `sampleData` of the version a render with that selector compiles, instead of the working copy.",
+        "parameters": [{ "$ref": "#/components/parameters/resolveImages" }, { "$ref": "#/components/parameters/templateVersion" }],
+        "responses": {
+          "200": { "description": "The template.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Template" } } } },
+          "400": { "$ref": "#/components/responses/InvalidExternalId" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/OrganizationScopeMismatch" },
+          "404": { "$ref": "#/components/responses/TemplateNotFound" }
+        }
+      },
+      "patch": {
+        "tags": ["Templates"],
+        "summary": "Rename external id or set tenant scope",
+        "operationId": "updateTemplate",
+        "description": "Renames the template's external id and/or sets its delegated-access `scopePath`. At least one field is required. After a rename the old v2 URL stops resolving immediately; the internal id, the v1 URL and historical render-log references do not change. Requires template ownership or organization admin access; `scopePath` additionally requires a key owned by an organization owner or admin.",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/UpdateTemplateRequest" } } } },
+        "responses": {
+          "200": { "description": "The updated template.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Template" } } } },
+          "400": { "description": "Neither field provided, `invalid_external_id`, or `invalid_scope_path`.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "description": "`organization_scope_mismatch`, `forbidden` (no edit access), or `scope_path_admin_required`.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "404": { "$ref": "#/components/responses/TemplateNotFound" },
+          "409": { "description": "`external_id_conflict` — the new external id is already reserved.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      }
+    },
+    "/v2/organizations/{organizationId}/templates/{externalId}/publish": {
+      "parameters": [{ "$ref": "#/components/parameters/organizationId" }, { "$ref": "#/components/parameters/externalId" }],
+      "post": {
+        "tags": ["Templates"],
+        "summary": "Publish template",
+        "operationId": "publishTemplate",
+        "description": "Promotes a draft to `published`: the source is normalized, compiled against the default fixture suite, and frozen as a new version that the `latest` channel points at. Published templates are visible to the whole organization and renderable over the API. The caller must own the template or be an organization admin/owner. Enforces the plan's published-template limit.",
+        "requestBody": { "required": false, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/PublishTemplateRequest" } } } },
+        "responses": {
+          "200": { "description": "The published template.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Template" } } } },
+          "400": { "description": "`already_published`, or `invalid_external_id`.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "402": { "description": "`template_limit_reached` — unpublish a template or upgrade the plan.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "403": { "description": "`organization_scope_mismatch` or `forbidden`.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "404": { "$ref": "#/components/responses/TemplateNotFound" },
+          "422": { "description": "The template does not compile against its sample data.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CompilationError" } } } }
+        }
+      }
+    },
+    "/v2/organizations/{organizationId}/templates/{externalId}/unpublish": {
+      "parameters": [{ "$ref": "#/components/parameters/organizationId" }, { "$ref": "#/components/parameters/externalId" }],
+      "post": {
+        "tags": ["Templates"],
+        "summary": "Unpublish template",
+        "operationId": "unpublishTemplate",
+        "description": "Moves a published template back to `draft`. It can no longer be rendered over the API and disappears from organization listings. Version history and render logs are preserved; republishing promotes a new version.",
+        "responses": {
+          "200": { "description": "The template, now a draft.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Template" } } } },
+          "400": { "description": "`already_draft`, or `invalid_external_id`.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "description": "`organization_scope_mismatch` or `forbidden`.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "404": { "$ref": "#/components/responses/TemplateNotFound" }
+        }
+      }
+    },
+    "/v2/organizations/{organizationId}/templates/{externalId}/render": {
+      "parameters": [{ "$ref": "#/components/parameters/organizationId" }, { "$ref": "#/components/parameters/externalId" }],
+      "post": {
+        "tags": ["Rendering"],
+        "summary": "Render PDF",
+        "operationId": "renderTemplate",
+        "description": "Validates `data` against the template's schema, compiles the template, and returns the PDF. Requires a published template and a plan with REST API access (Starter and higher).\n\nSend `\"async\": true` to render in the background instead: the response is `202` with a job handle; poll the job or wait for the `render.completed` / `render.failed` webhook. Async renders count toward the same monthly quota as synchronous ones.\n\nWebhook events for this render go to every enabled endpoint of the organization, or only to the endpoints in `webhookIds` when provided (an empty list sends nowhere).",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/RenderRequest" }, "examples": { "sync": { "summary": "Synchronous render", "value": { "data": { "company": "Acme Corp", "items": [{ "name": "Consulting", "qty": 3, "price": 150 }], "due_date": "2026-06-01" } } }, "async": { "summary": "Async render, restricted to one webhook endpoint", "value": { "data": { "company": "Acme Corp" }, "async": true, "webhookIds": ["whe_5xg6Kq0PSTeK1bXf3eDR3w"] } }, "pinned": { "summary": "Render a specific version", "value": { "data": { "company": "Acme Corp" }, "version": 4 } } } } } },
+        "responses": {
+          "200": { "description": "The rendered PDF.", "headers": { "Content-Disposition": { "schema": { "type": "string" }, "description": "`inline; filename=\"<template>.pdf\"`" } }, "content": { "application/pdf": { "schema": { "type": "string", "format": "binary" } } } },
+          "202": { "description": "Async render accepted and queued.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/RenderJobAccepted" } } } },
+          "400": { "description": "`data` does not match the template schema (`Validation failed` with `details`), an invalid `version` selector, or `invalid_external_id`.", "content": { "application/json": { "schema": { "anyOf": [{ "$ref": "#/components/schemas/ValidationError" }, { "$ref": "#/components/schemas/Error" }] } } } },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "402": { "description": "`api_renders_not_allowed_on_free` — REST renders need Starter or higher.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "403": { "description": "`draft_not_renderable` (publish first) or `organization_scope_mismatch`.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "404": { "$ref": "#/components/responses/TemplateNotFound" },
+          "422": { "description": "The template failed to compile with this data (`Compilation failed` with `diagnostics`), or `unknown_webhook_ids`.", "content": { "application/json": { "schema": { "anyOf": [{ "$ref": "#/components/schemas/CompilationError" }, { "$ref": "#/components/schemas/Error" }] } } } },
+          "429": { "$ref": "#/components/responses/QuotaExceeded" },
+          "500": { "$ref": "#/components/responses/InternalError" }
+        }
+      }
+    },
+    "/v2/organizations/{organizationId}/templates/{externalId}/batches": {
+      "parameters": [{ "$ref": "#/components/parameters/organizationId" }, { "$ref": "#/components/parameters/externalId" }],
+      "post": {
+        "tags": ["Rendering"],
+        "summary": "Render a batch",
+        "operationId": "createRenderBatch",
+        "description": "Queues one async render per entry in `items`, up to 500, against one template and one version. The version is resolved when the batch is submitted, so promoting a channel mid-batch does not mix versions. The exception is a template that renders its live draft (nothing promoted yet, or a legacy auto-publish template): the draft is not pinned, so edits made mid-batch can reach later items. The whole batch is admitted against your monthly quota or rejected with `429`; a batch is never partially queued.\n\nItems emit no per-render webhooks. On plans with webhooks (Pro and higher), one `batch.completed` event goes to every enabled endpoint (or the `webhookIds` given) once every item has succeeded or failed. Poll `statusUrl` for per-item status and download links.",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/RenderBatchRequest" }, "example": { "items": [{ "data": { "company": "Acme Corp", "total": 450 } }, { "data": { "company": "Globex", "total": 1200 } }], "webhookIds": ["whe_5xg6Kq0PSTeK1bXf3eDR3w"] } } } },
+        "responses": {
+          "202": { "description": "Batch accepted and queued.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/RenderBatchAccepted" } } } },
+          "400": { "description": "An invalid or unrenderable `version` selector, or `invalid_external_id`.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "402": { "description": "`api_renders_not_allowed_on_free`: REST renders need Starter or higher.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "403": { "$ref": "#/components/responses/OrganizationScopeMismatch" },
+          "404": { "$ref": "#/components/responses/TemplateNotFound" },
+          "413": { "description": "The request body exceeds 10 MB." },
+          "422": { "description": "`invalid_batch_size` (0 or more than 500 items) or `unknown_webhook_ids`.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "429": { "$ref": "#/components/responses/QuotaExceeded" },
+          "500": { "$ref": "#/components/responses/InternalError" }
+        }
+      }
+    },
+    "/v2/organizations/{organizationId}/renders/{jobId}": {
+      "parameters": [{ "$ref": "#/components/parameters/organizationId" }, { "$ref": "#/components/parameters/jobId" }],
+      "get": {
+        "tags": ["Render jobs"],
+        "summary": "Get render job",
+        "operationId": "getRenderJob",
+        "responses": {
+          "200": { "description": "Job status. `downloadUrl` appears once the job has succeeded.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/RenderJob" } } } },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/OrganizationScopeMismatch" },
+          "404": { "description": "Unknown job.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" }, "example": { "error": "Render job not found" } } } }
+        }
+      }
+    },
+    "/v2/organizations/{organizationId}/renders/{jobId}/pdf": {
+      "parameters": [{ "$ref": "#/components/parameters/organizationId" }, { "$ref": "#/components/parameters/jobId" }],
+      "get": {
+        "tags": ["Render jobs"],
+        "summary": "Download async render",
+        "operationId": "getRenderJobPdf",
+        "description": "The PDF of a succeeded async render. Requires the same API key that created the job.",
+        "responses": {
+          "200": { "description": "The rendered PDF.", "content": { "application/pdf": { "schema": { "type": "string", "format": "binary" } } } },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/OrganizationScopeMismatch" },
+          "404": { "description": "Unknown job.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" }, "example": { "error": "Render job not found" } } } },
+          "409": { "description": "The job has not succeeded (yet).", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" }, "example": { "error": "Render job is 'processing'; the PDF is only available once the job has succeeded" } } } }
+        }
+      }
+    },
+    "/v2/organizations/{organizationId}/batches/{batchId}": {
+      "parameters": [{ "$ref": "#/components/parameters/organizationId" }, { "$ref": "#/components/parameters/batchId" }],
+      "get": {
+        "tags": ["Render jobs"],
+        "summary": "Get render batch",
+        "operationId": "getRenderBatch",
+        "responses": {
+          "200": { "description": "Batch progress and every item's status, in submission order.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/RenderBatch" } } } },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/OrganizationScopeMismatch" },
+          "404": { "description": "Unknown batch.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" }, "example": { "error": "Render batch not found" } } } }
+        }
+      }
+    },
+    "/v2/organizations/{organizationId}/templates/{externalId}/logs": {
+      "parameters": [{ "$ref": "#/components/parameters/organizationId" }, { "$ref": "#/components/parameters/externalId" }],
+      "get": {
+        "tags": ["Render logs"],
+        "summary": "List render logs for a template",
+        "operationId": "listTemplateLogs",
+        "parameters": [{ "$ref": "#/components/parameters/limit" }, { "$ref": "#/components/parameters/offset" }, { "$ref": "#/components/parameters/logStatus" }, { "$ref": "#/components/parameters/logSource" }],
+        "responses": {
+          "200": { "description": "Newest first.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/RenderLogList" } } } },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/OrganizationScopeMismatch" },
+          "404": { "$ref": "#/components/responses/TemplateNotFound" }
+        }
+      }
+    },
+    "/v2/organizations/{organizationId}/logs": {
+      "parameters": [{ "$ref": "#/components/parameters/organizationId" }],
+      "get": {
+        "tags": ["Render logs"],
+        "summary": "List render logs",
+        "operationId": "listLogs",
+        "description": "Paginated render events for the organization. Each log carries `templateInternalId` and the `templateExternalId` captured when the render happened, so later renames do not rewrite history — filter by the historical alias with `externalId`.",
+        "parameters": [
+          { "$ref": "#/components/parameters/limit" }, { "$ref": "#/components/parameters/offset" }, { "$ref": "#/components/parameters/logStatus" }, { "$ref": "#/components/parameters/logSource" },
+          { "name": "externalId", "in": "query", "schema": { "type": "string" }, "description": "Only logs whose template external id was this value at render time." },
+          { "name": "search", "in": "query", "schema": { "type": "string" }, "description": "Free-text match on template name." },
+          { "name": "from", "in": "query", "schema": { "type": "string", "format": "date-time" }, "description": "Only logs created at or after this instant (ISO 8601)." },
+          { "name": "to", "in": "query", "schema": { "type": "string", "format": "date-time" }, "description": "Only logs created before this instant (ISO 8601)." }
+        ],
+        "responses": {
+          "200": { "description": "Newest first.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/RenderLogList" } } } },
+          "400": { "$ref": "#/components/responses/InvalidExternalId" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/OrganizationScopeMismatch" }
+        }
+      }
+    },
+    "/v2/organizations/{organizationId}/logs/{logId}": {
+      "parameters": [{ "$ref": "#/components/parameters/organizationId" }, { "$ref": "#/components/parameters/logId" }],
+      "get": {
+        "tags": ["Render logs"],
+        "summary": "Get render log",
+        "operationId": "getLog",
+        "description": "One render event, including the `requestPayload` that was rendered.",
+        "responses": {
+          "200": { "description": "The log entry.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/RenderLogDetail" } } } },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/OrganizationScopeMismatch" },
+          "404": { "description": "Unknown log id.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" }, "example": { "error": "Log not found" } } } }
+        }
+      }
+    },
+    "/v2/organizations/{organizationId}/webhooks": {
+      "parameters": [{ "$ref": "#/components/parameters/organizationId" }],
+      "get": {
+        "tags": ["Webhooks"],
+        "summary": "List webhook endpoints",
+        "operationId": "listWebhookEndpoints",
+        "description": "Secrets are never returned.",
+        "responses": {
+          "200": { "description": "Endpoints, newest first.", "content": { "application/json": { "schema": { "type": "array", "items": { "$ref": "#/components/schemas/WebhookEndpoint" } } } } },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/OrganizationScopeMismatch" }
+        }
+      },
+      "post": {
+        "tags": ["Webhooks"],
+        "summary": "Create webhook endpoint",
+        "operationId": "createWebhookEndpoint",
+        "description": "Registers a public http(s) URL. Non-global destinations (loopback, private, link-local, CGNAT and other reserved ranges, IPv4 and IPv6) are rejected at registration and re-validated before every delivery. The signing secret (`whsec_...`) is returned exactly once. Requires Pro or higher.",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CreateWebhookRequest" } } } },
+        "responses": {
+          "201": { "description": "The endpoint and its secret.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/WebhookEndpointWithSecret" } } } },
+          "400": { "$ref": "#/components/responses/WebhookUrlRejected" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/WebhookPlanGated" }
+        }
+      }
+    },
+    "/v2/organizations/{organizationId}/webhooks/{endpointId}": {
+      "parameters": [{ "$ref": "#/components/parameters/organizationId" }, { "$ref": "#/components/parameters/endpointId" }],
+      "patch": {
+        "tags": ["Webhooks"],
+        "summary": "Update webhook endpoint",
+        "operationId": "updateWebhookEndpoint",
+        "description": "Change the URL, description or enabled state. Disabling an endpoint stops future deliveries; deliveries already queued are dropped. Not plan-gated.",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/UpdateWebhookRequest" } } } },
+        "responses": {
+          "200": { "description": "The updated endpoint.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/WebhookEndpoint" } } } },
+          "400": { "$ref": "#/components/responses/WebhookUrlRejected" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/OrganizationScopeMismatch" },
+          "404": { "$ref": "#/components/responses/WebhookNotFound" }
+        }
+      },
+      "delete": {
+        "tags": ["Webhooks"],
+        "summary": "Delete webhook endpoint",
+        "operationId": "deleteWebhookEndpoint",
+        "description": "Soft delete. Not plan-gated.",
+        "responses": {
+          "200": { "$ref": "#/components/responses/Ok" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/OrganizationScopeMismatch" },
+          "404": { "$ref": "#/components/responses/WebhookNotFound" }
+        }
+      }
+    },
+    "/v2/organizations/{organizationId}/webhooks/{endpointId}/rotate-secret": {
+      "parameters": [{ "$ref": "#/components/parameters/organizationId" }, { "$ref": "#/components/parameters/endpointId" }],
+      "post": {
+        "tags": ["Webhooks"],
+        "summary": "Rotate signing secret",
+        "operationId": "rotateWebhookSecret",
+        "description": "Replaces the endpoint's secret. The new secret is returned exactly once. Requires Pro or higher.",
+        "responses": {
+          "200": { "description": "The endpoint and its new secret.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/WebhookEndpointWithSecret" } } } },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/WebhookPlanGated" },
+          "404": { "$ref": "#/components/responses/WebhookNotFound" }
+        }
+      }
+    },
+    "/v2/organizations/{organizationId}/webhooks/{endpointId}/test": {
+      "parameters": [{ "$ref": "#/components/parameters/organizationId" }, { "$ref": "#/components/parameters/endpointId" }],
+      "post": {
+        "tags": ["Webhooks"],
+        "summary": "Send test event",
+        "operationId": "testWebhookEndpoint",
+        "description": "Enqueues a `webhook.test` event to this endpoint. The body is optional; a missing or malformed body falls back to the default message. Requires Pro or higher.",
+        "requestBody": { "required": false, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/WebhookTestRequest" } } } },
+        "responses": {
+          "201": { "description": "The queued delivery.", "content": { "application/json": { "schema": { "type": "object", "required": ["delivery"], "properties": { "delivery": { "$ref": "#/components/schemas/WebhookDelivery" } } } } } },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/WebhookPlanGated" },
+          "404": { "$ref": "#/components/responses/WebhookNotFound" }
+        }
+      }
+    },
+    "/v2/organizations/{organizationId}/webhooks/{endpointId}/deliveries": {
+      "parameters": [{ "$ref": "#/components/parameters/organizationId" }, { "$ref": "#/components/parameters/endpointId" }],
+      "get": {
+        "tags": ["Webhooks"],
+        "summary": "List recent deliveries",
+        "operationId": "listWebhookDeliveries",
+        "description": "The 50 most recent deliveries to this endpoint, for debugging. Not plan-gated.",
+        "responses": {
+          "200": { "description": "Deliveries, newest first.", "content": { "application/json": { "schema": { "type": "array", "items": { "$ref": "#/components/schemas/WebhookDelivery" } } } } },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/OrganizationScopeMismatch" },
+          "404": { "$ref": "#/components/responses/WebhookNotFound" }
+        }
+      }
+    },
+    "/v2/organizations/{organizationId}/templates/{externalId}/embed-sessions": {
+      "parameters": [{ "$ref": "#/components/parameters/organizationId" }, { "$ref": "#/components/parameters/externalId" }],
+      "post": {
+        "tags": ["Embedded editor"],
+        "summary": "Create embedded editor session",
+        "operationId": "createEmbedSession",
+        "description": "Called from your backend. Exchanges the API key for a short-lived session token (`emb_...`) scoped to one template and one of your end users; your frontend mounts the editor with that token. Every AI turn in the session is metered against `externalTenantId`. Requires the Scale Plus (or a custom) plan.",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/EmbedSessionRequest" } } } },
+        "responses": {
+          "201": { "description": "The session token. Hand `token` to the browser; never the API key.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/EmbedSession" } } } },
+          "400": { "description": "Invalid request body; `issues` describes each field.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ValidationIssues" } } } },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "description": "`embedded_plan_required` or `organization_scope_mismatch`.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "404": { "description": "The template is not accessible to this key.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "502": { "$ref": "#/components/responses/BackendUnavailable" }
+        }
+      }
+    },
+    "/v2/organizations/{organizationId}/embed-sessions/{sessionId}": {
+      "parameters": [{ "$ref": "#/components/parameters/organizationId" }, { "$ref": "#/components/parameters/sessionId" }],
+      "delete": {
+        "tags": ["Embedded editor"],
+        "summary": "Revoke embedded editor session",
+        "operationId": "revokeEmbedSession",
+        "description": "Ends a session before it expires, e.g. when the end user signs out of your product.",
+        "responses": {
+          "200": { "$ref": "#/components/responses/Ok" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/OrganizationScopeMismatch" },
+          "404": { "description": "Unknown or already expired session.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" }, "example": { "error": "Session not found" } } } },
+          "502": { "$ref": "#/components/responses/BackendUnavailable" }
+        }
+      }
+    },
+    "/v2/organizations/{organizationId}/gallery": {
+      "parameters": [{ "$ref": "#/components/parameters/organizationId" }],
+      "get": {
+        "tags": ["Template gallery"],
+        "summary": "List gallery designs",
+        "operationId": "listGalleryTemplates",
+        "description": "Every design in the pdfs.build gallery, without its source. Filter with `category` (for example `odoo`, whose designs are named after Odoo's own fields) or `useCase` (for example `odoo-invoice`). The `id` is what `POST …/templates/from-gallery` takes.",
+        "parameters": [
+          { "name": "category", "in": "query", "schema": { "type": "string" }, "description": "Only designs in this category, e.g. `odoo`, `finance`." },
+          { "name": "useCase", "in": "query", "schema": { "type": "string" }, "description": "Only designs for this document type, e.g. `odoo-invoice`, `invoice`." }
+        ],
+        "responses": {
+          "200": {
+            "description": "The matching designs and the per-category counts of the whole library.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/GalleryListing" } } }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/OrganizationScopeMismatch" },
+          "502": { "$ref": "#/components/responses/BackendUnavailable" }
+        }
+      }
+    },
+    "/v2/organizations/{organizationId}/gallery/{galleryId}/preview": {
+      "parameters": [{ "$ref": "#/components/parameters/organizationId" }, { "$ref": "#/components/parameters/galleryId" }],
+      "get": {
+        "tags": ["Template gallery"],
+        "summary": "Preview a gallery design",
+        "operationId": "previewGalleryTemplate",
+        "description": "Page 1 of the design rendered from its own sample data, as a PNG. Rendered once and cached, so the first call takes a second and later ones do not.",
+        "responses": {
+          "200": { "description": "The page-1 render.", "content": { "image/png": { "schema": { "type": "string", "format": "binary" } } } },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/OrganizationScopeMismatch" },
+          "404": { "description": "`gallery_template_not_found`, or `preview_unavailable` when the design did not render.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "502": { "$ref": "#/components/responses/BackendUnavailable" }
+        }
+      }
+    },
+    "/v2/organizations/{organizationId}/templates/from-gallery": {
+      "parameters": [{ "$ref": "#/components/parameters/organizationId" }],
+      "post": {
+        "tags": ["Template gallery"],
+        "summary": "Add a gallery design to the organization",
+        "operationId": "createTemplateFromGallery",
+        "description": "Copies a gallery design into your organization as a template of your own and, unless `publish` is `false`, publishes it in the same call so the render API can use it at once. Give it an `externalId` to render it by a slug of your choosing; the default is the new template's UUID. The copy is yours from then on: edits, versions and the published-template quota are the organization's, and the gallery is never rendered from directly.",
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/FromGalleryRequest" } } }
+        },
+        "responses": {
+          "201": {
+            "description": "The new template. `publishedVersion` is the version the API serves, or `null` when `publish` was `false`.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/FromGalleryResult" } } }
+          },
+          "400": {
+            "description": "`invalid_from_gallery_request` (with `issues`) or `invalid_external_id`.",
+            "content": { "application/json": { "schema": { "anyOf": [{ "$ref": "#/components/schemas/ValidationIssues" }, { "$ref": "#/components/schemas/Error" }] } } }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "402": { "description": "`template_limit_reached`: publishing one more template would pass the plan's published-template limit.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "403": { "$ref": "#/components/responses/OrganizationScopeMismatch" },
+          "404": { "description": "`gallery_template_not_found`.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "409": { "description": "`external_id_conflict`: the organization already has a template with that external id.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "422": { "description": "The design failed the compile gate; the draft is kept and returned as `template`.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "502": { "$ref": "#/components/responses/BackendUnavailable" }
+        }
+      }
+    },
+    "/v2/organizations/{organizationId}/delegated/tickets": {
+      "parameters": [{ "$ref": "#/components/parameters/organizationId" }],
+      "post": {
+        "tags": ["Delegated agents"],
+        "summary": "Mint connect ticket",
+        "operationId": "createDelegatedTicket",
+        "description": "Mints a single-use connect code for one of your end users. Show them `connectCode` and `mcpServerUrl`; they add the MCP server to their assistant and paste the code on the consent screen. Redeeming it creates a delegated grant that can reach only templates whose `scopePath` starts with one of `scopePrefixes`, using only the tools in `allowedTools`. Every prefix must start with `externalTenantId/`.",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ConnectTicketRequest" } } } },
+        "responses": {
+          "201": { "description": "The ticket. `connectCode` is single-use and short-lived.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ConnectTicket" } } } },
+          "400": { "description": "`invalid_connect_ticket_request` (with `issues`) or `invalid_scope` (a prefix does not start with the tenant id, or an unknown tool).", "content": { "application/json": { "schema": { "anyOf": [{ "$ref": "#/components/schemas/ValidationIssues" }, { "$ref": "#/components/schemas/Error" }] } } } },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/DelegatedForbidden" },
+          "502": { "$ref": "#/components/responses/BackendUnavailable" }
+        }
+      }
+    },
+    "/v2/organizations/{organizationId}/delegated/grants": {
+      "parameters": [{ "$ref": "#/components/parameters/organizationId" }],
+      "get": {
+        "tags": ["Delegated agents"],
+        "summary": "List delegated grants",
+        "operationId": "listDelegatedGrants",
+        "description": "Every connection your customers have made, including expired and revoked ones.",
+        "responses": {
+          "200": { "description": "Grants, newest first.", "content": { "application/json": { "schema": { "type": "object", "required": ["grants"], "properties": { "grants": { "type": "array", "items": { "$ref": "#/components/schemas/DelegatedGrant" } } } } } } },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/DelegatedForbidden" },
+          "502": { "$ref": "#/components/responses/BackendUnavailable" }
+        }
+      }
+    },
+    "/v2/organizations/{organizationId}/delegated/grants/{grantId}": {
+      "parameters": [{ "$ref": "#/components/parameters/organizationId" }, { "$ref": "#/components/parameters/grantId" }],
+      "delete": {
+        "tags": ["Delegated agents"],
+        "summary": "Revoke delegated grant",
+        "operationId": "revokeDelegatedGrant",
+        "description": "Cuts the connection immediately: the grant and every token issued for it are revoked.",
+        "responses": {
+          "200": { "$ref": "#/components/responses/Ok" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/DelegatedForbidden" },
+          "404": { "description": "Unknown grant, or already revoked.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" }, "example": { "error": "Grant not found or already revoked" } } } },
+          "502": { "$ref": "#/components/responses/BackendUnavailable" }
+        }
+      }
+    },
+    "/v1/render": {
+      "post": {
+        "tags": ["Legacy v1"],
+        "deprecated": true,
+        "summary": "Render PDF (v1)",
+        "operationId": "renderTemplateV1",
+        "description": "Synchronous render addressed by the template's internal id. Emits webhook events to every enabled endpoint; there is no async mode on v1. Prefer `POST /v2/organizations/{organizationId}/templates/{externalId}/render`.",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/RenderRequestV1" } } } },
+        "responses": {
+          "200": { "description": "The rendered PDF.", "content": { "application/pdf": { "schema": { "type": "string", "format": "binary" } } } },
+          "400": { "description": "Missing `templateId`, an invalid `version`, or `data` failing schema validation.", "content": { "application/json": { "schema": { "anyOf": [{ "$ref": "#/components/schemas/ValidationError" }, { "$ref": "#/components/schemas/Error" }] } } } },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "402": { "description": "`api_renders_not_allowed_on_free`.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "403": { "description": "`draft_not_renderable`.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "404": { "$ref": "#/components/responses/TemplateNotFound" },
+          "422": { "description": "Compilation failed.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CompilationError" } } } },
+          "429": { "$ref": "#/components/responses/QuotaExceeded" },
+          "500": { "$ref": "#/components/responses/InternalError" }
+        }
+      }
+    },
+    "/v1/templates": {
+      "get": {
+        "tags": ["Legacy v1"],
+        "deprecated": true,
+        "summary": "List templates (v1)",
+        "operationId": "listTemplatesV1",
+        "responses": {
+          "200": { "description": "Published templates in the key's organization.", "content": { "application/json": { "schema": { "type": "array", "items": { "$ref": "#/components/schemas/TemplateSummaryV1" } } } } },
+          "401": { "$ref": "#/components/responses/Unauthorized" }
+        }
+      },
+      "post": {
+        "tags": ["Legacy v1"],
+        "deprecated": true,
+        "summary": "Create template (v1)",
+        "operationId": "createTemplateV1",
+        "description": "Creates a draft whose external id equals its generated internal id. Cannot lock the schema or set a tenant scope; use v2 for those.",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CreateTemplateRequestV1" } } } },
+        "responses": {
+          "201": { "description": "The created draft.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/TemplateV1" } } } },
+          "400": { "description": "Missing `name` or `code`.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "401": { "$ref": "#/components/responses/Unauthorized" }
+        }
+      }
+    },
+    "/v1/templates/{id}": {
+      "parameters": [{ "$ref": "#/components/parameters/templateIdV1" }],
+      "get": {
+        "tags": ["Legacy v1"],
+        "deprecated": true,
+        "summary": "Get template (v1)",
+        "operationId": "getTemplateV1",
+        "parameters": [{ "$ref": "#/components/parameters/resolveImages" }],
+        "responses": {
+          "200": { "description": "The template.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/TemplateV1" } } } },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "$ref": "#/components/responses/TemplateNotFound" }
+        }
+      }
+    },
+    "/v1/templates/{id}/publish": {
+      "parameters": [{ "$ref": "#/components/parameters/templateIdV1" }],
+      "post": {
+        "tags": ["Legacy v1"],
+        "deprecated": true,
+        "summary": "Publish template (v1)",
+        "operationId": "publishTemplateV1",
+        "requestBody": { "required": false, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/PublishTemplateRequest" } } } },
+        "responses": {
+          "200": { "description": "The published template.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/TemplateV1" } } } },
+          "400": { "description": "`already_published`.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "402": { "description": "`template_limit_reached`.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "403": { "description": "`forbidden`.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "404": { "$ref": "#/components/responses/TemplateNotFound" },
+          "422": { "description": "Compilation failed.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CompilationError" } } } }
+        }
+      }
+    },
+    "/v1/templates/{id}/unpublish": {
+      "parameters": [{ "$ref": "#/components/parameters/templateIdV1" }],
+      "post": {
+        "tags": ["Legacy v1"],
+        "deprecated": true,
+        "summary": "Unpublish template (v1)",
+        "operationId": "unpublishTemplateV1",
+        "responses": {
+          "200": { "description": "The template, now a draft.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/TemplateV1" } } } },
+          "400": { "description": "`already_draft`.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "description": "`forbidden`.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "404": { "$ref": "#/components/responses/TemplateNotFound" }
+        }
+      }
+    },
+    "/v1/templates/{id}/logs": {
+      "parameters": [{ "$ref": "#/components/parameters/templateIdV1" }],
+      "get": {
+        "tags": ["Legacy v1"],
+        "deprecated": true,
+        "summary": "List render logs for a template (v1)",
+        "operationId": "listTemplateLogsV1",
+        "parameters": [{ "$ref": "#/components/parameters/limit" }, { "$ref": "#/components/parameters/offset" }, { "$ref": "#/components/parameters/logStatus" }, { "$ref": "#/components/parameters/logSource" }],
+        "responses": {
+          "200": { "description": "Newest first.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/RenderLogListV1" } } } },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "$ref": "#/components/responses/TemplateNotFound" }
+        }
+      }
+    },
+    "/v1/logs": {
+      "get": {
+        "tags": ["Legacy v1"],
+        "deprecated": true,
+        "summary": "List render logs (v1)",
+        "operationId": "listLogsV1",
+        "parameters": [
+          { "$ref": "#/components/parameters/limit" }, { "$ref": "#/components/parameters/offset" }, { "$ref": "#/components/parameters/logStatus" }, { "$ref": "#/components/parameters/logSource" },
+          { "name": "templateId", "in": "query", "schema": { "type": "string" }, "description": "Only logs for this internal template id." },
+          { "name": "search", "in": "query", "schema": { "type": "string" } },
+          { "name": "from", "in": "query", "schema": { "type": "string", "format": "date-time" } },
+          { "name": "to", "in": "query", "schema": { "type": "string", "format": "date-time" } }
+        ],
+        "responses": {
+          "200": { "description": "Newest first.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/RenderLogListV1" } } } },
+          "401": { "$ref": "#/components/responses/Unauthorized" }
+        }
+      }
+    },
+    "/v1/logs/{id}": {
+      "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" }, "description": "Render log id." }],
+      "get": {
+        "tags": ["Legacy v1"],
+        "deprecated": true,
+        "summary": "Get render log (v1)",
+        "operationId": "getLogV1",
+        "responses": {
+          "200": { "description": "The log entry.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/RenderLogDetailV1" } } } },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "description": "Unknown log id.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" }, "example": { "error": "Log not found" } } } }
+        }
+      }
+    }
+  },
+  "webhooks": {
+    "render.completed": {
+      "post": {
+        "tags": ["Webhooks"],
+        "summary": "render.completed",
+        "operationId": "renderCompletedEvent",
+        "description": "An API render (sync or async) finished successfully. Delivered to every enabled endpoint, or to the `webhookIds` named on the render. Signed with the Standard Webhooks scheme (`webhook-id`, `webhook-timestamp`, `webhook-signature: v1,<base64 HMAC-SHA256>` over `\"{id}.{timestamp}.{body}\"`, keyed by the endpoint secret). Respond with any 2xx within 5 seconds; otherwise the delivery is retried up to 10 times with capped exponential backoff.",
+        "parameters": [{ "$ref": "#/components/parameters/webhookId" }, { "$ref": "#/components/parameters/webhookTimestamp" }, { "$ref": "#/components/parameters/webhookSignature" }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/RenderEvent" }, "example": { "id": "evt_9f2cQxT0Rq2m8n5WkYb3Lw", "type": "render.completed", "createdAt": "2026-08-30T12:00:00.000Z", "data": { "renderId": "d4e5f6a7-1b2c-4d3e-9f80-123456789abc", "jobId": "job_7a1b9c2d", "organizationId": "org_abc", "templateExternalId": "invoice-primary", "status": "success", "durationMs": 123, "downloadUrl": "https://api.pdfs.build/v2/organizations/org_abc/renders/job_7a1b9c2d/pdf" } } } } },
+        "responses": { "2XX": { "description": "Acknowledged." } }
+      }
+    },
+    "render.failed": {
+      "post": {
+        "tags": ["Webhooks"],
+        "summary": "render.failed",
+        "operationId": "renderFailedEvent",
+        "description": "An API render failed: compilation error, storage failure, or an async job that exhausted its retries. Same delivery and signature rules as `render.completed`.",
+        "parameters": [{ "$ref": "#/components/parameters/webhookId" }, { "$ref": "#/components/parameters/webhookTimestamp" }, { "$ref": "#/components/parameters/webhookSignature" }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/RenderEvent" }, "example": { "id": "evt_2bN8xQ1kTfWc7yLp0aRdEg", "type": "render.failed", "createdAt": "2026-08-30T12:00:00.000Z", "data": { "renderId": "d4e5f6a7-1b2c-4d3e-9f80-123456789abc", "organizationId": "org_abc", "templateExternalId": "invoice-primary", "status": "error", "errorMessage": "Compilation failed: unknown variable: due_date" } } } } },
+        "responses": { "2XX": { "description": "Acknowledged." } }
+      }
+    },
+    "batch.completed": {
+      "post": {
+        "tags": ["Webhooks"],
+        "summary": "batch.completed",
+        "operationId": "batchCompletedEvent",
+        "description": "Every item of a render batch has succeeded or failed. Sent once per batch. Fetch `GET /v2/organizations/{organizationId}/batches/{batchId}` for per-item results and download links. Same delivery and signature rules as `render.completed`.",
+        "parameters": [{ "$ref": "#/components/parameters/webhookId" }, { "$ref": "#/components/parameters/webhookTimestamp" }, { "$ref": "#/components/parameters/webhookSignature" }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/BatchEvent" }, "example": { "id": "evt_4kR7mPq2VsXc9zNb1hTdYw", "type": "batch.completed", "createdAt": "2026-09-23T12:00:00.000Z", "data": { "batchId": "batch_3f6a0c1e", "organizationId": "org_abc", "templateExternalId": "invoice-primary", "total": 2, "succeeded": 2, "failed": 0 } } } } },
+        "responses": { "2XX": { "description": "Acknowledged." } }
+      }
+    },
+    "webhook.test": {
+      "post": {
+        "tags": ["Webhooks"],
+        "summary": "webhook.test",
+        "operationId": "webhookTestEvent",
+        "description": "Sent by the dashboard or the test endpoint.",
+        "parameters": [{ "$ref": "#/components/parameters/webhookId" }, { "$ref": "#/components/parameters/webhookTimestamp" }, { "$ref": "#/components/parameters/webhookSignature" }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/WebhookTestEvent" } } } },
+        "responses": { "2XX": { "description": "Acknowledged." } }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "apiKey": { "type": "http", "scheme": "bearer", "bearerFormat": "prs_...", "description": "Organization-scoped API key, created under Settings → API Keys or with the MCP `create_api_key` tool." }
+    },
+    "parameters": {
+      "organizationId": { "name": "organizationId", "in": "path", "required": true, "schema": { "type": "string" }, "description": "Your organization id. Must match the API key's organization.", "example": "org_abc" },
+      "externalId": { "name": "externalId", "in": "path", "required": true, "schema": { "$ref": "#/components/schemas/ExternalId" }, "description": "The template's organization-scoped external id.", "example": "invoice-primary" },
+      "jobId": { "name": "jobId", "in": "path", "required": true, "schema": { "type": "string" }, "description": "Async render job id (`job_...`)." },
+      "batchId": { "name": "batchId", "in": "path", "required": true, "schema": { "type": "string" }, "description": "Render batch id (`batch_...`)." },
+      "logId": { "name": "logId", "in": "path", "required": true, "schema": { "type": "string" }, "description": "Render log id." },
+      "endpointId": { "name": "endpointId", "in": "path", "required": true, "schema": { "type": "string" }, "description": "Webhook endpoint id (`whe_...`)." },
+      "sessionId": { "name": "sessionId", "in": "path", "required": true, "schema": { "type": "string" }, "description": "Embedded session id, as returned when the session was created." },
+      "grantId": { "name": "grantId", "in": "path", "required": true, "schema": { "type": "string" }, "description": "Delegated grant id." },
+      "galleryId": { "name": "galleryId", "in": "path", "required": true, "schema": { "type": "string" }, "description": "A gallery design id, `<use-case>-<variant>`, as listed by `GET …/gallery`; e.g. `odoo-invoice-stub-band`." },
+      "templateIdV1": { "name": "id", "in": "path", "required": true, "schema": { "type": "string" }, "description": "The template's generated internal id." },
+      "resolveImages": { "name": "resolve_images", "in": "query", "schema": { "type": "string", "enum": ["true"] }, "description": "When `true`, image references in `sampleData` are resolved to fetchable URLs. Always on for templates built on a base template." },
+      "templateVersion": { "name": "version", "in": "query", "schema": { "type": "string", "examples": ["latest", "4", "staging", "draft"] }, "description": "Answer with the `schema` and `sampleData` of the content a render with this selector compiles: a version number, a channel name such as `latest` (the promoted version), or `draft` (the working copy). Omitted returns the working copy. An unknown version or channel fails with `400`." },
+      "limit": { "name": "limit", "in": "query", "schema": { "type": "integer", "minimum": 1, "maximum": 200, "default": 50 } },
+      "offset": { "name": "offset", "in": "query", "schema": { "type": "integer", "minimum": 0, "default": 0 } },
+      "logStatus": { "name": "status", "in": "query", "schema": { "type": "string", "enum": ["success", "error"] } },
+      "logSource": { "name": "source", "in": "query", "schema": { "type": "string", "enum": ["api", "ui", "mcp"] }, "description": "Where the render was triggered from." },
+      "webhookId": { "name": "webhook-id", "in": "header", "required": true, "schema": { "type": "string" }, "description": "The event id (`evt_...`). Unique per delivery; use it for idempotency." },
+      "webhookTimestamp": { "name": "webhook-timestamp", "in": "header", "required": true, "schema": { "type": "string" }, "description": "Unix seconds." },
+      "webhookSignature": { "name": "webhook-signature", "in": "header", "required": true, "schema": { "type": "string" }, "description": "`v1,<base64 HMAC-SHA256>` per the Standard Webhooks spec." }
+    },
+    "responses": {
+      "Ok": { "description": "Done.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Ok" } } } },
+      "Unauthorized": { "description": "Missing, invalid or expired API key.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" }, "example": { "error": "Unauthorized" } } } },
+      "OrganizationScopeMismatch": { "description": "The organization in the URL does not match the API key's organization.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" }, "example": { "error": "organization_scope_mismatch", "message": "The organization in the URL does not match the API key organization" } } } },
+      "TemplateNotFound": { "description": "No template with that id is accessible to this key. Another user's draft is indistinguishable from a missing template.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" }, "example": { "error": "Template not found" } } } },
+      "InvalidExternalId": { "description": "`invalid_external_id`.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" }, "example": { "error": "invalid_external_id", "message": "externalId must be 1-128 characters using only ASCII letters, digits, '.', '_', '~', or '-', and cannot be '.' or '..'" } } } },
+      "QuotaExceeded": { "description": "`render_quota_exceeded` — this billing period's render quota is used up. Upgrade or buy a top-up pack.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+      "InternalError": { "description": "Rendering failed for a reason that is not the template or the data. Safe to retry.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" }, "example": { "error": "Internal compilation error" } } } },
+      "WebhookUrlRejected": { "description": "`invalid_url` (not a well-formed http(s) URL) or `url_not_allowed` (resolves to a non-public address).", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+      "WebhookPlanGated": { "description": "`plan_gated` (webhooks need Pro or higher) or `organization_scope_mismatch`.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+      "WebhookNotFound": { "description": "`not_found` — no such endpoint in this organization.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" }, "example": { "error": "not_found", "message": "Webhook endpoint not found" } } } },
+      "DelegatedForbidden": { "description": "`admin_required` (the key's owner is not an organization owner/admin), `delegated_plan_required`, `delegated_access_disabled` (the organization has not opted in), or `organization_scope_mismatch`.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+      "BackendUnavailable": { "description": "The service that owns this resource could not be reached. Safe to retry.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" }, "example": { "error": "embed_backend_unavailable" } } } }
+    },
+    "schemas": {
+      "ExternalId": { "type": "string", "pattern": "^[A-Za-z0-9._~-]{1,128}$", "description": "Organization-scoped template id you control. 1–128 ASCII letters, digits, `.`, `_`, `~` or `-`; `.` and `..` are reserved. Case-sensitive." },
+      "ScopePath": { "type": "string", "maxLength": 512, "description": "Tenant scope for delegated agent access: zero or more segments, each 1–128 chars from the external-id charset and each ending in `/`, e.g. `acct_9f3/entity_dubai/`. Empty means unscoped — invisible to every delegated grant.", "example": "acct_9f3/entity_dubai/" },
+      "Timestamp": { "type": "string", "description": "UTC, ISO 8601 without a timezone suffix.", "example": "2026-08-30T12:00:00.123456" },
+      "TemplateStatus": { "type": "string", "enum": ["draft", "published"] },
+      "Ok": { "type": "object", "required": ["ok"], "properties": { "ok": { "type": "boolean", "const": true } } },
+      "Error": {
+        "type": "object",
+        "required": ["error"],
+        "properties": {
+          "error": { "type": "string", "description": "Machine-readable code (e.g. `draft_not_renderable`) or, for a few legacy failures, a short phrase." },
+          "message": { "type": "string", "description": "Human-readable detail. Present on most coded errors." }
+        },
+        "example": { "error": "draft_not_renderable", "message": "Only published templates can be rendered via the API. Publish this template first." }
+      },
+      "ValidationError": {
+        "type": "object",
+        "required": ["error", "details"],
+        "properties": {
+          "error": { "type": "string", "const": "Validation failed" },
+          "details": { "type": "array", "items": { "type": "object", "required": ["path"], "properties": { "path": { "type": "string", "description": "JSON path of the offending value." }, "message": { "type": "string" } } } }
+        }
+      },
+      "CompilationError": {
+        "type": "object",
+        "required": ["error", "diagnostics"],
+        "properties": {
+          "error": { "type": "string", "const": "Compilation failed" },
+          "diagnostics": { "type": "array", "items": { "$ref": "#/components/schemas/TypstDiagnostic" } }
+        }
+      },
+      "TypstDiagnostic": {
+        "type": "object",
+        "required": ["severity", "message"],
+        "properties": {
+          "severity": { "type": "string", "enum": ["error", "warning"] },
+          "message": { "type": "string" },
+          "line": { "type": "integer" },
+          "column": { "type": "integer" },
+          "snippet": { "type": "string" },
+          "source_context": { "type": "string" },
+          "hint": { "type": "string" }
+        }
+      },
+      "ValidationIssues": {
+        "type": "object",
+        "required": ["error", "issues"],
+        "properties": {
+          "error": { "type": "string" },
+          "issues": { "type": "object", "description": "Per-field problems, keyed by field name.", "additionalProperties": true }
+        }
+      },
+      "TemplateSummary": {
+        "type": "object",
+        "required": ["internalId", "externalId", "name", "status", "scopePath", "createdAt", "updatedAt"],
+        "properties": {
+          "internalId": { "type": "string", "description": "Generated, immutable. What v1 URLs and the embedded SDK address." },
+          "externalId": { "$ref": "#/components/schemas/ExternalId" },
+          "name": { "type": "string" },
+          "description": { "type": ["string", "null"] },
+          "status": { "$ref": "#/components/schemas/TemplateStatus" },
+          "scopePath": { "$ref": "#/components/schemas/ScopePath" },
+          "createdAt": { "$ref": "#/components/schemas/Timestamp" },
+          "updatedAt": { "$ref": "#/components/schemas/Timestamp" }
+        }
+      },
+      "Template": {
+        "allOf": [
+          { "$ref": "#/components/schemas/TemplateSummary" },
+          {
+            "type": "object",
+            "required": ["schemaLocked"],
+            "properties": {
+              "schema": { "type": ["object", "null"], "description": "JSON Schema of the render `data` payload.", "additionalProperties": true },
+              "schemaLocked": { "type": "boolean", "description": "When true the data contract is frozen: embedded editing can restyle the document but cannot add, remove or retype a field." },
+              "sampleData": { "type": ["object", "null"], "description": "Example data satisfying `schema`.", "additionalProperties": true },
+              "baseTemplateId": { "type": ["string", "null"], "description": "Internal id of the base template this one layers on, if any." },
+              "version": { "type": ["integer", "null"], "description": "Present when `version` was given: the frozen version `schema` and `sampleData` come from, or null for the working copy." },
+              "channel": { "type": ["string", "null"], "description": "Present when `version` was given: the channel the selector resolved through, if any." }
+            }
+          }
+        ]
+      },
+      "CreateTemplateRequest": {
+        "type": "object",
+        "required": ["externalId", "name", "code"],
+        "properties": {
+          "externalId": { "$ref": "#/components/schemas/ExternalId" },
+          "name": { "type": "string", "description": "Display name." },
+          "description": { "type": "string" },
+          "code": { "type": "string", "description": "Template source. Must define a top-level `#let render(...)` entry function. (`typstCode` is accepted as a legacy alias.)" },
+          "schema": { "type": "object", "description": "JSON Schema describing the render `data` payload.", "additionalProperties": true },
+          "sampleData": { "type": "object", "description": "Example data that satisfies `schema`.", "additionalProperties": true },
+          "pageSettings": { "type": "object", "description": "Page size, margins and other layout settings.", "additionalProperties": true },
+          "schemaLocked": { "type": "boolean", "default": false, "description": "Freeze the data contract at creation. Cannot be changed later. Rejected if `sampleData` contains fields the schema does not declare." },
+          "scopePath": { "$ref": "#/components/schemas/ScopePath" }
+        }
+      },
+      "UpdateTemplateRequest": {
+        "type": "object",
+        "minProperties": 1,
+        "properties": {
+          "externalId": { "$ref": "#/components/schemas/ExternalId" },
+          "scopePath": { "$ref": "#/components/schemas/ScopePath" }
+        }
+      },
+      "PublishTemplateRequest": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string", "description": "Rename on publish." },
+          "description": { "type": "string", "description": "Update the description on publish." }
+        }
+      },
+      "VersionSelector": {
+        "description": "Which content to render. Omitted or `null` resolves through the `latest` channel, which follows promotions rather than in-progress edits. A positive integer pins a version number, `\"draft\"` renders the mutable working copy, and any other string names a channel.",
+        "oneOf": [
+          { "type": "integer", "minimum": 1 },
+          { "type": "string", "examples": ["latest", "draft", "staging", "4"] }
+        ]
+      },
+      "RenderRequest": {
+        "type": "object",
+        "properties": {
+          "data": { "type": "object", "description": "Key-value pairs matching the template's schema. Defaults to `{}`.", "additionalProperties": true },
+          "async": { "type": "boolean", "default": false, "description": "Render in the background and return `202` with a job handle." },
+          "webhookIds": { "type": "array", "items": { "type": "string" }, "description": "Restrict this render's webhook events to these endpoint ids (`whe_...`). Unknown ids fail with `422 unknown_webhook_ids`. Omitted: all enabled endpoints. `[]`: none." },
+          "version": { "$ref": "#/components/schemas/VersionSelector" }
+        }
+      },
+      "RenderRequestV1": {
+        "type": "object",
+        "required": ["templateId"],
+        "properties": {
+          "templateId": { "type": "string", "description": "The template's generated internal id." },
+          "data": { "type": "object", "additionalProperties": true },
+          "version": { "$ref": "#/components/schemas/VersionSelector" }
+        }
+      },
+      "RenderJobAccepted": {
+        "type": "object",
+        "required": ["id", "status", "statusUrl"],
+        "properties": {
+          "id": { "type": "string", "example": "job_7a1b9c2d" },
+          "status": { "type": "string", "const": "queued" },
+          "statusUrl": { "type": "string", "format": "uri", "example": "https://api.pdfs.build/v2/organizations/org_abc/renders/job_7a1b9c2d" }
+        }
+      },
+      "RenderJob": {
+        "type": "object",
+        "required": ["id", "status", "templateExternalId", "createdAt"],
+        "properties": {
+          "id": { "type": "string" },
+          "status": { "type": "string", "enum": ["queued", "processing", "success", "error"] },
+          "templateExternalId": { "type": ["string", "null"] },
+          "durationMs": { "type": "integer" },
+          "error": { "type": "string", "description": "Present when `status` is `error`." },
+          "downloadUrl": { "type": "string", "format": "uri", "description": "Present once `status` is `success`. Requires the same API key." },
+          "createdAt": { "$ref": "#/components/schemas/Timestamp" },
+          "completedAt": { "$ref": "#/components/schemas/Timestamp" }
+        }
+      },
+      "RenderBatchRequest": {
+        "type": "object",
+        "required": ["items"],
+        "properties": {
+          "items": { "type": "array", "minItems": 1, "maxItems": 500, "items": { "type": "object", "properties": { "data": { "type": "object", "description": "Template data for this document, validated against the template schema when the item renders." } } } },
+          "webhookIds": { "type": "array", "items": { "type": "string" }, "description": "Endpoints to notify with `batch.completed`. Omitted: every enabled endpoint. Empty: none." },
+          "version": { "$ref": "#/components/schemas/VersionSelector" }
+        }
+      },
+      "RenderBatchAccepted": {
+        "type": "object",
+        "required": ["id", "status", "total", "statusUrl"],
+        "properties": {
+          "id": { "type": "string", "example": "batch_3f6a0c1e" },
+          "status": { "type": "string", "const": "processing" },
+          "total": { "type": "integer", "example": 2 },
+          "statusUrl": { "type": "string", "format": "uri", "example": "https://api.pdfs.build/v2/organizations/org_abc/batches/batch_3f6a0c1e" }
+        }
+      },
+      "RenderBatch": {
+        "type": "object",
+        "required": ["id", "status", "templateExternalId", "total", "succeeded", "failed", "pending", "createdAt", "items"],
+        "properties": {
+          "id": { "type": "string" },
+          "status": { "type": "string", "enum": ["processing", "completed"] },
+          "templateExternalId": { "type": ["string", "null"] },
+          "total": { "type": "integer" },
+          "succeeded": { "type": "integer" },
+          "failed": { "type": "integer" },
+          "pending": { "type": "integer", "description": "Items still queued or processing." },
+          "createdAt": { "$ref": "#/components/schemas/Timestamp" },
+          "completedAt": { "$ref": "#/components/schemas/Timestamp" },
+          "items": { "type": "array", "items": { "type": "object", "required": ["index", "jobId", "status"], "properties": { "index": { "type": "integer", "description": "Position in the submitted `items`." }, "jobId": { "type": "string", "description": "Also usable with the render job routes." }, "status": { "type": "string", "enum": ["queued", "processing", "success", "error"] }, "downloadUrl": { "type": "string", "format": "uri", "description": "Present once the item has succeeded. Requires the same API key." }, "error": { "type": "string", "description": "Present when `status` is `error`." } } } }
+        }
+      },
+      "RenderLog": {
+        "type": "object",
+        "required": ["id", "templateInternalId", "templateExternalId", "source", "status", "createdAt", "apiKeyName", "apiKeyPrefix"],
+        "properties": {
+          "id": { "type": "string" },
+          "templateInternalId": { "type": "string" },
+          "templateExternalId": { "type": ["string", "null"], "description": "The external id at render time; renames do not rewrite it." },
+          "templateName": { "type": ["string", "null"] },
+          "source": { "type": "string", "description": "`api`, `ui`, `mcp`, or another in-app source." },
+          "status": { "type": "string", "enum": ["pending", "success", "error"] },
+          "errorMessage": { "type": ["string", "null"] },
+          "durationMs": { "type": ["integer", "null"] },
+          "apiKeyId": { "type": ["string", "null"] },
+          "userId": { "type": ["string", "null"] },
+          "templateUpdatedAt": { "oneOf": [{ "$ref": "#/components/schemas/Timestamp" }, { "type": "null" }] },
+          "createdAt": { "$ref": "#/components/schemas/Timestamp" },
+          "apiKeyName": { "type": ["string", "null"] },
+          "apiKeyPrefix": { "type": ["string", "null"] }
+        }
+      },
+      "RenderLogDetail": {
+        "allOf": [
+          { "$ref": "#/components/schemas/RenderLog" },
+          { "type": "object", "required": ["organizationId"], "properties": { "organizationId": { "type": "string" }, "requestPayload": { "type": ["object", "null"], "description": "The `data` that was rendered.", "additionalProperties": true } } }
+        ]
+      },
+      "RenderLogList": {
+        "type": "object",
+        "required": ["logs", "total"],
+        "properties": {
+          "logs": { "type": "array", "items": { "$ref": "#/components/schemas/RenderLog" } },
+          "total": { "type": "integer", "description": "Total matching logs, for pagination." }
+        }
+      },
+      "RenderLogV1": {
+        "type": "object",
+        "required": ["id", "templateId", "source", "status", "createdAt", "apiKeyName", "apiKeyPrefix"],
+        "properties": {
+          "id": { "type": "string" },
+          "templateId": { "type": "string", "description": "Internal template id." },
+          "templateName": { "type": ["string", "null"] },
+          "source": { "type": "string" },
+          "status": { "type": "string", "enum": ["pending", "success", "error"] },
+          "errorMessage": { "type": ["string", "null"] },
+          "durationMs": { "type": ["integer", "null"] },
+          "apiKeyId": { "type": ["string", "null"] },
+          "userId": { "type": ["string", "null"] },
+          "templateUpdatedAt": { "oneOf": [{ "$ref": "#/components/schemas/Timestamp" }, { "type": "null" }] },
+          "createdAt": { "$ref": "#/components/schemas/Timestamp" },
+          "apiKeyName": { "type": ["string", "null"] },
+          "apiKeyPrefix": { "type": ["string", "null"] }
+        }
+      },
+      "RenderLogDetailV1": {
+        "allOf": [
+          { "$ref": "#/components/schemas/RenderLogV1" },
+          { "type": "object", "required": ["organizationId"], "properties": { "organizationId": { "type": "string" }, "requestPayload": { "type": ["object", "null"], "additionalProperties": true } } }
+        ]
+      },
+      "RenderLogListV1": {
+        "type": "object",
+        "required": ["logs", "total"],
+        "properties": {
+          "logs": { "type": "array", "items": { "$ref": "#/components/schemas/RenderLogV1" } },
+          "total": { "type": "integer" }
+        }
+      },
+      "WebhookEndpoint": {
+        "type": "object",
+        "required": ["id", "organizationId", "url", "enabled", "description", "createdAt", "updatedAt"],
+        "properties": {
+          "id": { "type": "string", "example": "whe_5xg6Kq0PSTeK1bXf3eDR3w" },
+          "organizationId": { "type": "string" },
+          "url": { "type": "string", "format": "uri" },
+          "enabled": { "type": "boolean" },
+          "description": { "type": ["string", "null"] },
+          "createdAt": { "$ref": "#/components/schemas/Timestamp" },
+          "updatedAt": { "$ref": "#/components/schemas/Timestamp" }
+        }
+      },
+      "WebhookEndpointWithSecret": {
+        "type": "object",
+        "required": ["endpoint", "secret"],
+        "properties": {
+          "endpoint": { "$ref": "#/components/schemas/WebhookEndpoint" },
+          "secret": { "type": "string", "description": "Standard Webhooks signing secret (`whsec_` + base64). Shown once; store it now.", "example": "whsec_MfKjnR7bCq4Xy1UvZ0aW3sTdE9gHpLqI5oN2kBjA8xY=" }
+        }
+      },
+      "CreateWebhookRequest": {
+        "type": "object",
+        "required": ["url"],
+        "properties": {
+          "url": { "type": "string", "format": "uri", "description": "Public http(s) destination." },
+          "description": { "type": "string" },
+          "enabled": { "type": "boolean", "default": true }
+        }
+      },
+      "UpdateWebhookRequest": {
+        "type": "object",
+        "properties": {
+          "url": { "type": "string", "format": "uri" },
+          "description": { "type": ["string", "null"], "description": "`null` clears the description; omit to leave it unchanged." },
+          "enabled": { "type": "boolean" }
+        }
+      },
+      "WebhookTestRequest": {
+        "type": "object",
+        "properties": { "message": { "type": "string", "description": "Carried in `data.message` of the test event." } }
+      },
+      "WebhookDelivery": {
+        "type": "object",
+        "required": ["id", "endpointId", "eventType", "status", "attempts", "createdAt"],
+        "properties": {
+          "id": { "type": "string", "description": "Event id (`evt_...`), also sent as the `webhook-id` header." },
+          "endpointId": { "type": "string" },
+          "eventType": { "type": "string", "enum": ["render.completed", "render.failed", "webhook.test"] },
+          "status": { "type": "string", "enum": ["pending", "processing", "delivered", "failed"] },
+          "attempts": { "type": "integer" },
+          "lastResponseStatus": { "type": ["integer", "null"] },
+          "lastError": { "type": ["string", "null"] },
+          "createdAt": { "$ref": "#/components/schemas/Timestamp" },
+          "deliveredAt": { "oneOf": [{ "$ref": "#/components/schemas/Timestamp" }, { "type": "null" }] }
+        }
+      },
+      "RenderEvent": {
+        "type": "object",
+        "required": ["id", "type", "createdAt", "data"],
+        "properties": {
+          "id": { "type": "string", "description": "Unique per delivery (`evt_...`)." },
+          "type": { "type": "string", "enum": ["render.completed", "render.failed"] },
+          "createdAt": { "type": "string", "format": "date-time" },
+          "data": {
+            "type": "object",
+            "required": ["renderId", "organizationId", "status"],
+            "properties": {
+              "renderId": { "type": "string", "description": "The render log id." },
+              "jobId": { "type": "string", "description": "Async renders only." },
+              "organizationId": { "type": "string" },
+              "templateExternalId": { "type": "string" },
+              "status": { "type": "string", "enum": ["success", "error"] },
+              "durationMs": { "type": "integer" },
+              "errorMessage": { "type": "string", "description": "`render.failed` only." },
+              "downloadUrl": { "type": "string", "format": "uri", "description": "Successful async renders only. Requires the API key." }
+            }
+          }
+        }
+      },
+      "BatchEvent": {
+        "type": "object",
+        "required": ["id", "type", "createdAt", "data"],
+        "properties": {
+          "id": { "type": "string", "description": "Unique per delivery (`evt_...`)." },
+          "type": { "type": "string", "const": "batch.completed" },
+          "createdAt": { "type": "string", "format": "date-time" },
+          "data": { "type": "object", "required": ["batchId", "organizationId", "total", "succeeded", "failed"], "properties": { "batchId": { "type": "string" }, "organizationId": { "type": "string" }, "templateExternalId": { "type": "string" }, "total": { "type": "integer" }, "succeeded": { "type": "integer" }, "failed": { "type": "integer" } } }
+        }
+      },
+      "WebhookTestEvent": {
+        "type": "object",
+        "required": ["id", "type", "createdAt", "data"],
+        "properties": {
+          "id": { "type": "string" },
+          "type": { "type": "string", "const": "webhook.test" },
+          "createdAt": { "type": "string", "format": "date-time" },
+          "data": { "type": "object", "required": ["message", "organizationId", "endpointId"], "properties": { "message": { "type": "string" }, "organizationId": { "type": "string" }, "endpointId": { "type": "string" } } }
+        }
+      },
+      "EmbedSessionRequest": {
+        "type": "object",
+        "required": ["externalTenantId", "externalUserId"],
+        "properties": {
+          "externalTenantId": { "type": "string", "minLength": 1, "maxLength": 200, "description": "Your customer's id. AI usage in the session is metered against it." },
+          "externalUserId": { "type": "string", "minLength": 1, "maxLength": 200, "description": "The end user's id in your system, for attribution." },
+          "expiresInSeconds": { "type": "integer", "minimum": 60, "maximum": 3600, "description": "Session lifetime." }
+        }
+      },
+      "EmbedSession": {
+        "type": "object",
+        "required": ["sessionId", "token", "templateId", "expiresAt"],
+        "properties": {
+          "sessionId": { "type": "string" },
+          "token": { "type": "string", "description": "Session token (`emb_...`) for `@pdfsbuild/react`. Scoped to this template and user." },
+          "templateId": { "type": "string", "description": "The template's internal id — what the SDK addresses the document by." },
+          "expiresAt": { "type": "string", "format": "date-time" }
+        }
+      },
+      "GalleryTemplate": {
+        "type": "object",
+        "required": ["id", "name", "useCase", "category", "page", "pages"],
+        "properties": {
+          "id": { "type": "string", "example": "odoo-invoice-stub-band" },
+          "name": { "type": "string", "example": "Odoo Invoice — Stub Band" },
+          "description": { "type": "string" },
+          "useCase": { "type": "string", "example": "odoo-invoice" },
+          "category": { "type": "string", "example": "odoo" },
+          "archetype": { "type": "string", "example": "band-header" },
+          "palette": { "type": "string", "example": "royal-bone" },
+          "tier": { "type": "string", "example": "expressive" },
+          "page": { "type": "string", "example": "A4-portrait" },
+          "pages": { "type": "integer", "example": 1 }
+        }
+      },
+      "GalleryListing": {
+        "type": "object",
+        "required": ["templates", "categories"],
+        "properties": {
+          "templates": { "type": "array", "items": { "$ref": "#/components/schemas/GalleryTemplate" } },
+          "categories": {
+            "type": "array",
+            "description": "Every category in the library with its design count, whatever the filter.",
+            "items": { "type": "object", "required": ["id", "count"], "properties": { "id": { "type": "string" }, "count": { "type": "integer" } } }
+          }
+        }
+      },
+      "FromGalleryRequest": {
+        "type": "object",
+        "required": ["galleryId"],
+        "properties": {
+          "galleryId": { "type": "string", "example": "odoo-invoice-stub-band" },
+          "externalId": { "type": "string", "description": "The slug to render the copy by. 1-128 URL-safe characters; defaults to the new template's UUID." },
+          "name": { "type": "string", "description": "A name for the copy; defaults to the design's." },
+          "publish": { "type": "boolean", "default": true, "description": "`false` leaves the copy as a draft for the editor instead of publishing it." }
+        }
+      },
+      "FromGalleryResult": {
+        "type": "object",
+        "required": ["id", "externalId", "galleryId", "name", "status", "publishedVersion"],
+        "properties": {
+          "id": { "type": "string", "format": "uuid" },
+          "externalId": { "type": "string" },
+          "galleryId": { "type": "string" },
+          "name": { "type": "string" },
+          "status": { "type": "string", "enum": ["draft", "published"] },
+          "publishedVersion": { "type": "integer", "nullable": true }
+        }
+      },
+      "ConnectTicketRequest": {
+        "type": "object",
+        "required": ["externalTenantId", "externalUserId", "scopePrefixes"],
+        "properties": {
+          "externalTenantId": { "type": "string", "minLength": 1, "maxLength": 200, "description": "Billing boundary. Must equal the first segment of every prefix." },
+          "externalUserId": { "type": "string", "minLength": 1, "maxLength": 200 },
+          "scopePrefixes": { "type": "array", "minItems": 1, "maxItems": 50, "items": { "type": "string", "minLength": 1, "maxLength": 512 }, "description": "Access boundary: the grant reaches templates whose `scopePath` starts with any of these.", "example": ["acct_9f3/entity_dubai/", "acct_9f3/entity_ajman/"] },
+          "allowedTools": { "type": "array", "maxItems": 50, "items": { "type": "string" }, "description": "MCP tools the grant may call. Defaults to the delegated allowlist; tools that escalate access (schema writes, publishing, API keys) are always denied." },
+          "label": { "type": "string", "maxLength": 200, "description": "Shown in your connection list." },
+          "expiresInSeconds": { "type": "integer", "minimum": 60, "maximum": 1800, "description": "Ticket lifetime (default 10 minutes)." },
+          "grantExpiresInSeconds": { "type": "integer", "minimum": 3600, "maximum": 31536000, "description": "Lifetime of the grant created when the ticket is redeemed." }
+        }
+      },
+      "ConnectTicket": {
+        "type": "object",
+        "required": ["ticketId", "connectCode", "mcpServerUrl", "expiresAt"],
+        "properties": {
+          "ticketId": { "type": "string" },
+          "connectCode": { "type": "string", "description": "Show this to the end user (`dct_...`). Single use." },
+          "mcpServerUrl": { "type": "string", "format": "uri", "example": "https://backend.pdfs.build/mcp" },
+          "expiresAt": { "type": "string", "format": "date-time" }
+        }
+      },
+      "DelegatedGrant": {
+        "type": "object",
+        "required": ["id", "externalTenantId", "externalUserId", "scopePrefixes", "allowedTools", "label", "expiresAt", "revokedAt", "lastUsedAt", "createdAt"],
+        "properties": {
+          "id": { "type": "string" },
+          "externalTenantId": { "type": "string" },
+          "externalUserId": { "type": "string" },
+          "scopePrefixes": { "type": "array", "items": { "type": "string" } },
+          "allowedTools": { "type": "array", "items": { "type": "string" } },
+          "label": { "type": "string" },
+          "expiresAt": { "type": ["string", "null"], "format": "date-time" },
+          "revokedAt": { "type": ["string", "null"], "format": "date-time" },
+          "lastUsedAt": { "type": ["string", "null"], "format": "date-time" },
+          "createdAt": { "type": "string", "format": "date-time" }
+        }
+      },
+      "TemplateSummaryV1": {
+        "type": "object",
+        "required": ["id", "name", "status", "createdAt", "updatedAt"],
+        "properties": {
+          "id": { "type": "string", "description": "Internal id." },
+          "name": { "type": "string" },
+          "description": { "type": ["string", "null"] },
+          "status": { "$ref": "#/components/schemas/TemplateStatus" },
+          "createdAt": { "$ref": "#/components/schemas/Timestamp" },
+          "updatedAt": { "$ref": "#/components/schemas/Timestamp" }
+        }
+      },
+      "TemplateV1": {
+        "allOf": [
+          { "$ref": "#/components/schemas/TemplateSummaryV1" },
+          {
+            "type": "object",
+            "required": ["userId"],
+            "properties": {
+              "schema": { "type": ["object", "null"], "additionalProperties": true },
+              "sampleData": { "type": ["object", "null"], "additionalProperties": true },
+              "baseTemplateId": { "type": ["string", "null"] },
+              "userId": { "type": "string" },
+              "organizationId": { "type": ["string", "null"] }
+            }
+          }
+        ]
+      },
+      "CreateTemplateRequestV1": {
+        "type": "object",
+        "required": ["name", "code"],
+        "properties": {
+          "name": { "type": "string" },
+          "description": { "type": "string" },
+          "code": { "type": "string", "description": "Template source (`typstCode` accepted as a legacy alias)." },
+          "schema": { "type": "object", "additionalProperties": true },
+          "sampleData": { "type": "object", "additionalProperties": true },
+          "pageSettings": { "type": "object", "additionalProperties": true }
+        }
+      }
+    }
+  }
+}
