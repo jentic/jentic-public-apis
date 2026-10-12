@@ -1,6 +1,6 @@
 # APIs — B
 
-Browsing 219 APIs starting with **B**.
+Browsing 220 APIs starting with **B**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · **B** · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -48,6 +48,7 @@ Browsing 219 APIs starting with **B**.
 | [beatport.com](../../../../apis/openapi/beatport.com) | [main](../../../../apis/openapi/beatport.com/main) |
 | [beds24.com](../../../../apis/openapi/beds24.com) | [main](../../../../apis/openapi/beds24.com/main) |
 | [beebole.com](../../../../apis/openapi/beebole.com) | [main](../../../../apis/openapi/beebole.com/main) |
+| [beebs.app](../../../../apis/openapi/beebs.app) | [main](../../../../apis/openapi/beebs.app/main) |
 | [beehelp.fr](../../../../apis/openapi/beehelp.fr) | [main](../../../../apis/openapi/beehelp.fr/main) |
 | [beehiiv.com](../../../../apis/openapi/beehiiv.com) | [main](../../../../apis/openapi/beehiiv.com/main) |
 | [beekai.com](../../../../apis/openapi/beekai.com) | [main](../../../../apis/openapi/beekai.com/main) |
