@@ -10,9 +10,9 @@
 
 ## Explore the API Directory
 
-[![Browse the API Index](https://img.shields.io/badge/🔎_Browse_the_full_API_Index-OpenAPI_specs-6C47FF?style=for-the-badge)](#jentic-public-apis)
+[![Browse the API Directory](https://img.shields.io/badge/🔎_Browse_the_full_API_Directory-jentic.com%2Fapis-6C47FF?style=for-the-badge)](https://jentic.com/apis)
 
-[![Categories](https://img.shields.io/badge/categories-22-6C47FF?style=flat-square)](#browse-by-category)
+[![Categories](https://img.shields.io/badge/categories-22-6C47FF?style=flat-square)](https://jentic.com/apis)
 [![AI-Readiness scored](https://img.shields.io/badge/AI--readiness-scored-40c463?style=flat-square)](https://github.com/jentic/jentic-api-scorecard)
 [![OpenAPI](https://img.shields.io/badge/format-OpenAPI_%2B_Arazzo-85EA2D?style=flat-square&logo=openapiinitiative&logoColor=black)](https://www.openapis.org/)
 [![License: CC0-1.0](https://img.shields.io/badge/license-CC0_1.0-blue?style=flat-square)](LICENSE.md)
@@ -38,7 +38,7 @@ Every API has a machine-readable **OpenAPI spec** in this repository, and most c
 
 ### Browse by category
 
-The directory is organized into 22 categories. Below is a small sample from a few. Each API links to its OpenAPI spec in this repository; browse the full set via the [Quick access API Index](#jentic-public-apis) above.
+The directory is organized into 22 categories. Below is a small sample from a few. Expand a section, then follow **View all** for every API in that category on [jentic.com/apis](https://jentic.com/apis).
 
 <details>
 <summary><b>🛠️ Developer Tools</b></summary>
@@ -50,7 +50,7 @@ The directory is organized into 22 categories. Below is a small sample from a fe
 | <img src="https://icons.duckduckgo.com/ip3/cloudflare.com.ico" width="16" height="16" align="top" /> **Cloudflare** | [📄 OpenAPI](apis/openapi/cloudflare.com/main/4.0.0/openapi.json) |
 | <img src="https://icons.duckduckgo.com/ip3/digitalocean.com.ico" width="16" height="16" align="top" /> **DigitalOcean** | [📄 OpenAPI](apis/openapi/digitalocean.com/main/2.0/openapi.json) |
 
-➡️ More Developer Tools APIs are in the [Quick access API Index](#jentic-public-apis).
+➡️ **[View all Developer Tools APIs →](https://jentic.com/apis?category=developer-tools)**
 
 </details>
 
@@ -62,7 +62,7 @@ The directory is organized into 22 categories. Below is a small sample from a fe
 | <img src="https://icons.duckduckgo.com/ip3/openai.com.ico" width="16" height="16" align="top" /> **OpenAI** | [📄 OpenAPI](apis/openapi/openai.com/main/2.3.0/openapi.json) |
 | <img src="https://icons.duckduckgo.com/ip3/anthropic.com.ico" width="16" height="16" align="top" /> **Anthropic** (Messages) | [📄 OpenAPI](apis/openapi/anthropic.com/messages/1.0.0/openapi.json) |
 
-➡️ More AI/ML APIs are in the [Quick access API Index](#jentic-public-apis).
+➡️ **[View all AI/ML APIs →](https://jentic.com/apis?category=ai-ml)**
 
 </details>
 
@@ -75,7 +75,7 @@ The directory is organized into 22 categories. Below is a small sample from a fe
 | <img src="https://icons.duckduckgo.com/ip3/plaid.com.ico" width="16" height="16" align="top" /> **Plaid** | [📄 OpenAPI](apis/openapi/plaid.com/main/2020-09-14_1.631.0/openapi.json) |
 | <img src="https://icons.duckduckgo.com/ip3/xero.com.ico" width="16" height="16" align="top" /> **Xero** Accounting | [📄 OpenAPI](apis/openapi/xero.com/xero_accounting/7.0.0/openapi.json) |
 
-➡️ More Payments &amp; Finance APIs are in the [Quick access API Index](#jentic-public-apis).
+➡️ **[View all Payments](https://jentic.com/apis?category=payments)** · **[Finance APIs →](https://jentic.com/apis?category=finance)**
 
 </details>
 
@@ -89,7 +89,7 @@ The directory is organized into 22 categories. Below is a small sample from a fe
 | <img src="https://icons.duckduckgo.com/ip3/twilio.com.ico" width="16" height="16" align="top" /> **Twilio** Messaging | [📄 OpenAPI](apis/openapi/twilio.com/twilio_messaging_v1/1.0.0/openapi.json) |
 | <img src="https://icons.duckduckgo.com/ip3/sendgrid.com.ico" width="16" height="16" align="top" /> **SendGrid** Mail | [📄 OpenAPI](apis/openapi/sendgrid.com/mail/1.0.0/openapi.json) |
 
-➡️ More Communications APIs are in the [Quick access API Index](#jentic-public-apis).
+➡️ **[View all Communications APIs →](https://jentic.com/apis?category=communications)**
 
 </details>
 
@@ -103,7 +103,7 @@ The directory is organized into 22 categories. Below is a small sample from a fe
 | <img src="https://icons.duckduckgo.com/ip3/google.com.ico" width="16" height="16" align="top" /> **Google Sheets** | [📄 OpenAPI](apis/openapi/googleapis.com/sheets/v4/openapi.json) |
 | <img src="https://icons.duckduckgo.com/ip3/notion.so.ico" width="16" height="16" align="top" /> **Notion** | [📄 OpenAPI](apis/openapi/notion.com/notion-api/2026-03-11/openapi.json) |
 
-➡️ More Productivity APIs are in the [Quick access API Index](#jentic-public-apis).
+➡️ **[View all Productivity APIs →](https://jentic.com/apis?category=productivity)**
 
 </details>
 
@@ -124,7 +124,7 @@ The directory goes well beyond the usual suspects. Here's a taste of the long ta
 | <img src="https://icons.duckduckgo.com/ip3/chess.com.ico" width="16" height="16" align="top" /> **Chess.com** | Players, games &amp; stats | [📄 OpenAPI](apis/openapi/chess.com/main/1.0.0/openapi.json) |
 | <img src="https://icons.duckduckgo.com/ip3/lichess.org.ico" width="16" height="16" align="top" /> **Lichess** | Open chess platform | [📄 OpenAPI](apis/openapi/lichess.org/main/2.0.130/openapi.json) |
 
-> Looking for something else? Jump into the raw specs via the [Quick access API Index](#jentic-public-apis) above.
+> Looking for something else? Search the **[full API Directory →](https://jentic.com/apis)**, or jump into the raw specs via the [Quick access API Index](#jentic-public-apis) above.
 
 ## Overview
 
