@@ -193,7 +193,7 @@ Browsing 692 APIs starting with **S**.
 | [shrtlnk.dev](../../../../apis/openapi/shrtlnk.dev) | [shrtlnk](../../../../apis/openapi/shrtlnk.dev/shrtlnk) |
 | [shuffll.com](../../../../apis/openapi/shuffll.com) | [main](../../../../apis/openapi/shuffll.com/main) |
 | [shutterstock.com](../../../../apis/openapi/shutterstock.com) | [main](../../../../apis/openapi/shutterstock.com/main) |
-| [sieg.com](../../../../apis/openapi/sieg.com) | [baixar-eventos](../../../../apis/openapi/sieg.com/baixar-eventos) · [baixar-xml-por-nsu](../../../../apis/openapi/sieg.com/baixar-xml-por-nsu) · [buscar-xmls-por-nsu](../../../../apis/openapi/sieg.com/buscar-xmls-por-nsu) |
+| [sieg.com](../../../../apis/openapi/sieg.com) | [baixar-eventos](../../../../apis/openapi/sieg.com/baixar-eventos) · [baixar-xml-por-nsu](../../../../apis/openapi/sieg.com/baixar-xml-por-nsu) · [buscar-xmls-por-nsu](../../../../apis/openapi/sieg.com/buscar-xmls-por-nsu) · [enviar-xmls](../../../../apis/openapi/sieg.com/enviar-xmls) |
 | [sift.com](../../../../apis/openapi/sift.com) | [main](../../../../apis/openapi/sift.com/main) |
 | [sifterapp.com](../../../../apis/openapi/sifterapp.com) | [main](../../../../apis/openapi/sifterapp.com/main) |
 | [sightmap.com](../../../../apis/openapi/sightmap.com) | [engrain-sight-map](../../../../apis/openapi/sightmap.com/engrain-sight-map) |
