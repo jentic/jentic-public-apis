@@ -251,10 +251,10 @@ This project is licensed under the CC0 1.0 License - see the [LICENSE.md](LICENS
 
 ## Star History
 
-<a href="https://www.star-history.com/?repos=jentic%2Fjentic-public-apis&type=date&legend=top-left">
- <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=jentic/jentic-public-apis&type=date&theme=dark&legend=top-left" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=jentic/jentic-public-apis&type=date&legend=top-left" />
-   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=jentic/jentic-public-apis&type=date&legend=top-left" />
- </picture>
+<a href="https://www.star-history.com/#jentic/jentic-public-apis&Date">
+<picture>
+<source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=jentic/jentic-public-apis&type=Date&theme=dark" />
+<source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=jentic/jentic-public-apis&type=Date" />
+<img alt="Star History Chart" src="https://api.star-history.com/svg?repos=jentic/jentic-public-apis&type=Date" />
+</picture>
 </a>
