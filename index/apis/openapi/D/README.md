@@ -1,6 +1,6 @@
 # APIs — D
 
-Browsing 178 APIs starting with **D**.
+Browsing 179 APIs starting with **D**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · **D** · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -86,6 +86,7 @@ Browsing 178 APIs starting with **D**.
 | [dev.foodkit.io](../../../../apis/openapi/dev.foodkit.io) | [main](../../../../apis/openapi/dev.foodkit.io/main) |
 | [dev.socrata.com](../../../../apis/openapi/dev.socrata.com) | [main](../../../../apis/openapi/dev.socrata.com/main) |
 | [dev.to](../../../../apis/openapi/dev.to) | [chatgpt](../../../../apis/openapi/dev.to/chatgpt) · [main](../../../../apis/openapi/dev.to/main) |
+| [developer.aero](../../../../apis/openapi/developer.aero) | [main](../../../../apis/openapi/developer.aero/main) |
 | [developer.amazonservices.com](../../../../apis/openapi/developer.amazonservices.com) | [main](../../../../apis/openapi/developer.amazonservices.com/main) |
 | [developer.ap.org](../../../../apis/openapi/developer.ap.org) | [main](../../../../apis/openapi/developer.ap.org/main) |
 | [developer.junglescout.com](../../../../apis/openapi/developer.junglescout.com) | [junglescout](../../../../apis/openapi/developer.junglescout.com/junglescout) |
