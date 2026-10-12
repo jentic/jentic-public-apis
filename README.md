@@ -190,6 +190,8 @@ jentic inspect <operation>         # see its method, params, and schemas
 jentic execute <operation> --json  # call it through the Broker
 ```
 
+MCP-capable agents don't need the CLI in the loop. Jentic One also speaks **MCP**: a local `jentic mcp` server over stdio, or a Streamable HTTP endpoint at `/mcp`, exposes the same discover → execute loop as tools (`search_apis`, `inspect_operation`, `execute`), with every call still routed through the Broker. See [connecting an agent](https://github.com/jentic/jentic-one/blob/main/docs/guides/connecting-agents.md) for the MCP and raw-HTTP paths.
+
 Any of the thousands of APIs in this repository can be imported and executed this way.
 
 ## AI-Readiness Scoring
