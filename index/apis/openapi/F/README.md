@@ -1,6 +1,6 @@
 # APIs — F
 
-Browsing 119 APIs starting with **F**.
+Browsing 120 APIs starting with **F**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · **F** · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -62,6 +62,7 @@ Browsing 119 APIs starting with **F**.
 | [finapi.io](../../../../apis/openapi/finapi.io) | [main](../../../../apis/openapi/finapi.io/main) |
 | [findwork.dev](../../../../apis/openapi/findwork.dev) | [main](../../../../apis/openapi/findwork.dev/main) |
 | [fingerprint.com](../../../../apis/openapi/fingerprint.com) | [main](../../../../apis/openapi/fingerprint.com/main) |
+| [finicity.com](../../../../apis/openapi/finicity.com) | [main](../../../../apis/openapi/finicity.com/main) |
 | [finnhub.io](../../../../apis/openapi/finnhub.io) | [main](../../../../apis/openapi/finnhub.io/main) |
 | [finstar.ch](../../../../apis/openapi/finstar.ch) | [finstar-api](../../../../apis/openapi/finstar.ch/finstar-api) |
 | [fintel.io](../../../../apis/openapi/fintel.io) | [main](../../../../apis/openapi/fintel.io/main) |
