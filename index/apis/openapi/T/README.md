@@ -1,6 +1,6 @@
 # APIs — T
 
-Browsing 243 APIs starting with **T**.
+Browsing 244 APIs starting with **T**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · **T** · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -205,6 +205,7 @@ Browsing 243 APIs starting with **T**.
 | [transbank.cl](../../../../apis/openapi/transbank.cl) | [main](../../../../apis/openapi/transbank.cl/main) |
 | [transcript-yt.com](../../../../apis/openapi/transcript-yt.com) | [main](../../../../apis/openapi/transcript-yt.com/main) |
 | [transcriptapi.com](../../../../apis/openapi/transcriptapi.com) | [main](../../../../apis/openapi/transcriptapi.com/main) |
+| [transcriptfetch.com](../../../../apis/openapi/transcriptfetch.com) | [main](../../../../apis/openapi/transcriptfetch.com/main) |
 | [transit.app](../../../../apis/openapi/transit.app) | [main](../../../../apis/openapi/transit.app/main) |
 | [transitapp.com](../../../../apis/openapi/transitapp.com) | [main](../../../../apis/openapi/transitapp.com/main) |
 | [transitfeeds.com](../../../../apis/openapi/transitfeeds.com) | [main](../../../../apis/openapi/transitfeeds.com/main) |
