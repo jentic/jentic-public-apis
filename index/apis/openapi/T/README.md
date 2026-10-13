@@ -1,6 +1,6 @@
 # APIs — T
 
-Browsing 240 APIs starting with **T**.
+Browsing 241 APIs starting with **T**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · **T** · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -43,6 +43,7 @@ Browsing 240 APIs starting with **T**.
 | [tavusapi.com](../../../../apis/openapi/tavusapi.com) | [tavus](../../../../apis/openapi/tavusapi.com/tavus) |
 | [taxamo.com](../../../../apis/openapi/taxamo.com) | [main](../../../../apis/openapi/taxamo.com/main) · [taxamo](../../../../apis/openapi/taxamo.com/taxamo) |
 | [taxbandits.com](../../../../apis/openapi/taxbandits.com) | [taxbandits-api](../../../../apis/openapi/taxbandits.com/taxbandits-api) |
+| [taxid.dev](../../../../apis/openapi/taxid.dev) | [main](../../../../apis/openapi/taxid.dev/main) |
 | [taxjar.com](../../../../apis/openapi/taxjar.com) | [main](../../../../apis/openapi/taxjar.com/main) |
 | [taxrates.io](../../../../apis/openapi/taxrates.io) | [main](../../../../apis/openapi/taxrates.io/main) · [taxrates.io-api](../../../../apis/openapi/taxrates.io/taxrates.io-api) |
 | [tcdial.com](../../../../apis/openapi/tcdial.com) | [main](../../../../apis/openapi/tcdial.com/main) |
