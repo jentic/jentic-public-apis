@@ -1,6 +1,6 @@
 # APIs — S
 
-Browsing 695 APIs starting with **S**.
+Browsing 696 APIs starting with **S**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · **S** · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -107,6 +107,7 @@ Browsing 695 APIs starting with **S**.
 | [seektable.com](../../../../apis/openapi/seektable.com) | [main](../../../../apis/openapi/seektable.com/main) |
 | [segment.com](../../../../apis/openapi/segment.com) | [main](../../../../apis/openapi/segment.com/main) |
 | [segmentapis.com](../../../../apis/openapi/segmentapis.com) | [main](../../../../apis/openapi/segmentapis.com/main) |
+| [selda.ai](../../../../apis/openapi/selda.ai) | [main](../../../../apis/openapi/selda.ai/main) |
 | [seldon.local](../../../../apis/openapi/seldon.local) | [engine](../../../../apis/openapi/seldon.local/engine) · [wrapper](../../../../apis/openapi/seldon.local/wrapper) |
 | [selectpdf.com](../../../../apis/openapi/selectpdf.com) | [main](../../../../apis/openapi/selectpdf.com/main) |
 | [seller.flipkart.com](../../../../apis/openapi/seller.flipkart.com) | [main](../../../../apis/openapi/seller.flipkart.com/main) |
