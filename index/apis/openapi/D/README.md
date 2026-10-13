@@ -1,6 +1,6 @@
 # APIs — D
 
-Browsing 181 APIs starting with **D**.
+Browsing 182 APIs starting with **D**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · **D** · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -131,6 +131,7 @@ Browsing 181 APIs starting with **D**.
 | [dnb.no](../../../../apis/openapi/dnb.no) | [main](../../../../apis/openapi/dnb.no/main) |
 | [dnd5eapi.co](../../../../apis/openapi/dnd5eapi.co) | [main](../../../../apis/openapi/dnd5eapi.co/main) |
 | [dntly.com](../../../../apis/openapi/dntly.com) | [donately-api](../../../../apis/openapi/dntly.com/donately-api) |
+| [doc.cheap](../../../../apis/openapi/doc.cheap) | [main](../../../../apis/openapi/doc.cheap/main) |
 | [doc.concordnow.com](../../../../apis/openapi/doc.concordnow.com) | [main](../../../../apis/openapi/doc.concordnow.com/main) |
 | [docassemble.org](../../../../apis/openapi/docassemble.org) | [main](../../../../apis/openapi/docassemble.org/main) |
 | [docker.com](../../../../apis/openapi/docker.com) | [engine](../../../../apis/openapi/docker.com/engine) |
