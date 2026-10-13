@@ -1,6 +1,6 @@
 # APIs — S
 
-Browsing 696 APIs starting with **S**.
+Browsing 697 APIs starting with **S**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · **S** · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -12,6 +12,7 @@ Browsing 696 APIs starting with **S**.
 | [sabre.com](../../../../apis/openapi/sabre.com) | [main](../../../../apis/openapi/sabre.com/main) |
 | [safaricom.co.ke](../../../../apis/openapi/safaricom.co.ke) | [main](../../../../apis/openapi/safaricom.co.ke/main) |
 | [safaricom.et](../../../../apis/openapi/safaricom.et) | [main](../../../../apis/openapi/safaricom.et/main) |
+| [safereel.ai](../../../../apis/openapi/safereel.ai) | [main](../../../../apis/openapi/safereel.ai/main) |
 | [safetyculture.io](../../../../apis/openapi/safetyculture.io) | [main](../../../../apis/openapi/safetyculture.io/main) |
 | [sage.com](../../../../apis/openapi/sage.com) | [sage](../../../../apis/openapi/sage.com/sage) |
 | [sage.hr](../../../../apis/openapi/sage.hr) | [main](../../../../apis/openapi/sage.hr/main) |
