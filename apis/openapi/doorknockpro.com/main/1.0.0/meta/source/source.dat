@@ -1,0 +1,1021 @@
+openapi: 3.1.0
+info:
+  title: Door Knock Pro Public API
+  version: '1.0.0'
+  description: |
+    REST API for Door Knock Pro (DKP). Lets external systems read and write
+    leads, appointments, territories, users, activity and knock history,
+    and subscribe to outbound webhooks.
+
+    ## Authentication
+
+    Two-layer auth model:
+
+    1. **API Key** (company-level) — sent as `X-Api-Key: dkp_...` on every request.
+       Identifies the company, enforces abilities, IP allowlist, and rate limits.
+
+    2. **User Access Token** (per-user, optional) — sent as `Authorization: Bearer <token>`.
+       Obtained via `POST /v1/auth/login`. Identifies the specific user making the request.
+       Self-contained signed token (8h expiry, no server-side state).
+
+    ### Server-to-server mode
+
+    If no user token is provided, actions are attributed to a virtual
+    "service account" (e.g. "Zapier Integration"). The API key alone is
+    sufficient for server-to-server integrations.
+
+    ### Rate limits
+
+    - 60 requests/minute per API key (company-level)
+    - 100 requests/minute per user token (prevents one user from exhausting the company quota)
+
+    All endpoints are scoped to the company that owns the API key.
+    Cross-tenant access is impossible by design.
+  contact:
+    name: Door Knock Pro Engineering
+    url: https://doorknockpro.com
+servers:
+  - url: https://app.doorknockpro.com/api
+    description: Production
+
+tags:
+  - name: Auth
+  - name: Identity
+  - name: Leads
+  - name: Appointments
+  - name: Territories
+  - name: Users
+  - name: Lookups
+  - name: Webhooks
+
+security:
+  - ApiKeyAuth: []
+    BearerAuth: []
+
+paths:
+  /v1/auth/login:
+    post:
+      tags: [Auth]
+      summary: Authenticate a user (returns access token)
+      operationId: login
+      description: |
+        Authenticates a user within the company identified by the API key.
+        Returns a short-lived access token (8h) to use on subsequent requests.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email: { type: string, format: email }
+                password: { type: string }
+      responses:
+        '200':
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  access_token: { type: string }
+                  token_type: { type: string, example: Bearer }
+                  expires_in: { type: integer, example: 28800 }
+                  user:
+                    type: object
+                    properties:
+                      id: { type: integer }
+                      name: { type: string }
+                      email: { type: string }
+                      role: { type: string, nullable: true }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /v1/auth/logout:
+    post:
+      tags: [Auth]
+      summary: Invalidate the current access token
+      operationId: logout
+      responses:
+        '200':
+          description: Logged out
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: { type: string }
+
+  /v1/me:
+    get:
+      tags: [Identity]
+      summary: Get the authenticated user, company and current token
+      operationId: getMe
+      responses:
+        '200': { $ref: '#/components/responses/Me' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /v1/leads:
+    get:
+      tags: [Leads]
+      summary: List leads
+      operationId: listLeads
+      parameters:
+        - $ref: '#/components/parameters/PerPage'
+        - $ref: '#/components/parameters/Page'
+        - in: query
+          name: team_id
+          schema: { type: integer }
+        - in: query
+          name: status_id
+          schema: { type: integer }
+        - in: query
+          name: updated_since
+          schema: { type: string, format: date-time }
+        - in: query
+          name: q
+          schema: { type: string, maxLength: 120 }
+        - in: query
+          name: include
+          description: 'Comma-separated list. Allowed: status, assignedTo, team'
+          schema: { type: string }
+      responses:
+        '200':
+          description: Paginated leads
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PaginationEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: '#/components/schemas/Lead' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [Leads]
+      summary: Create a lead
+      operationId: createLead
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LeadInput' }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/Lead' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /v1/leads/{id}:
+    parameters:
+      - $ref: '#/components/parameters/IdPath'
+    get:
+      tags: [Leads]
+      summary: Show a lead
+      operationId: showLead
+      parameters:
+        - in: query
+          name: include
+          schema: { type: string }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/Lead' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      tags: [Leads]
+      summary: Update a lead
+      operationId: updateLead
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LeadInput' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/Lead' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+    delete:
+      tags: [Leads]
+      summary: Soft-delete a lead
+      operationId: deleteLead
+      responses:
+        '204': { description: Deleted }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /v1/leads/{id}/history:
+    parameters:
+      - $ref: '#/components/parameters/IdPath'
+    get:
+      tags: [Leads]
+      summary: Activity history for a single lead
+      operationId: leadHistory
+      parameters:
+        - $ref: '#/components/parameters/PerPage'
+        - in: query
+          name: since
+          schema: { type: string, format: date-time }
+      responses:
+        '200':
+          description: Paginated activity entries
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PaginationEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: '#/components/schemas/Activity' }
+
+  /v1/appointments:
+    get:
+      tags: [Appointments]
+      summary: List appointments
+      operationId: listAppointments
+      parameters:
+        - $ref: '#/components/parameters/PerPage'
+        - $ref: '#/components/parameters/Page'
+        - in: query
+          name: lead_id
+          schema: { type: integer }
+        - in: query
+          name: assigned_to
+          schema: { type: integer }
+        - in: query
+          name: status
+          schema: { type: string, enum: [pending, confirmed, done, canceled] }
+        - in: query
+          name: from
+          schema: { type: string, format: date-time }
+        - in: query
+          name: to
+          schema: { type: string, format: date-time }
+      responses:
+        '200':
+          description: Paginated appointments
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PaginationEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: '#/components/schemas/Appointment' }
+    post:
+      tags: [Appointments]
+      summary: Create an appointment
+      operationId: createAppointment
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AppointmentInput' }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/Appointment' }
+
+  /v1/appointments/{id}:
+    parameters:
+      - $ref: '#/components/parameters/IdPath'
+    get:
+      tags: [Appointments]
+      summary: Show an appointment
+      operationId: showAppointment
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/Appointment' }
+    patch:
+      tags: [Appointments]
+      summary: Update an appointment
+      operationId: updateAppointment
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AppointmentInput' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/Appointment' }
+    delete:
+      tags: [Appointments]
+      summary: Soft-delete an appointment
+      operationId: deleteAppointment
+      responses:
+        '204': { description: Deleted }
+
+  /v1/territories:
+    get:
+      tags: [Territories]
+      summary: List territories
+      operationId: listTerritories
+      parameters:
+        - $ref: '#/components/parameters/PerPage'
+        - in: query
+          name: type
+          schema: { type: string }
+        - in: query
+          name: q
+          schema: { type: string }
+      responses:
+        '200':
+          description: Paginated territories
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PaginationEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: '#/components/schemas/Territory' }
+
+  /v1/territories/{id}:
+    parameters:
+      - $ref: '#/components/parameters/IdPath'
+    get:
+      tags: [Territories]
+      summary: Show a territory
+      operationId: showTerritory
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/Territory' }
+
+  /v1/territories/{id}/leads:
+    parameters:
+      - $ref: '#/components/parameters/IdPath'
+    get:
+      tags: [Territories]
+      summary: Search leads within a territory
+      operationId: territoryLeads
+      description: Returns leads whose GPS coordinates fall inside the territory's boundary polygon. Supports optional filters.
+      parameters:
+        - $ref: '#/components/parameters/PerPage'
+        - in: query
+          name: from
+          description: Filter leads created on or after this date
+          schema: { type: string, format: date }
+        - in: query
+          name: to
+          description: Filter leads created on or before this date
+          schema: { type: string, format: date }
+        - in: query
+          name: user_id
+          description: Filter by created_by user ID
+          schema: { type: integer }
+        - in: query
+          name: team_id
+          description: Filter by team ID
+          schema: { type: integer }
+        - in: query
+          name: status_id
+          description: Filter by lead status ID
+          schema: { type: integer }
+      responses:
+        '200':
+          description: Paginated leads within the territory
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PaginationEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: '#/components/schemas/Lead' }
+
+  /v1/users:
+    get:
+      tags: [Users]
+      summary: List company users / reps
+      operationId: listUsers
+      parameters:
+        - $ref: '#/components/parameters/PerPage'
+        - in: query
+          name: team_id
+          schema: { type: integer }
+        - in: query
+          name: status
+          schema: { type: integer }
+        - in: query
+          name: q
+          schema: { type: string }
+      responses:
+        '200':
+          description: Paginated users
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PaginationEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: '#/components/schemas/User' }
+
+  /v1/users/{id}:
+    parameters:
+      - $ref: '#/components/parameters/IdPath'
+    get:
+      tags: [Users]
+      summary: Show a user
+      operationId: showUser
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/User' }
+
+  /v1/teams:
+    get:
+      tags: [Lookups]
+      summary: List teams
+      operationId: listTeams
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: integer }
+                        name: { type: string }
+
+  /v1/lead-statuses:
+    get:
+      tags: [Lookups]
+      summary: List configured lead statuses
+      operationId: listLeadStatuses
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/LeadStatus' }
+
+  /v1/property-types:
+    get:
+      tags: [Lookups]
+      summary: List property types
+      operationId: listPropertyTypes
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: integer }
+                        name: { type: string }
+
+  /v1/webhooks/events:
+    get:
+      tags: [Webhooks]
+      summary: List event types you can subscribe to
+      operationId: listWebhookEvents
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/WebhookEvent' }
+
+  /v1/webhooks:
+    get:
+      tags: [Webhooks]
+      summary: List webhook endpoints
+      operationId: listWebhookEndpoints
+      responses:
+        '200':
+          description: Paginated endpoints
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PaginationEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: '#/components/schemas/WebhookEndpoint' }
+    post:
+      tags: [Webhooks]
+      summary: Create a webhook endpoint (signing secret is returned once)
+      operationId: createWebhookEndpoint
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/WebhookEndpointInput' }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    allOf:
+                      - $ref: '#/components/schemas/WebhookEndpoint'
+                      - type: object
+                        properties:
+                          secret: { type: string, description: 'HMAC-SHA256 signing secret. Shown once.' }
+
+  /v1/webhooks/{id}:
+    parameters:
+      - $ref: '#/components/parameters/IdPath'
+    get:
+      tags: [Webhooks]
+      summary: Show a webhook endpoint
+      operationId: showWebhookEndpoint
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/WebhookEndpoint' }
+    patch:
+      tags: [Webhooks]
+      summary: Update endpoint or rotate its signing secret
+      operationId: updateWebhookEndpoint
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/WebhookEndpointInput'
+                - type: object
+                  properties:
+                    rotate_secret: { type: boolean }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/WebhookEndpoint' }
+    delete:
+      tags: [Webhooks]
+      summary: Delete a webhook endpoint
+      operationId: deleteWebhookEndpoint
+      responses:
+        '204': { description: Deleted }
+
+  /v1/webhooks/{id}/test:
+    parameters:
+      - $ref: '#/components/parameters/IdPath'
+    post:
+      tags: [Webhooks]
+      summary: Queue a synthetic webhook.ping delivery
+      operationId: testWebhookEndpoint
+      responses:
+        '202':
+          description: Queued
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  queued: { type: boolean }
+                  delivery_id: { type: string, format: uuid }
+
+  /v1/webhooks/deliveries:
+    get:
+      tags: [Webhooks]
+      summary: List recent webhook delivery attempts
+      operationId: listWebhookDeliveries
+      parameters:
+        - $ref: '#/components/parameters/PerPage'
+        - in: query
+          name: endpoint_id
+          schema: { type: integer }
+        - in: query
+          name: event
+          schema: { type: string }
+        - in: query
+          name: status
+          schema: { type: string, enum: [pending, succeeded, failed, dead] }
+      responses:
+        '200':
+          description: Paginated deliveries
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PaginationEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: '#/components/schemas/WebhookDelivery' }
+
+  /v1/webhooks/deliveries/{id}/replay:
+    parameters:
+      - $ref: '#/components/parameters/IdPath'
+    post:
+      tags: [Webhooks]
+      summary: Replay a delivery
+      operationId: replayWebhookDelivery
+      responses:
+        '202':
+          description: Queued
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  queued: { type: boolean }
+                  delivery_id: { type: string, format: uuid }
+
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-Api-Key
+      description: 'Company API key (format: dkp_...). Required on every request.'
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: 'User access token returned by POST /v1/auth/login. Optional for simple integrations.'
+
+  parameters:
+    PerPage:
+      in: query
+      name: per_page
+      schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+    Page:
+      in: query
+      name: page
+      schema: { type: integer, minimum: 1, default: 1 }
+    IdPath:
+      in: path
+      name: id
+      required: true
+      schema: { type: integer }
+
+  responses:
+    Me:
+      description: Authenticated identity
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              data:
+                type: object
+                properties:
+                  user:
+                    type: object
+                    properties:
+                      id:    { type: integer }
+                      name:  { type: string }
+                      email: { type: string }
+                  company:
+                    type: object
+                    nullable: true
+                    properties:
+                      id:   { type: integer }
+                      name: { type: string }
+                  token:
+                    type: object
+                    properties:
+                      id:           { type: integer }
+                      name:         { type: string }
+                      abilities:    { type: array, items: { type: string } }
+                      last_used_at: { type: string, format: date-time, nullable: true }
+                      expires_at:   { type: string, format: date-time, nullable: true }
+                  api_version: { type: string }
+    Unauthorized:
+      description: Missing or invalid token
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Forbidden:
+      description: Token lacks the required ability or feature is disabled
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    NotFound:
+      description: Resource not found (or belongs to another tenant)
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    ValidationError:
+      description: Request body failed validation
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              message: { type: string }
+              errors:
+                type: object
+                additionalProperties:
+                  type: array
+                  items: { type: string }
+
+  schemas:
+    Error:
+      type: object
+      properties:
+        message: { type: string }
+        error:   { type: string }
+
+    PaginationEnvelope:
+      type: object
+      properties:
+        links:
+          type: object
+          properties:
+            first: { type: string, nullable: true }
+            last:  { type: string, nullable: true }
+            prev:  { type: string, nullable: true }
+            next:  { type: string, nullable: true }
+        meta:
+          type: object
+          properties:
+            current_page: { type: integer }
+            from:         { type: integer, nullable: true }
+            last_page:    { type: integer }
+            per_page:     { type: integer }
+            to:           { type: integer, nullable: true }
+            total:        { type: integer }
+
+    Lead:
+      type: object
+      properties:
+        id:              { type: integer }
+        name:            { type: string, nullable: true }
+        email:           { type: string, nullable: true }
+        phone:           { type: string, nullable: true }
+        alter_email:     { type: string, nullable: true }
+        alter_phone:     { type: string, nullable: true }
+        notes:           { type: string, nullable: true }
+        property_type_id: { type: integer, nullable: true }
+        team_id:         { type: integer, nullable: true }
+        created_by:      { type: integer, nullable: true }
+        lead_status_id:  { type: integer, nullable: true }
+        appointment:     { type: string, format: date-time, nullable: true }
+        related_assets:  { type: array, items: { type: string }, nullable: true }
+        address:
+          type: object
+          properties:
+            house:          { type: string, nullable: true }
+            street:         { type: string, nullable: true }
+            city:           { type: string, nullable: true }
+            state_province: { type: string, nullable: true }
+            country:        { type: string, nullable: true }
+            zip_code:       { type: string, nullable: true }
+        location:
+          type: object
+          properties:
+            lat: { type: number, nullable: true }
+            lng: { type: number, nullable: true }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time, nullable: true }
+
+    LeadInput:
+      type: object
+      required: [latitude, longitude, lead_status_id]
+      properties:
+        name:             { type: string }
+        email:            { type: string, format: email }
+        phone:            { type: string }
+        alter_email:      { type: string, format: email }
+        alter_phone:      { type: string }
+        notes:            { type: string }
+        house:            { type: string }
+        street:           { type: string }
+        city:             { type: string }
+        state_province:   { type: string }
+        country:          { type: string }
+        zip_code:         { type: string }
+        latitude:         { type: number, minimum: -90,  maximum: 90 }
+        longitude:        { type: number, minimum: -180, maximum: 180 }
+        property_type_id: { type: integer }
+        team_id:          { type: integer }
+        lead_status_id:   { type: integer }
+        appointment:      { type: string, format: date-time }
+        related_assets:   { type: array, items: { type: string } }
+
+    Appointment:
+      type: object
+      properties:
+        id:                { type: integer }
+        lead_id:           { type: integer, nullable: true }
+        title:             { type: string, nullable: true }
+        notes:             { type: string, nullable: true }
+        status:            { type: string }
+        duration_minutes:  { type: integer, nullable: true }
+        reminder_sent:     { type: boolean }
+        appointment_date:  { type: string, format: date-time, nullable: true }
+        appointment_time:  { type: string, nullable: true }
+        created_by:        { type: integer, nullable: true }
+        assigned_to:       { type: integer, nullable: true }
+        created_at:        { type: string, format: date-time }
+        updated_at:        { type: string, format: date-time, nullable: true }
+
+    AppointmentInput:
+      type: object
+      required: [appointment_date]
+      properties:
+        lead_id:          { type: integer }
+        title:            { type: string }
+        notes:            { type: string }
+        appointment_date: { type: string, format: date-time }
+        appointment_time: { type: string, pattern: '^\d{2}:\d{2}$' }
+        duration_minutes: { type: integer, minimum: 1, maximum: 1440 }
+        status:           { type: string, enum: [pending, confirmed, done, canceled] }
+        assigned_to:      { type: integer }
+
+    Territory:
+      type: object
+      properties:
+        id:           { type: integer }
+        name:         { type: string }
+        description:  { type: string, nullable: true }
+        color:        { type: string, nullable: true }
+        type:         { type: string }
+        status:       { type: boolean }
+        coordinates:  { type: array, items: { type: object, additionalProperties: true } }
+        added_by:     { type: integer }
+        members_count: { type: integer, nullable: true }
+        created_at:   { type: string, format: date-time }
+        updated_at:   { type: string, format: date-time, nullable: true }
+
+    User:
+      type: object
+      properties:
+        id:         { type: integer }
+        name:       { type: string }
+        email:      { type: string }
+        mobile:     { type: string, nullable: true }
+        team_id:    { type: integer, nullable: true }
+        role_id:    { type: integer, nullable: true }
+        status:     { type: integer, nullable: true }
+        login:      { type: string, nullable: true }
+        timezone:   { type: string, nullable: true }
+        last_login: { type: string, format: date-time, nullable: true }
+        created_at: { type: string, format: date-time }
+
+    LeadStatus:
+      type: object
+      properties:
+        id:         { type: integer }
+        name:       { type: string }
+        color:      { type: string }
+        icon:       { type: string, nullable: true }
+        is_active:  { type: boolean }
+        order:      { type: integer, nullable: true }
+
+    Activity:
+      type: object
+      description: A history entry for a lead (from dashboard_logs).
+      properties:
+        id:         { type: integer }
+        action:     { type: string }
+        data:       { type: object, additionalProperties: true, nullable: true }
+        user_id:    { type: integer, nullable: true }
+        created_at: { type: string, format: date-time }
+
+    WebhookEvent:
+      type: object
+      properties:
+        id:          { type: string }
+        group:       { type: string }
+        label:       { type: string }
+        description: { type: string }
+
+    WebhookEndpoint:
+      type: object
+      properties:
+        id:                   { type: integer }
+        url:                  { type: string }
+        description:          { type: string, nullable: true }
+        events:               { type: array, items: { type: string } }
+        headers:              { type: object, additionalProperties: { type: string }, nullable: true }
+        is_active:            { type: boolean }
+        consecutive_failures: { type: integer }
+        last_success_at:      { type: string, format: date-time, nullable: true }
+        last_failure_at:      { type: string, format: date-time, nullable: true }
+        created_at:           { type: string, format: date-time }
+        updated_at:           { type: string, format: date-time, nullable: true }
+
+    WebhookEndpointInput:
+      type: object
+      required: [url, events]
+      properties:
+        url:         { type: string, format: uri, maxLength: 2048 }
+        description: { type: string }
+        events:
+          type: array
+          minItems: 1
+          items:
+            type: string
+            example: lead.created
+        headers:
+          type: object
+          additionalProperties: { type: string }
+        is_active: { type: boolean }
+
+    WebhookDelivery:
+      type: object
+      properties:
+        id:            { type: integer }
+        delivery_id:   { type: string, format: uuid }
+        endpoint_id:   { type: integer }
+        event:         { type: string }
+        status:        { type: string, enum: [pending, succeeded, failed, dead] }
+        attempts:      { type: integer }
+        response_code: { type: integer, nullable: true }
+        response_body: { type: string, nullable: true }
+        error:         { type: string, nullable: true }
+        next_retry_at: { type: string, format: date-time, nullable: true }
+        delivered_at:  { type: string, format: date-time, nullable: true }
+        created_at:    { type: string, format: date-time }
