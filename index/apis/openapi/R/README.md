@@ -1,6 +1,6 @@
 # APIs — R
 
-Browsing 245 APIs starting with **R**.
+Browsing 246 APIs starting with **R**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · **R** · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -33,6 +33,7 @@ Browsing 245 APIs starting with **R**.
 | [rasa.io](../../../../apis/openapi/rasa.io) | [main](../../../../apis/openapi/rasa.io/main) |
 | [rasayel.io](../../../../apis/openapi/rasayel.io) | [main](../../../../apis/openapi/rasayel.io/main) |
 | [rasterwise.com](../../../../apis/openapi/rasterwise.com) | [main](../../../../apis/openapi/rasterwise.com/main) |
+| [rate-api.com](../../../../apis/openapi/rate-api.com) | [main](../../../../apis/openapi/rate-api.com/main) |
 | [ratemyagent.com](../../../../apis/openapi/ratemyagent.com) | [main](../../../../apis/openapi/ratemyagent.com/main) |
 | [rawg.io](../../../../apis/openapi/rawg.io) | [main](../../../../apis/openapi/rawg.io/main) |
 | [raygun.com](../../../../apis/openapi/raygun.com) | [main](../../../../apis/openapi/raygun.com/main) |
