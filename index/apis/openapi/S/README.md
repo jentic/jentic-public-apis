@@ -1,6 +1,6 @@
 # APIs — S
 
-Browsing 699 APIs starting with **S**.
+Browsing 700 APIs starting with **S**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · **S** · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -27,6 +27,7 @@ Browsing 699 APIs starting with **S**.
 | [salesflare.com](../../../../apis/openapi/salesflare.com) | [salesflare](../../../../apis/openapi/salesflare.com/salesflare) |
 | [salesforce.com](../../../../apis/openapi/salesforce.com) | [main](../../../../apis/openapi/salesforce.com/main) |
 | [salesloft.com](../../../../apis/openapi/salesloft.com) | [main](../../../../apis/openapi/salesloft.com/main) · [salesloft-platform](../../../../apis/openapi/salesloft.com/salesloft-platform) |
+| [salestaxcalculatorapi.com](../../../../apis/openapi/salestaxcalculatorapi.com) | [main](../../../../apis/openapi/salestaxcalculatorapi.com/main) |
 | [salesup.com](../../../../apis/openapi/salesup.com) | [main](../../../../apis/openapi/salesup.com/main) |
 | [saltedge.com](../../../../apis/openapi/saltedge.com) | [main](../../../../apis/openapi/saltedge.com/main) |
 | [saltproject.io](../../../../apis/openapi/saltproject.io) | [main](../../../../apis/openapi/saltproject.io/main) |
