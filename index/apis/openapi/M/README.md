@@ -1,6 +1,6 @@
 # APIs — M
 
-Browsing 253 APIs starting with **M**.
+Browsing 254 APIs starting with **M**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · **M** · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -255,6 +255,7 @@ Browsing 253 APIs starting with **M**.
 | [mymemory.translated.net](../../../../apis/openapi/mymemory.translated.net) | [main](../../../../apis/openapi/mymemory.translated.net/main) |
 | [mymip.be](../../../../apis/openapi/mymip.be) | [mip-api](../../../../apis/openapi/mymip.be/mip-api) |
 | [myplantnet.org](../../../../apis/openapi/myplantnet.org) | [main](../../../../apis/openapi/myplantnet.org/main) |
+| [mypuma.net](../../../../apis/openapi/mypuma.net) | [main](../../../../apis/openapi/mypuma.net/main) |
 | [mysql.com](../../../../apis/openapi/mysql.com) | [main](../../../../apis/openapi/mysql.com/main) |
 | [mytime.com](../../../../apis/openapi/mytime.com) | [main](../../../../apis/openapi/mytime.com/main) |
 | [myworkerai.com](../../../../apis/openapi/myworkerai.com) | [main](../../../../apis/openapi/myworkerai.com/main) |
