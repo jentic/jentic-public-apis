@@ -1,6 +1,6 @@
 # APIs — A
 
-Browsing 426 APIs starting with **A**.
+Browsing 427 APIs starting with **A**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · **A** · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -102,6 +102,7 @@ Browsing 426 APIs starting with **A**.
 | [aidaform.com](../../../../apis/openapi/aidaform.com) | [main](../../../../apis/openapi/aidaform.com/main) |
 | [aidbase](../../../../apis/openapi/aidbase) | [main](../../../../apis/openapi/aidbase/main) |
 | [aidbase.ai](../../../../apis/openapi/aidbase.ai) | [main](../../../../apis/openapi/aidbase.ai/main) |
+| [aidecisions.ai](../../../../apis/openapi/aidecisions.ai) | [main](../../../../apis/openapi/aidecisions.ai/main) |
 | [aiforthai.in.th](../../../../apis/openapi/aiforthai.in.th) | [ai-for-thai](../../../../apis/openapi/aiforthai.in.th/ai-for-thai) |
 | [aimastering.com](../../../../apis/openapi/aimastering.com) | [main](../../../../apis/openapi/aimastering.com/main) |
 | [aimlapi.com](../../../../apis/openapi/aimlapi.com) | [aiml-api](../../../../apis/openapi/aimlapi.com/aiml-api) · [aimlapi](../../../../apis/openapi/aimlapi.com/aimlapi) |
