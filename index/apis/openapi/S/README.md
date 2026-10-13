@@ -440,7 +440,7 @@ Browsing 692 APIs starting with **S**.
 | [superfeedr.com](../../../../apis/openapi/superfeedr.com) | [main](../../../../apis/openapi/superfeedr.com/main) |
 | [supergood.ai](../../../../apis/openapi/supergood.ai) | [main](../../../../apis/openapi/supergood.ai/main) |
 | [superheroapi.com](../../../../apis/openapi/superheroapi.com) | [main](../../../../apis/openapi/superheroapi.com/main) · [superheroes](../../../../apis/openapi/superheroapi.com/superheroes) |
-| [supportbox.cz](../../../../apis/openapi/supportbox.cz) | [supportbox](../../../../apis/openapi/supportbox.cz/supportbox) |
+| [supportbox.cz](../../../../apis/openapi/supportbox.cz) | [supportbox](../../../../apis/openapi/supportbox.cz/supportbox) · [supportbox-2](../../../../apis/openapi/supportbox.cz/supportbox-2) |
 | [supportivekoala.com](../../../../apis/openapi/supportivekoala.com) | [main](../../../../apis/openapi/supportivekoala.com/main) |
 | [suqoof.com](../../../../apis/openapi/suqoof.com) | [main](../../../../apis/openapi/suqoof.com/main) |
 | [surecart.com](../../../../apis/openapi/surecart.com) | [main](../../../../apis/openapi/surecart.com/main) |
