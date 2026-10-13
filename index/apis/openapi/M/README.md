@@ -1,6 +1,6 @@
 # APIs — M
 
-Browsing 256 APIs starting with **M**.
+Browsing 257 APIs starting with **M**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · **M** · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -28,6 +28,7 @@ Browsing 256 APIs starting with **M**.
 | [mailinabox.email](../../../../apis/openapi/mailinabox.email) | [main](../../../../apis/openapi/mailinabox.email/main) |
 | [mailjet.com](../../../../apis/openapi/mailjet.com) | [main](../../../../apis/openapi/mailjet.com/main) |
 | [mailosaur.com](../../../../apis/openapi/mailosaur.com) | [main](../../../../apis/openapi/mailosaur.com/main) |
+| [mailrambo.com](../../../../apis/openapi/mailrambo.com) | [main](../../../../apis/openapi/mailrambo.com/main) |
 | [mailsac.com](../../../../apis/openapi/mailsac.com) | [mailsac](../../../../apis/openapi/mailsac.com/mailsac) · [mailsac-api](../../../../apis/openapi/mailsac.com/mailsac-api) |
 | [mailslurp.com](../../../../apis/openapi/mailslurp.com) | [main](../../../../apis/openapi/mailslurp.com/main) |
 | [mailtrap.io](../../../../apis/openapi/mailtrap.io) | [mailtrap-api](../../../../apis/openapi/mailtrap.io/mailtrap-api) · [main](../../../../apis/openapi/mailtrap.io/main) |
