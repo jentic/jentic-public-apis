@@ -1,6 +1,6 @@
 # APIs — A
 
-Browsing 446 APIs starting with **A**.
+Browsing 447 APIs starting with **A**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · **A** · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -20,6 +20,7 @@ Browsing 446 APIs starting with **A**.
 | [abuse.ch](../../../../apis/openapi/abuse.ch) | [main](../../../../apis/openapi/abuse.ch/main) |
 | [abusech](../../../../apis/openapi/abusech) | [main](../../../../apis/openapi/abusech/main) |
 | [abuseipdb.com](../../../../apis/openapi/abuseipdb.com) | [abuseipdb-api](../../../../apis/openapi/abuseipdb.com/abuseipdb-api) · [main](../../../../apis/openapi/abuseipdb.com/main) |
+| [abuzzhive.com](../../../../apis/openapi/abuzzhive.com) | [main](../../../../apis/openapi/abuzzhive.com/main) |
 | [academictorrents.com](../../../../apis/openapi/academictorrents.com) | [academic-torrents-api](../../../../apis/openapi/academictorrents.com/academic-torrents-api) |
 | [accela.com](../../../../apis/openapi/accela.com) | [accela-civic-platform-api](../../../../apis/openapi/accela.com/accela-civic-platform-api) · [main](../../../../apis/openapi/accela.com/main) |
 | [accelo.com](../../../../apis/openapi/accelo.com) | [main](../../../../apis/openapi/accelo.com/main) |
