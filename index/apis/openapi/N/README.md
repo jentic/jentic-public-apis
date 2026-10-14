@@ -1,6 +1,6 @@
 # APIs — N
 
-Browsing 165 APIs starting with **N**.
+Browsing 166 APIs starting with **N**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · **N** · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -105,6 +105,7 @@ Browsing 165 APIs starting with **N**.
 | [niftyimages.com](../../../../apis/openapi/niftyimages.com) | [main](../../../../apis/openapi/niftyimages.com/main) |
 | [nimble.com](../../../../apis/openapi/nimble.com) | [main](../../../../apis/openapi/nimble.com/main) |
 | [ninety.io](../../../../apis/openapi/ninety.io) |  |
+| [ninjachat.ai](../../../../apis/openapi/ninjachat.ai) | [main](../../../../apis/openapi/ninjachat.ai/main) |
 | [ninjavan.co](../../../../apis/openapi/ninjavan.co) | [main](../../../../apis/openapi/ninjavan.co/main) |
 | [ninox.com](../../../../apis/openapi/ninox.com) | [ninox-api](../../../../apis/openapi/ninox.com/ninox-api) |
 | [ninoxdb.de](../../../../apis/openapi/ninoxdb.de) | [main](../../../../apis/openapi/ninoxdb.de/main) |
