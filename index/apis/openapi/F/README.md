@@ -1,6 +1,6 @@
 # APIs — F
 
-Browsing 130 APIs starting with **F**.
+Browsing 131 APIs starting with **F**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · **F** · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -74,6 +74,7 @@ Browsing 130 APIs starting with **F**.
 | [firebasehosting.googleapis.com](../../../../apis/openapi/firebasehosting.googleapis.com) | [main](../../../../apis/openapi/firebasehosting.googleapis.com/main) |
 | [firecrawl.dev](../../../../apis/openapi/firecrawl.dev) | [main](../../../../apis/openapi/firecrawl.dev/main) |
 | [fireflies.ai](../../../../apis/openapi/fireflies.ai) | [main](../../../../apis/openapi/fireflies.ai/main) |
+| [firmenwatch.ch](../../../../apis/openapi/firmenwatch.ch) | [main](../../../../apis/openapi/firmenwatch.ch/main) |
 | [firmwater.com](../../../../apis/openapi/firmwater.com) | [main](../../../../apis/openapi/firmwater.com/main) |
 | [fitbit.com](../../../../apis/openapi/fitbit.com) | [main](../../../../apis/openapi/fitbit.com/main) |
 | [flashswitch.flash-group.com](../../../../apis/openapi/flashswitch.flash-group.com) | [1foryou](../../../../apis/openapi/flashswitch.flash-group.com/1foryou) |
