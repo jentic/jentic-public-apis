@@ -1,12 +1,13 @@
 # APIs — R
 
-Browsing 248 APIs starting with **R**.
+Browsing 249 APIs starting with **R**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · **R** · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
 | Vendor | APIs |
 |--------|------|
 | [Radarr](../../../../apis/openapi/Radarr) | [main](../../../../apis/openapi/Radarr/main) |
+| [racingalpha.co.uk](../../../../apis/openapi/racingalpha.co.uk) | [main](../../../../apis/openapi/racingalpha.co.uk/main) |
 | [rackoot.com](../../../../apis/openapi/rackoot.com) | [main](../../../../apis/openapi/rackoot.com/main) |
 | [radar.com](../../../../apis/openapi/radar.com) | [main](../../../../apis/openapi/radar.com/main) |
 | [radixdlt.com](../../../../apis/openapi/radixdlt.com) | [main](../../../../apis/openapi/radixdlt.com/main) |
