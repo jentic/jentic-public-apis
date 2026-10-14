@@ -1,6 +1,6 @@
 # APIs — A
 
-Browsing 452 APIs starting with **A**.
+Browsing 453 APIs starting with **A**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · **A** · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -354,6 +354,7 @@ Browsing 452 APIs starting with **A**.
 | [appfolio.com](../../../../apis/openapi/appfolio.com) | [main](../../../../apis/openapi/appfolio.com/main) |
 | [apple.com](../../../../apis/openapi/apple.com) | [app-store-connect](../../../../apis/openapi/apple.com/app-store-connect) · [app-store-connect-api](../../../../apis/openapi/apple.com/app-store-connect-api) · [sirikit-cloud-media](../../../../apis/openapi/apple.com/sirikit-cloud-media) |
 | [applitools.com](../../../../apis/openapi/applitools.com) | [main](../../../../apis/openapi/applitools.com/main) |
+| [appmanai.com](../../../../apis/openapi/appmanai.com) | [main](../../../../apis/openapi/appmanai.com/main) |
 | [apptigent.com](../../../../apis/openapi/apptigent.com) | [apptigent.com](../../../../apis/openapi/apptigent.com/apptigent.com) · [powertools-developer](../../../../apis/openapi/apptigent.com/powertools-developer) |
 | [appveyor.com](../../../../apis/openapi/appveyor.com) | [main](../../../../apis/openapi/appveyor.com/main) |
 | [appwrite.io](../../../../apis/openapi/appwrite.io) | [appwrite](../../../../apis/openapi/appwrite.io/appwrite) · [client](../../../../apis/openapi/appwrite.io/client) · [server](../../../../apis/openapi/appwrite.io/server) |
