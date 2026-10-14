@@ -1,6 +1,6 @@
 # APIs — H
 
-Browsing 112 APIs starting with **H**.
+Browsing 113 APIs starting with **H**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · **H** · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -103,6 +103,7 @@ Browsing 112 APIs starting with **H**.
 | [hubhopper.com](../../../../apis/openapi/hubhopper.com) | [main](../../../../apis/openapi/hubhopper.com/main) |
 | [hubspot.com](../../../../apis/openapi/hubspot.com) | [93 APIs](../../../../apis/openapi/hubspot.com) |
 | [huggingface.co](../../../../apis/openapi/huggingface.co) | [main](../../../../apis/openapi/huggingface.co/main) |
+| [humandesignhub.app](../../../../apis/openapi/humandesignhub.app) | [main](../../../../apis/openapi/humandesignhub.app/main) |
 | [humanforce.com](../../../../apis/openapi/humanforce.com) | [main](../../../../apis/openapi/humanforce.com/main) |
 | [humanity.com](../../../../apis/openapi/humanity.com) |  |
 | [humanloop.com](../../../../apis/openapi/humanloop.com) | [main](../../../../apis/openapi/humanloop.com/main) |
