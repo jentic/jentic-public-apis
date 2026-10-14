@@ -1,6 +1,6 @@
 # APIs — C
 
-Browsing 438 APIs starting with **C**.
+Browsing 439 APIs starting with **C**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · **C** · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -22,6 +22,7 @@ Browsing 438 APIs starting with **C**.
 | [calorieninjas.com](../../../../apis/openapi/calorieninjas.com) | [main](../../../../apis/openapi/calorieninjas.com/main) |
 | [caltech.edu](../../../../apis/openapi/caltech.edu) | [main](../../../../apis/openapi/caltech.edu/main) |
 | [camb.ai](../../../../apis/openapi/camb.ai) | [main](../../../../apis/openapi/camb.ai/main) |
+| [cambio-uruguay.com](../../../../apis/openapi/cambio-uruguay.com) | [main](../../../../apis/openapi/cambio-uruguay.com/main) |
 | [campaignmonitor.com](../../../../apis/openapi/campaignmonitor.com) | [main](../../../../apis/openapi/campaignmonitor.com/main) |
 | [camunda.com](../../../../apis/openapi/camunda.com) | [main](../../../../apis/openapi/camunda.com/main) |
 | [canada-holidays.ca](../../../../apis/openapi/canada-holidays.ca) | [main](../../../../apis/openapi/canada-holidays.ca/main) |
