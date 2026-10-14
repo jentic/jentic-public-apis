@@ -1,0 +1,878 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "GovAuctions Data API",
+    "version": "1.1.0",
+    "description": "Structured government-surplus auction data. Live listings (facts only, no images) cover sanctioned federal sources (GSA Auctions) in the US. Sold-price comps and the proprietary GovAuctions Flip Score resale signal are derived aggregates; comps cover the full surplus market in US, UK, CA, AU, DE, FR (/sources lists each market's archive size). Every plan carries two budgets: total calls, and a smaller valuation allowance that the valuation endpoints (/comps, /comps/batch per query, /sold, /comps/trend, /flip-score) draw down — see the X-Valuation-* response headers, or call /usage to read both budgets directly. Past the monthly valuation allowance, a key that holds prepaid credits spends one per valuation call; a call that returns no answer (empty, not priceable, or an error) costs nothing from either. Listing prices and bid counts are refreshed on a twice-daily ingest (about 06:00 and 18:00 UTC); the listing endpoints serve that snapshot rather than polling the source per request, so a lot's bid can be up to ~12h behind. Check /coverage before building on the comp endpoints: it reports what we can and cannot price. Plans: Free (free); Pay as you go (prepaid credits from $10 for 500 valuation calls); Enterprise (contact us). Get a key at https://govauctions.app/developers.",
+    "contact": {
+      "url": "https://govauctions.app/developers"
+    },
+    "x-jentic-source-url": "https://govauctions.app/api/v1/openapi.json"
+  },
+  "servers": [
+    {
+      "url": "https://govauctions.app/api/v1"
+    }
+  ],
+  "paths": {
+    "/listings": {
+      "get": {
+        "operationId": "searchListings",
+        "summary": "Search live listings (facts only, GSA Auctions)",
+        "parameters": [
+          {
+            "name": "country",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "US"
+              ],
+              "default": "US"
+            }
+          },
+          {
+            "name": "state",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "2-letter state/region code"
+          },
+          {
+            "name": "category",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "source",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "gsa"
+              ],
+              "default": "gsa"
+            },
+            "description": "Source platform (sanctioned sources only; currently gsa)"
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Title keyword"
+          },
+          {
+            "name": "priceMin",
+            "in": "query",
+            "schema": {
+              "type": "number"
+            }
+          },
+          {
+            "name": "priceMax",
+            "in": "query",
+            "schema": {
+              "type": "number"
+            }
+          },
+          {
+            "name": "active",
+            "in": "query",
+            "schema": {
+              "type": "boolean",
+              "default": true
+            }
+          },
+          {
+            "name": "zip",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "US 5-digit ZIP to search around. Limits results to lots within radiusMiles, orders them nearest-first, and adds distanceMiles to each item plus an origin block to the response."
+          },
+          {
+            "name": "radiusMiles",
+            "in": "query",
+            "schema": {
+              "type": "number",
+              "maximum": 500,
+              "default": 100
+            },
+            "description": "Radius from zip, in miles. Requires zip."
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "ending-soonest",
+                "newest"
+              ]
+            },
+            "description": "Result order. Default is soonest-ending, or nearest-first when zip is given. `newest` orders by the lot's own listing date (auction start), newest first, with a deterministic id tie-break - use it for recurring \"what's new\" polling, where the default order can leave a brand-new lot off page one. Lots that have not opened yet sort to the top."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "default": 25
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of listings. A zero-result page also carries a `scope` block naming the sources and market actually searched, so an empty `data` is distinguishable from \"no such lots exist\": raw listings are served for sanctioned public-domain sources only (gsa) in the US, while sold-price comps span the full market and all four comp markets (US, UK, Canada, Australia; the DE and FR markets carry live listings only and have no sold-price history).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Listing"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/listings/{id}": {
+      "get": {
+        "operationId": "getListing",
+        "summary": "Get one live listing by id",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Listing. Live lots only — this does not fall back to the sold archive.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/Listing"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found"
+          }
+        }
+      }
+    },
+    "/comps": {
+      "get": {
+        "operationId": "getSoldComps",
+        "summary": "Sold-price range for a described item (full-market aggregate)",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Item description, e.g. '2015 Ford F-150'"
+          },
+          {
+            "name": "category",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "country",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "US",
+                "UK",
+                "CA",
+                "AU",
+                "DE",
+                "FR"
+              ],
+              "default": "US"
+            }
+          },
+          {
+            "name": "state",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Optional 2-letter state/region code for a regional range. Falls back to national when that state is too thin; the response `scope` field reports which pool was used."
+          },
+          {
+            "name": "include",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "comps"
+              ]
+            },
+            "description": "Set to `comps` to also return the individual sales the range was computed from (title, finalBid, year, state, soldMonth). Sample size is capped by plan. Not served for EU markets (DE, FR, NL, PL): the range comes back with `compsWithheld: true`."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            },
+            "description": "How many underlying sales to return with include=comps. Capped by the plan's sample limit."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Comp range (p25/median/p75), with scope=state|national when a state was requested, and `comps` when include=comps. A miss carries `data: null` plus a `reason`: `insufficient_comps` (too few comparable sales yet — worth retrying as the archive grows) or `category_not_priceable` (the requested category can NEVER return a range — the body lists them in `excludedCategories`). A catch-all category such as `miscellaneous` is NOT refused: the label is dropped and the item is priced on its title alone, and the body then carries `requestedCategory` + `categoryDropped` next to the `category` we actually resolved, so check `category` and `confidence` before trusting that range."
+          },
+          "403": {
+            "description": "Not in plan"
+          },
+          "429": {
+            "description": "Monthly valuation allowance exhausted"
+          }
+        }
+      }
+    },
+    "/comps/batch": {
+      "post": {
+        "operationId": "valueBasket",
+        "summary": "Value up to N items in one request (one valuation call per query)",
+        "description": "Send item descriptions and get one comp range per query. Each query costs one valuation call, the same as sending them separately. If the valuation allowance runs out mid-batch, the priced queries are returned and a `truncated` block names the rest.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "queries"
+                ],
+                "properties": {
+                  "queries": {
+                    "type": "array",
+                    "description": "Item descriptions, or per-item objects {q, category, country, state}.",
+                    "items": {
+                      "oneOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "object"
+                        }
+                      ]
+                    }
+                  },
+                  "country": {
+                    "type": "string",
+                    "enum": [
+                      "US",
+                      "UK",
+                      "CA",
+                      "AU",
+                      "DE",
+                      "FR"
+                    ],
+                    "default": "US"
+                  },
+                  "state": {
+                    "type": "string"
+                  },
+                  "include": {
+                    "type": "string",
+                    "enum": [
+                      "comps"
+                    ]
+                  },
+                  "limit": {
+                    "type": "integer"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "One result per query, in submission order"
+          },
+          "400": {
+            "description": "Malformed body, or more queries than the plan allows"
+          },
+          "403": {
+            "description": "Not in plan"
+          }
+        }
+      }
+    },
+    "/comps/trend": {
+      "get": {
+        "operationId": "getPriceTrend",
+        "summary": "Month-by-month median sale price for an item",
+        "description": "Sold-price trend built from the same matched comps as /comps, so the two can never disagree. Months with too few sales are dropped; a query without enough qualifying months returns an empty `data` array with a reason rather than a misleading two-point line.",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "category",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "country",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "US",
+                "UK",
+                "CA",
+                "AU",
+                "DE",
+                "FR"
+              ],
+              "default": "US"
+            }
+          },
+          {
+            "name": "state",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Monthly medians plus a first-to-last change percentage"
+          },
+          "403": {
+            "description": "Not in plan"
+          },
+          "429": {
+            "description": "Monthly valuation allowance exhausted"
+          }
+        }
+      }
+    },
+    "/sold": {
+      "get": {
+        "operationId": "getSoldHistory",
+        "summary": "The individual archived sales behind an item",
+        "description": "Title, final price, sale month and state for the comparable sales behind a range, plus the range. Query-anchored: describe an item. No paging, id lookup, source platform, lot id or URL; this is evidence, not a browsable archive. Not served for DE, FR, NL or PL. Page size is capped by plan.",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "category",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "country",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "US",
+                "UK",
+                "CA",
+                "AU"
+              ],
+              "default": "US"
+            }
+          },
+          {
+            "name": "state",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            },
+            "description": "Capped by the plan's sample limit."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Matching sales, with a summary range"
+          },
+          "403": {
+            "description": "Not in plan"
+          },
+          "429": {
+            "description": "Monthly valuation allowance exhausted"
+          }
+        }
+      }
+    },
+    "/coverage": {
+      "get": {
+        "operationId": "getCompCoverage",
+        "summary": "How much comp data we hold, per category",
+        "description": "Sales held per category for a market, each category's share of the pool, and the categories that can never return a range (real estate and junk-drawer buckets). Check this before building on the comp endpoints. Does not draw down the valuation allowance.",
+        "parameters": [
+          {
+            "name": "country",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "US",
+                "UK",
+                "CA",
+                "AU",
+                "DE",
+                "FR"
+              ],
+              "default": "US"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Per-category coverage table"
+          }
+        }
+      }
+    },
+    "/sources": {
+      "get": {
+        "operationId": "listSources",
+        "summary": "Listing sources and comp markets this API covers",
+        "description": "Live lot count per listing source, and archive size per sold-price comp market. Counts only. No key needed, and it does not count against any budget.",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Listing sources and comp markets"
+          }
+        }
+      }
+    },
+    "/usage": {
+      "get": {
+        "operationId": "getApiUsage",
+        "summary": "This key's usage and remaining budgets for the month",
+        "description": "Both counters and the reset date. The valuation allowance is the one that binds for comps-heavy traffic, and it is smaller than the headline call budget — read it here rather than inferring it from response headers. Does not draw down the valuation allowance.",
+        "responses": {
+          "200": {
+            "description": "Plan, period, call budget and valuation budget"
+          }
+        }
+      }
+    },
+    "/webhooks": {
+      "get": {
+        "operationId": "listWebhooks",
+        "summary": "List webhook subscriptions",
+        "responses": {
+          "200": {
+            "description": "Subscriptions, with delivery health"
+          },
+          "403": {
+            "description": "Webhooks not in plan"
+          }
+        }
+      },
+      "post": {
+        "operationId": "createWebhook",
+        "summary": "Create a webhook subscription (push on new lots)",
+        "description": "We POST matching new lots to your https endpoint as they enter the feed. Payloads are raw per-lot records, so GSA only, like /listings. Signed with HMAC-SHA256 in X-GovAuctions-Signature; the secret is returned once, at creation. Delivery is at-least-once: dedupe on lot id.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "url"
+                ],
+                "properties": {
+                  "url": {
+                    "type": "string",
+                    "description": "Public https endpoint."
+                  },
+                  "events": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "listing.new"
+                      ]
+                    }
+                  },
+                  "filters": {
+                    "type": "object",
+                    "description": "Same vocabulary as /listings.",
+                    "properties": {
+                      "state": {
+                        "type": "string"
+                      },
+                      "category": {
+                        "type": "string"
+                      },
+                      "q": {
+                        "type": "string"
+                      },
+                      "priceMin": {
+                        "type": "number"
+                      },
+                      "priceMax": {
+                        "type": "number"
+                      },
+                      "minFlipScore": {
+                        "type": "number"
+                      }
+                    }
+                  },
+                  "description": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created; the response carries the signing secret once"
+          },
+          "403": {
+            "description": "Webhooks not in plan, or subscription limit reached"
+          }
+        }
+      }
+    },
+    "/webhooks/{id}": {
+      "delete": {
+        "operationId": "deleteWebhook",
+        "summary": "Delete a webhook subscription",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Deleted"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        }
+      }
+    },
+    "/flip-score": {
+      "get": {
+        "operationId": "getFlipScore",
+        "summary": "GovAuctions Flip Score resale signal for one live lot, in any comp market",
+        "description": "Any live lot from any source, in any market with sold-price comps (see the `country` enum on /comps). Returns our valuation and the link to the lot on its source site; no description or images. One lot per call; there is no way to list ids here.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Lot id, as it appears in a govauctions.app lot URL"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Flip Score, estimated value, discount, country and sourceUrl"
+          },
+          "403": {
+            "description": "Not in plan"
+          },
+          "404": {
+            "description": "No live lot with that id in a comp market"
+          },
+          "429": {
+            "description": "Monthly valuation allowance exhausted"
+          }
+        }
+      }
+    },
+    "/export": {
+      "get": {
+        "operationId": "exportCsv",
+        "summary": "Bulk CSV export (pay as you go and above: buying any credit pack adds it). Row cap varies by plan.",
+        "parameters": [
+          {
+            "name": "dataset",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "comps",
+                "listings"
+              ],
+              "default": "comps"
+            }
+          },
+          {
+            "name": "country",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "US",
+                "UK",
+                "CA",
+                "AU",
+                "DE",
+                "FR"
+              ],
+              "default": "US"
+            },
+            "description": "Comps cover every market in this enum. Listings exports are US-only."
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "For dataset=comps: comma-separated item descriptions, one row each (max 100); each charges one valuation call. For dataset=listings: a title keyword."
+          },
+          {
+            "name": "category",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "state",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "dataset=listings only"
+          },
+          {
+            "name": "active",
+            "in": "query",
+            "schema": {
+              "type": "boolean",
+              "default": true
+            },
+            "description": "dataset=listings only"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "text/csv",
+            "content": {
+              "text/csv": {}
+            }
+          },
+          "403": {
+            "description": "CSV export not included in plan"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Listing": {
+        "type": "object",
+        "description": "A live lot. Price fields describe BID state, which is not the same as the figure a source's own web page shows: GSA renders a lot's opening/minimum amount in a box labelled \"Current Bid\" even when nobody has bid, so treat currentBid, not the source page, as the answer to \"has anyone bid\".",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "gsa"
+            ]
+          },
+          "sourceUrl": {
+            "type": "string",
+            "format": "uri"
+          },
+          "currency": {
+            "type": "string",
+            "default": "USD"
+          },
+          "title": {
+            "type": "string"
+          },
+          "category": {
+            "type": "string"
+          },
+          "condition": {
+            "type": "string"
+          },
+          "sellerName": {
+            "type": "string"
+          },
+          "sellerType": {
+            "type": "string"
+          },
+          "currentBid": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "description": "Highest bid actually submitted, or null when no bid has been placed. Null is a fact, not a gap: it means nobody has bid."
+          },
+          "startingBid": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "description": "Opening/minimum amount. ALWAYS null for gsa lots: the GSA Auctions v2 feed we ingest publishes no opening-bid field (its only price-related fields are highBidAmount, biddersCount, aucIncrement and reserve), so the opening figure shown on gsaauctions.gov is not available to us. Do not read null here as \"no opening price\"."
+          },
+          "buyerPremiumPct": {
+            "type": "number"
+          },
+          "bidCount": {
+            "type": "integer",
+            "description": "Bidders/bids reported by the source. Read together with bidStateUnknown: a 0 with bidStateUnknown absent means no bids, a 0 with bidStateUnknown true means the source did not report."
+          },
+          "bidStateUnknown": {
+            "type": "boolean",
+            "description": "Present and true only when the source publishes no bid state, making bidCount: 0 meaningless. Absent on gsa lots, which do publish bid state."
+          },
+          "location": {
+            "type": "object",
+            "properties": {
+              "city": {
+                "type": "string"
+              },
+              "state": {
+                "type": "string"
+              },
+              "zip": {
+                "type": "string"
+              },
+              "latitude": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "longitude": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              }
+            }
+          },
+          "startsAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "endsAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "active": {
+            "type": "boolean"
+          },
+          "updatedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "distanceMiles": {
+            "type": "number",
+            "description": "Only when zip was supplied."
+          },
+          "facts": {
+            "type": "object",
+            "description": "Parsed attributes (year, make, model, ...) when derivable from the listing text."
+          }
+        }
+      }
+    },
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "Your API key as a Bearer token (or send it as the x-api-key header)."
+      }
+    }
+  },
+  "security": [
+    {
+      "bearerAuth": []
+    }
+  ],
+  "x-versioning": {
+    "scheme": "URL path (/api/v1). A breaking change ships as /api/v2; /api/v1 is never broken in place.",
+    "additiveChanges": "New endpoints, new optional parameters and new response fields can appear in v1 at any time. Ignore fields you do not recognise.",
+    "deprecationPolicy": "A deprecated endpoint returns the RFC 8594 `Deprecation` header with the date it was deprecated and `Sunset` with the date it stops responding. Sunset is at least 180 days after Deprecation, and both are announced on /developers before they are sent."
+  }
+}
