@@ -1,6 +1,6 @@
 # APIs — G
 
-Browsing 180 APIs starting with **G**.
+Browsing 181 APIs starting with **G**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · **G** · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -35,6 +35,7 @@ Browsing 180 APIs starting with **G**.
 | [geonames.org](../../../../apis/openapi/geonames.org) | [main](../../../../apis/openapi/geonames.org/main) |
 | [geoscreenshot.com](../../../../apis/openapi/geoscreenshot.com) | [main](../../../../apis/openapi/geoscreenshot.com/main) |
 | [gerermesaffaires.com](../../../../apis/openapi/gerermesaffaires.com) | [main](../../../../apis/openapi/gerermesaffaires.com/main) |
+| [gessa.ai](../../../../apis/openapi/gessa.ai) | [main](../../../../apis/openapi/gessa.ai/main) |
 | [gestion-diagnostic.fr](../../../../apis/openapi/gestion-diagnostic.fr) | [main](../../../../apis/openapi/gestion-diagnostic.fr/main) |
 | [getacute.io](../../../../apis/openapi/getacute.io) | [main](../../../../apis/openapi/getacute.io/main) |
 | [getadministrate.com](../../../../apis/openapi/getadministrate.com) | [main](../../../../apis/openapi/getadministrate.com/main) |
