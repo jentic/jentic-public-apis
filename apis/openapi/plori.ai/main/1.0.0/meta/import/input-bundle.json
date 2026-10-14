@@ -1,0 +1,1883 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "plori REST API",
+    "version": "1.0.0",
+    "summary": "Create cloud AI agents, send them work, read the results.",
+    "description": "The documented REST surface of api.plori.ai: agents, runs, schedules, credits, GitHub Actions workload identity, and the public rate cards. Account endpoints authenticate with `Authorization: Bearer <plori_sk_ API key>` (minted in the dashboard or via `plori login`) or an OAuth 2.1 access token from the same flow MCP clients use. See https://plori.ai/auth.md. GitHub Actions instead exchange a signed OIDC JWT for a narrow single-run capability. Run OUTPUT is read over the session WebSocket (`GET /v1/ws`) or the MCP/CLI surfaces; `POST .../runs` is submit-only and returns 202. This document lists the supported public endpoints; other paths served by the API are internal and may change without notice.",
+    "contact": {
+      "name": "plori",
+      "url": "https://plori.ai",
+      "email": "agent@plori.ai"
+    },
+    "termsOfService": "https://plori.ai/terms",
+    "x-jentic-source-url": "https://plori.ai/openapi.json"
+  },
+  "servers": [
+    {
+      "url": "https://api.plori.ai"
+    }
+  ],
+  "paths": {
+    "/v1/agents": {
+      "post": {
+        "operationId": "createAgent",
+        "summary": "Create an agent (or get-or-create by name)",
+        "description": "Creates a cloud agent owned by the authenticated account. With `if_exists: \"return\"` this is get-or-create: if an agent with the same name exists, it is returned (200, `existing: true`) instead of creating a duplicate. Prefer this and one long-lived agent. The owner is always the credential's account; a `user_id` in the body is ignored.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "name"
+                ],
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "model": {
+                    "type": "string",
+                    "description": "Model slug; omit for the Plori Router default."
+                  },
+                  "config": {
+                    "type": "object",
+                    "description": "Opaque agent config; defaults to {}."
+                  },
+                  "if_exists": {
+                    "type": "string",
+                    "enum": [
+                      "return",
+                      "error"
+                    ],
+                    "description": "\"return\" = get-or-create by name; \"error\" (default) = always create."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Existing agent returned (get-or-create hit).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/Agent"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "existing": {
+                          "type": "boolean"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "Agent created.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Agent"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "description": "Plan does not allow the requested model tier.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Per-plan agent cap reached. `Retry-After: 60`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "operationId": "listAgents",
+        "summary": "List your agents",
+        "responses": {
+          "200": {
+            "description": "The authenticated account's agents.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Agent"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      }
+    },
+    "/v1/agents/{agentID}": {
+      "get": {
+        "operationId": "getAgent",
+        "summary": "Get one agent",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/agentID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The agent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Agent"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/v1/agents/{agentID}/files/read": {
+      "get": {
+        "operationId": "readAgentFile",
+        "summary": "Read one window of a text file on an agent's disk",
+        "description": "Returns `text/plain` for a text file. This is the editor route: a file that is not text answers 415, and a file over the 2 MiB text cap answers 413 unless a window was asked for. Both refusals carry a `download_url` for the route that does serve those bytes. Use `offset` and `limit` to page through a file of any size; every 200 states what it covered in `X-File-Offset`, `X-File-Returned-Bytes`, `X-File-Size` and `X-File-Truncated`, so a short body is never silent. The disk is served directly, so an idle agent's files are readable with no running pod.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/agentID"
+          },
+          {
+            "name": "path",
+            "in": "query",
+            "required": true,
+            "description": "The file's path on the agent's disk, rooted at the disk root.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "description": "Byte offset of the first byte to return. Default 0.",
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "How many bytes to return, clamped to the 2 MiB per-call cap. Absent or 0 means the cap.",
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The requested window of the file, as text.",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "headers": {
+              "X-File-Size": {
+                "description": "Size of the whole file in bytes.",
+                "schema": {
+                  "type": "integer",
+                  "format": "int64"
+                }
+              },
+              "X-File-Offset": {
+                "description": "Byte offset this body starts at.",
+                "schema": {
+                  "type": "integer",
+                  "format": "int64"
+                }
+              },
+              "X-File-Returned-Bytes": {
+                "description": "How many bytes this body carries.",
+                "schema": {
+                  "type": "integer",
+                  "format": "int64"
+                }
+              },
+              "X-File-Truncated": {
+                "description": "true when bytes remain past this window.",
+                "schema": {
+                  "type": "boolean"
+                }
+              },
+              "ETag": {
+                "description": "The file's version, for a compare-and-swap write.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "413": {
+            "description": "The file is over the text cap and no window was asked for. The body carries `size`, `cap` and `download_url`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "The file is not text. The body carries `download_url` for the route that streams its bytes.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/agents/{agentID}/files/download": {
+      "get": {
+        "operationId": "downloadAgentFile",
+        "summary": "Download one file from an agent's disk",
+        "description": "Streams a file's bytes — text or binary, any size the account can hold — with its own content type for known extensions and `application/octet-stream` otherwise. This is the route a file link in an agent's reply resolves to. The disk is served directly, so an idle agent's files are downloadable with no running pod.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/agentID"
+          },
+          {
+            "name": "path",
+            "in": "query",
+            "required": true,
+            "description": "The file's path on the agent's disk, rooted at the disk root.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The file's bytes. `Content-Disposition` is always an attachment, and `X-File-Size` carries the size the disk reported before the stream started.",
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            },
+            "headers": {
+              "X-File-Size": {
+                "description": "Size of the file in bytes, as of the stat that preceded the stream.",
+                "schema": {
+                  "type": "integer",
+                  "format": "int64"
+                }
+              },
+              "ETag": {
+                "description": "The file's version.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "No path was given, or the path is a directory (`error: \"is a directory\"`) — list it instead.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/v1/agents/{agentID}/runs": {
+      "post": {
+        "operationId": "invokeAgent",
+        "summary": "Send the agent a message (submit a run)",
+        "description": "Submits a run and returns 202 immediately; there is no blocking or SSE mode on this endpoint. Read the reply over the session WebSocket (`GET /v1/ws`), poll `GET /v1/agents/{agentID}/runs/{runID}` for status, or use the MCP `invoke_agent` tool, which can wait. A run is nondeterministic and billable. Retry only with an `Idempotency-Key`: the same key replays the original run for 24 h (the replay carries `X-Plori-Idempotent-Replay: true`).",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "githubRunAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/agentID"
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 255
+            },
+            "description": "Client-chosen retry key; wins over the body's `idempotency_key`."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "message": {
+                    "type": "string",
+                    "description": "The user message. Exactly one of `message` or `messages` is required; `messages` wins if both are set."
+                  },
+                  "messages": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/components/schemas/Message"
+                    }
+                  },
+                  "session_id": {
+                    "type": "string",
+                    "description": "Continue an existing thread; omit to start a new one."
+                  },
+                  "idempotency_key": {
+                    "type": "string",
+                    "maxLength": 255
+                  },
+                  "max_turn_tokens": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 5000000,
+                    "description": "Cap for this turn; 0 or omitted = the default budget."
+                  },
+                  "max_advisor_spend_micro_usd": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 5000000,
+                    "description": "Advisor completion cap for the turn in micro-USD. Omit the field to use the agent cap. Set 0 to disable advisor completions."
+                  },
+                  "max_turn_seconds": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "description": "Soft checkpoint for this turn; 0 or omitted = the default."
+                  },
+                  "github_token": {
+                    "type": "string",
+                    "writeOnly": true,
+                    "description": "Job-lifetime contents:read GITHUB_TOKEN for repository checkout. Delivered only to this turn in memory and never persisted; the owning API-key fallback is supported for GHES."
+                  },
+                  "github_server_url": {
+                    "type": "string",
+                    "format": "uri",
+                    "description": "HTTPS origin that issued github_token, such as https://github.com or a GHES origin. The token's in-memory Git credential helper is scoped to this host; invalid values fall back to github.com."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Run submitted. Headers `X-Plori-Run-Id` and `X-Plori-Session-Id` mirror the body.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "run_id",
+                    "session_id"
+                  ],
+                  "properties": {
+                    "run_id": {
+                      "type": "string"
+                    },
+                    "session_id": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "402": {
+            "description": "Insufficient credits.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreditExhaustion"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "description": "Agent or session not found.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "A request with this Idempotency-Key is still in flight. `Retry-After: 2`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "This Idempotency-Key was already used for a different request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Plan concurrency cap or cluster capacity. `Retry-After: 10`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "operationId": "listAgentRuns",
+        "summary": "List the agent's runs",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/agentID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Run history, newest first.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Run"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/v1/agents/{agentID}/runs/{runID}": {
+      "get": {
+        "operationId": "getAgentRun",
+        "summary": "Get one run's status",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/agentID"
+          },
+          {
+            "$ref": "#/components/parameters/runID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The run.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Run"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/v1/agents/{agentID}/runs/{runID}/cancel": {
+      "post": {
+        "operationId": "cancelAgentRun",
+        "summary": "Cancel an in-flight run",
+        "description": "Requests cancellation; cascades to any child runs the run delegated to.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/agentID"
+          },
+          {
+            "$ref": "#/components/parameters/runID"
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Cancellation requested.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "runId": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string",
+                      "const": "cancelling"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "description": "Run already finished.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/agents/{agentID}/schedules": {
+      "post": {
+        "operationId": "createSchedule",
+        "summary": "Schedule a deferred one-shot run",
+        "description": "A direct owner session using the owner's plori_sk_ API key outside MCP creates a pending schedule. An MCP request or OAuth access token creates an awaiting_confirmation schedule with confirm_url. It cannot fire until the owner confirms. Unconfirmed rows have no expiry sweep.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/agentID"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "prompt"
+                ],
+                "properties": {
+                  "prompt": {
+                    "type": "string"
+                  },
+                  "fire_at": {
+                    "type": "string",
+                    "format": "date-time",
+                    "description": "RFC3339 UTC. Exactly one of `fire_at` or `delay_seconds`."
+                  },
+                  "delay_seconds": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "session_id": {
+                    "type": "string",
+                    "description": "Pin the thread; omit for the agent's active thread."
+                  },
+                  "metadata": {
+                    "type": "object"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Schedule created.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Schedule"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      },
+      "get": {
+        "operationId": "listSchedules",
+        "summary": "List the agent's schedules",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/agentID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Schedules.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Schedule"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/v1/agents/{agentID}/schedules/{scheduleID}": {
+      "get": {
+        "operationId": "getSchedule",
+        "summary": "Get one schedule",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/agentID"
+          },
+          {
+            "$ref": "#/components/parameters/scheduleID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The schedule.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Schedule"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "cancelSchedule",
+        "summary": "Cancel an unconfirmed, pending, or dispatched schedule",
+        "description": "Returns the updated schedule (200, not 204). A schedule that already fired is a 404 because there is nothing left to cancel.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/agentID"
+          },
+          {
+            "$ref": "#/components/parameters/scheduleID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Cancelled.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Schedule"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/v1/users/{userID}/credits": {
+      "get": {
+        "operationId": "getCredits",
+        "summary": "Get the account's credit balance and plan",
+        "description": "`userID` must be the authenticated account's own id (anything else is 403). Check the balance before taking on long work.",
+        "parameters": [
+          {
+            "name": "userID",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Balance, plan, and purchase options.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Credits"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      }
+    },
+    "/v1/agents/{agentID}/schedules/{scheduleID}/confirm": {
+      "post": {
+        "operationId": "confirmSchedule",
+        "summary": "Confirm a deferred schedule as the account owner",
+        "description": "Requires the owner's own plori_sk_ API key outside MCP. Takes no body. Changes awaiting_confirmation to pending and records confirmed_at only while fire_at is in the future. An already confirmed row returns 200 unchanged. MCP and OAuth requests receive 403 with the confirmation link in the error text.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/agentID"
+          },
+          {
+            "$ref": "#/components/parameters/scheduleID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Schedule confirmed, or already confirmed (idempotent).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Schedule"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "description": "AI clients cannot confirm; the error text includes the owner's confirmation link. Another account's agent is also forbidden.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Agent or schedule not found, or schedule outside the addressed agent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Unconfirmed fire time has passed, the row's state cannot be confirmed and confirmed_at is unset, or the agent is being deleted (code: agent_deleting).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/github/oidc/exchange": {
+      "post": {
+        "operationId": "exchangeGitHubOIDC",
+        "summary": "Exchange GitHub Actions workload identity for one run",
+        "description": "Verifies a GitHub Actions OIDC JWT minted for audience `plori.ai`, resolves the repository's persistent agent, and returns a short-lived single-run capability. Public repositories receive up to 3 free runs per repository and 10 per GitHub owner per UTC month while unclaimed. Private repositories and exhausted public repositories receive a claim URL instead. This endpoint never creates a customer account or API key.",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "token"
+                ],
+                "properties": {
+                  "token": {
+                    "type": "string",
+                    "writeOnly": true,
+                    "description": "GitHub Actions OIDC JWT with audience plori.ai."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Repository identity accepted; use this capability once on POST /v1/agents/{agentID}/runs.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GitHubOIDCExchange"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "OIDC signature, issuer, audience, lifetime, or repository claims are invalid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Repository must be claimed before it can run. The body includes a signed claim URL.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GitHubClaimRequired"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The repository agent is being provisioned. Retry after the indicated delay.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/github/claim": {
+      "post": {
+        "operationId": "claimGitHubRepository",
+        "summary": "Attach a verified repository to the signed-in account",
+        "description": "Combines the signed repository claim capability from a workflow with a registered Plori payer identity. The same repository agent, disk, threads, and private memory move to that account. Safe to retry by the same account.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "repository",
+                  "claim_token"
+                ],
+                "properties": {
+                  "repository": {
+                    "type": "string",
+                    "example": "owner/repository"
+                  },
+                  "claim_token": {
+                    "type": "string",
+                    "writeOnly": true
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Repository attached or already attached to this account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "repository",
+                    "agent_id",
+                    "already_bound"
+                  ],
+                  "properties": {
+                    "repository": {
+                      "type": "string"
+                    },
+                    "agent_id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "already_bound": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "description": "A registered account is required.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "description": "Repository belongs to another account; contact support for a transfer.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/github/runs/{runID}": {
+      "get": {
+        "operationId": "getGitHubRunResult",
+        "summary": "Poll one GitHub-triggered run's durable event stream",
+        "description": "Returns AG-UI events after `after_seq`. A GitHub capability is scoped to its repository agent; the manual API-key fallback can read only runs owned by that account.",
+        "security": [
+          {
+            "githubRunAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/runID"
+          },
+          {
+            "name": "after_seq",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Current status and the next durable event page.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "run_id",
+                    "status",
+                    "cause",
+                    "terminal",
+                    "after_seq",
+                    "events"
+                  ],
+                  "properties": {
+                    "run_id": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string"
+                    },
+                    "cause": {
+                      "type": "string",
+                      "description": "Machine-readable terminal cause. Empty while the run is active and after normal completion.",
+                      "enum": [
+                        "",
+                        "user_stop",
+                        "interrupted",
+                        "stalled",
+                        "time_limit",
+                        "credits_exhausted",
+                        "backend_error",
+                        "spawn_failed",
+                        "account_disk_full",
+                        "agent_deleted"
+                      ]
+                    },
+                    "terminal": {
+                      "type": "boolean"
+                    },
+                    "after_seq": {
+                      "type": "integer"
+                    },
+                    "events": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": true
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/v1/pricing/models": {
+      "get": {
+        "operationId": "getModelPricing",
+        "summary": "Public model rate card",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Per-model token rates at the provider's real cost, no markup. Amounts are micro-USD (µ$), where 1,000,000 µ$ = $1.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelPricing"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/pricing/tools": {
+      "get": {
+        "operationId": "getToolPricing",
+        "summary": "Public tool and workflow rate card",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Per-tool rates and workflow run pricing, in micro-USD (µ$), where 1,000,000 µ$ = $1.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ToolPricing"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "A plori API key (plori_sk_…) or an OAuth 2.1 access token. How to get either: https://plori.ai/auth.md"
+      },
+      "githubRunAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "A short-lived `plori_ghr_` capability returned only by the GitHub OIDC exchange. It submits exactly one run to one repository agent and polls only that run."
+      }
+    },
+    "parameters": {
+      "agentID": {
+        "name": "agentID",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "format": "uuid"
+        }
+      },
+      "runID": {
+        "name": "runID",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string"
+        }
+      },
+      "scheduleID": {
+        "name": "scheduleID",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "format": "uuid"
+        }
+      }
+    },
+    "responses": {
+      "BadRequest": {
+        "description": "Malformed request.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "Unauthorized": {
+        "description": "Missing or invalid credential.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "Forbidden": {
+        "description": "The resource belongs to another account.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "NotFound": {
+        "description": "No such resource.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      }
+    },
+    "schemas": {
+      "Error": {
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "type": "string"
+          },
+          "request_id": {
+            "type": "string",
+            "description": "Present on 500 responses, whose error message is always the fixed string \"internal error\": quote this id to support to locate the failure."
+          }
+        }
+      },
+      "CreditExhaustion": {
+        "type": "object",
+        "required": [
+          "error",
+          "code",
+          "audience"
+        ],
+        "properties": {
+          "error": {
+            "type": "string"
+          },
+          "code": {
+            "type": "string",
+            "const": "insufficient_credits"
+          },
+          "audience": {
+            "type": "string",
+            "enum": [
+              "anon",
+              "registered_free",
+              "subscribed"
+            ]
+          }
+        }
+      },
+      "GitHubOIDCExchange": {
+        "type": "object",
+        "required": [
+          "token",
+          "agent_id",
+          "repository",
+          "expires_at",
+          "free_tier",
+          "repo_runs_remaining",
+          "owner_runs_remaining",
+          "claim_url"
+        ],
+        "properties": {
+          "token": {
+            "type": "string",
+            "writeOnly": true
+          },
+          "agent_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "repository": {
+            "type": "string"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "free_tier": {
+            "type": "boolean"
+          },
+          "repo_runs_remaining": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "owner_runs_remaining": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "claim_url": {
+            "type": "string",
+            "format": "uri"
+          }
+        }
+      },
+      "GitHubClaimRequired": {
+        "type": "object",
+        "required": [
+          "error",
+          "code",
+          "claim_url",
+          "repository"
+        ],
+        "properties": {
+          "error": {
+            "type": "string"
+          },
+          "code": {
+            "type": "string",
+            "const": "github_repo_claim_required"
+          },
+          "claim_url": {
+            "type": "string",
+            "format": "uri"
+          },
+          "repository": {
+            "type": "string"
+          }
+        }
+      },
+      "Agent": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "user_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "backend": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "config": {
+            "type": "object"
+          },
+          "entity_disk_id": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "description": "Warm-session state when known: warming, ready, or sleeping."
+          },
+          "deleting": {
+            "type": "boolean",
+            "description": "True while this agent's disk is still being erased. The agent offers no actions except deletion itself, which is idempotent and the only way to finish a stuck one."
+          },
+          "deleting_since": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When the erasure was first asked for. Absent when the agent is not being deleted."
+          },
+          "moving": {
+            "type": "boolean",
+            "description": "True while this agent's files are being copied to a new disk. Poll the migration progress route only while this is true."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "Message": {
+        "type": "object",
+        "required": [
+          "role",
+          "content"
+        ],
+        "properties": {
+          "role": {
+            "type": "string"
+          },
+          "content": {
+            "type": "string"
+          },
+          "tool_call_id": {
+            "type": "string"
+          },
+          "parts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Part"
+            }
+          }
+        }
+      },
+      "Part": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "mime": {
+            "type": "string"
+          },
+          "w": {
+            "type": "integer"
+          },
+          "h": {
+            "type": "integer"
+          }
+        }
+      },
+      "Run": {
+        "type": "object",
+        "description": "Run status and accounting. The run's OUTPUT is not in this DTO. Read it over the session WebSocket or the MCP get_run_result tool.",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "agent_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "thread_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "type": "string"
+          },
+          "origin": {
+            "type": "string",
+            "enum": [
+              "user",
+              "schedule",
+              "background",
+              "agent",
+              "agent_result"
+            ]
+          },
+          "parent_run_id": {
+            "type": "string"
+          },
+          "started_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "ended_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "last_heartbeat_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "cause": {
+            "type": "string",
+            "enum": [
+              "user_stop",
+              "interrupted",
+              "stalled",
+              "time_limit",
+              "backend_error",
+              "spawn_failed",
+              "account_disk_full",
+              "agent_deleted"
+            ]
+          },
+          "retryable": {
+            "type": "boolean"
+          },
+          "credits": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "Amount charged for the run, in micro-USD (µ$), where 1,000,000 µ$ = $1."
+          },
+          "tokens": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "stop_reason": {
+            "type": "string"
+          }
+        }
+      },
+      "Schedule": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "agent_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "kind": {
+            "type": "string",
+            "const": "once"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "awaiting_confirmation",
+              "pending",
+              "firing",
+              "dispatched",
+              "done",
+              "cancelled",
+              "failed"
+            ],
+            "description": "AI-client-created schedules await owner confirmation. done does not establish task success; inspect the run outcome."
+          },
+          "prompt": {
+            "type": "string"
+          },
+          "fire_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "thread_id": {
+            "type": "string"
+          },
+          "metadata": {
+            "type": "object"
+          },
+          "last_error": {
+            "type": "string"
+          },
+          "attempts": {
+            "type": "integer"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "last_fired_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "confirmed_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Time the owner confirmed the schedule. Absent when unset."
+          },
+          "confirm_url": {
+            "type": "string",
+            "format": "uri",
+            "description": "Owner confirmation page. Present only for awaiting_confirmation schedules."
+          }
+        }
+      },
+      "Credits": {
+        "type": "object",
+        "properties": {
+          "balance": {
+            "type": "integer",
+            "description": "Wallet balance in micro-USD (µ$), where 1,000,000 µ$ = $1. The wallet keeps the name 'credits' but every amount is US dollars."
+          },
+          "low_credit_threshold": {
+            "type": "integer",
+            "description": "Low-balance threshold, in micro-USD (µ$)."
+          },
+          "peg_cents": {
+            "type": "integer",
+            "description": "Deprecated. Amounts are micro-USD (µ$), where 1,000,000 µ$ = $1; use that conversion rather than a credits-per-dollar rate."
+          },
+          "packs": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "usd_cents": {
+                  "type": "integer",
+                  "description": "Purchase price in whole US cents."
+                },
+                "credits": {
+                  "type": "integer",
+                  "description": "Balance granted, in micro-USD (µ$). Packs are flat: the µ$ granted equals usd_cents × 10,000."
+                }
+              }
+            }
+          },
+          "plans": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "usd_cents": {
+                  "type": "integer",
+                  "description": "Monthly price in whole US cents."
+                },
+                "monthly_credits": {
+                  "type": "integer",
+                  "description": "Monthly usage allowance, in micro-USD (µ$)."
+                }
+              }
+            }
+          },
+          "active_plan": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "properties": {
+              "sku": {
+                "type": "string"
+              },
+              "monthly_credits": {
+                "type": "integer",
+                "description": "Monthly usage allowance, in micro-USD (µ$)."
+              },
+              "status": {
+                "type": "string"
+              },
+              "current_period_end": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "cancel_at_period_end": {
+                "type": "boolean"
+              }
+            }
+          },
+          "can_manage_billing": {
+            "type": "boolean"
+          },
+          "audience": {
+            "type": "string",
+            "enum": [
+              "anon",
+              "registered_free",
+              "subscribed"
+            ]
+          }
+        }
+      },
+      "ModelPricing": {
+        "type": "object",
+        "properties": {
+          "credits_per_usd": {
+            "type": "integer",
+            "description": "Deprecated. Amounts are micro-USD (µ$), where 1,000,000 µ$ = $1."
+          },
+          "peg_cents": {
+            "type": "integer",
+            "description": "Deprecated. Amounts are micro-USD (µ$), where 1,000,000 µ$ = $1."
+          },
+          "note": {
+            "type": "string"
+          },
+          "model_tiers": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "in_nano_usd_per_tok": {
+                  "type": "integer"
+                },
+                "out_nano_usd_per_tok": {
+                  "type": "integer"
+                },
+                "credits_per_1k_in": {
+                  "type": "number"
+                },
+                "credits_per_1k_out": {
+                  "type": "number"
+                },
+                "free_tier_eligible": {
+                  "type": "boolean"
+                }
+              }
+            }
+          },
+          "models": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "in_nano_usd_per_tok": {
+                  "type": "integer"
+                },
+                "out_nano_usd_per_tok": {
+                  "type": "integer"
+                },
+                "free_tier_eligible": {
+                  "type": "boolean"
+                }
+              }
+            }
+          },
+          "free_max_model_out_nano_usd_per_tok": {
+            "type": "integer"
+          }
+        }
+      },
+      "ToolPricing": {
+        "type": "object",
+        "properties": {
+          "peg_cents": {
+            "type": "integer",
+            "description": "Deprecated. Amounts are micro-USD (µ$), where 1,000,000 µ$ = $1."
+          },
+          "tools": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "tool": {
+                  "type": "string"
+                },
+                "mode": {
+                  "type": "string",
+                  "enum": [
+                    "free",
+                    "per_call"
+                  ]
+                },
+                "credits": {
+                  "type": "integer",
+                  "description": "Per-call rate, in micro-USD (µ$)."
+                },
+                "free_per_month": {
+                  "type": "integer"
+                },
+                "note": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "allowance_reset": {
+            "type": "string"
+          },
+          "workflow": {
+            "type": "object",
+            "properties": {
+              "exec_credits": {
+                "type": "integer",
+                "description": "Flat cost of a workflow run, in micro-USD (µ$)."
+              },
+              "included_seconds": {
+                "type": "integer"
+              },
+              "long_run_credits_per_minute": {
+                "type": "integer",
+                "description": "Per additional started minute past the included seconds, in micro-USD (µ$)."
+              },
+              "note": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "security": [
+    {
+      "bearerAuth": []
+    }
+  ]
+}
