@@ -1,6 +1,6 @@
 # APIs — M
 
-Browsing 259 APIs starting with **M**.
+Browsing 260 APIs starting with **M**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · **M** · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -240,6 +240,7 @@ Browsing 259 APIs starting with **M**.
 | [musicbrainz.org](../../../../apis/openapi/musicbrainz.org) | [main](../../../../apis/openapi/musicbrainz.org/main) |
 | [musicgpt.com](../../../../apis/openapi/musicgpt.com) | [main](../../../../apis/openapi/musicgpt.com/main) |
 | [musixmatch.com](../../../../apis/openapi/musixmatch.com) | [main](../../../../apis/openapi/musixmatch.com/main) |
+| [mutator.app](../../../../apis/openapi/mutator.app) | [main](../../../../apis/openapi/mutator.app/main) |
 | [mux.com](../../../../apis/openapi/mux.com) | [main](../../../../apis/openapi/mux.com/main) |
 | [mx.com](../../../../apis/openapi/mx.com) | [main](../../../../apis/openapi/mx.com/main) |
 | [my.15five.com](../../../../apis/openapi/my.15five.com) | [15five-public-api](../../../../apis/openapi/my.15five.com/15five-public-api) |
