@@ -1,6 +1,6 @@
 # APIs — W
 
-Browsing 84 APIs starting with **W**.
+Browsing 85 APIs starting with **W**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · **W** · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -44,6 +44,7 @@ Browsing 84 APIs starting with **W**.
 | [weedmaps.com](../../../../apis/openapi/weedmaps.com) | [main](../../../../apis/openapi/weedmaps.com/main) |
 | [weezevent.com](../../../../apis/openapi/weezevent.com) | [main](../../../../apis/openapi/weezevent.com/main) |
 | [wefitter.com](../../../../apis/openapi/wefitter.com) | [main](../../../../apis/openapi/wefitter.com/main) |
+| [weftly.ai](../../../../apis/openapi/weftly.ai) | [main](../../../../apis/openapi/weftly.ai/main) |
 | [wger.de](../../../../apis/openapi/wger.de) | [main](../../../../apis/openapi/wger.de/main) |
 | [whapi.com](../../../../apis/openapi/whapi.com) | [11 APIs](../../../../apis/openapi/whapi.com) |
 | [whatconverts.com](../../../../apis/openapi/whatconverts.com) | [main](../../../../apis/openapi/whatconverts.com/main) |
