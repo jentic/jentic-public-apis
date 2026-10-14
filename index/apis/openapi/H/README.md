@@ -1,6 +1,6 @@
 # APIs — H
 
-Browsing 117 APIs starting with **H**.
+Browsing 118 APIs starting with **H**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · **H** · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -96,6 +96,7 @@ Browsing 117 APIs starting with **H**.
 | [hotels.cloudbeds.com](../../../../apis/openapi/hotels.cloudbeds.com) | [main](../../../../apis/openapi/hotels.cloudbeds.com/main) |
 | [hotstoks.com](../../../../apis/openapi/hotstoks.com) | [main](../../../../apis/openapi/hotstoks.com/main) |
 | [hourtick.com](../../../../apis/openapi/hourtick.com) | [main](../../../../apis/openapi/hourtick.com/main) |
+| [housingsentinel.cn](../../../../apis/openapi/housingsentinel.cn) | [main](../../../../apis/openapi/housingsentinel.cn/main) |
 | [hrflow.ai](../../../../apis/openapi/hrflow.ai) | [main](../../../../apis/openapi/hrflow.ai/main) |
 | [hrpartner.io](../../../../apis/openapi/hrpartner.io) | [main](../../../../apis/openapi/hrpartner.io/main) |
 | [html2pdf.app](../../../../apis/openapi/html2pdf.app) | [main](../../../../apis/openapi/html2pdf.app/main) |
