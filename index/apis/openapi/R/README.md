@@ -1,6 +1,6 @@
 # APIs — R
 
-Browsing 247 APIs starting with **R**.
+Browsing 248 APIs starting with **R**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · **R** · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -241,6 +241,7 @@ Browsing 247 APIs starting with **R**.
 | [rumble.run](../../../../apis/openapi/rumble.run) | [main](../../../../apis/openapi/rumble.run/main) · [rumble-api-(deprecated)](../../../../apis/openapi/rumble.run/rumble-api-(deprecated)) |
 | [runcloud.io](../../../../apis/openapi/runcloud.io) | [main](../../../../apis/openapi/runcloud.io/main) |
 | [rundeck.com](../../../../apis/openapi/rundeck.com) | [main](../../../../apis/openapi/rundeck.com/main) |
+| [runriva.com](../../../../apis/openapi/runriva.com) | [main](../../../../apis/openapi/runriva.com/main) |
 | [runscope.com](../../../../apis/openapi/runscope.com) | [main](../../../../apis/openapi/runscope.com/main) |
 | [runscopeapi](../../../../apis/openapi/runscopeapi) | [main](../../../../apis/openapi/runscopeapi/main) |
 | [runsensible.com](../../../../apis/openapi/runsensible.com) | [Runsensible](../../../../apis/openapi/runsensible.com/Runsensible) |
