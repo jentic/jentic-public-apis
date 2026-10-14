@@ -1,6 +1,6 @@
 # APIs — B
 
-Browsing 228 APIs starting with **B**.
+Browsing 229 APIs starting with **B**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · **B** · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -37,6 +37,7 @@ Browsing 228 APIs starting with **B**.
 | [basesnap.com](../../../../apis/openapi/basesnap.com) | [main](../../../../apis/openapi/basesnap.com/main) |
 | [basespace.illumina.com](../../../../apis/openapi/basespace.illumina.com) | [main](../../../../apis/openapi/basespace.illumina.com/main) |
 | [baseten.co](../../../../apis/openapi/baseten.co) | [main](../../../../apis/openapi/baseten.co/main) |
+| [basile.cc](../../../../apis/openapi/basile.cc) | [main](../../../../apis/openapi/basile.cc/main) |
 | [battle.net](../../../../apis/openapi/battle.net) | [main](../../../../apis/openapi/battle.net/main) |
 | [bbc.co.uk](../../../../apis/openapi/bbc.co.uk) | [main](../../../../apis/openapi/bbc.co.uk/main) |
 | [bbc.com](../../../../apis/openapi/bbc.com) | [main](../../../../apis/openapi/bbc.com/main) |
