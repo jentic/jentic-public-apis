@@ -1,6 +1,6 @@
 # APIs — A
 
-Browsing 433 APIs starting with **A**.
+Browsing 434 APIs starting with **A**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · **A** · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -131,6 +131,7 @@ Browsing 433 APIs starting with **A**.
 | [airweave.ai](../../../../apis/openapi/airweave.ai) | [main](../../../../apis/openapi/airweave.ai/main) |
 | [aishub.net](../../../../apis/openapi/aishub.net) | [main](../../../../apis/openapi/aishub.net/main) |
 | [aishub_api](../../../../apis/openapi/aishub_api) | [main](../../../../apis/openapi/aishub_api/main) |
+| [aislabs.ai](../../../../apis/openapi/aislabs.ai) | [main](../../../../apis/openapi/aislabs.ai/main) |
 | [aista.ai](../../../../apis/openapi/aista.ai) | [aista-api](../../../../apis/openapi/aista.ai/aista-api) |
 | [aitable.ai](../../../../apis/openapi/aitable.ai) | [main](../../../../apis/openapi/aitable.ai/main) |
 | [akadadance.com](../../../../apis/openapi/akadadance.com) | [main](../../../../apis/openapi/akadadance.com/main) |
