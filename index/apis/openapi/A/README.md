@@ -1,6 +1,6 @@
 # APIs — A
 
-Browsing 441 APIs starting with **A**.
+Browsing 442 APIs starting with **A**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · **A** · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -384,6 +384,7 @@ Browsing 441 APIs starting with **A**.
 | [assertible.com](../../../../apis/openapi/assertible.com) | [main](../../../../apis/openapi/assertible.com/main) |
 | [assignar.com](../../../../apis/openapi/assignar.com) | [main](../../../../apis/openapi/assignar.com/main) |
 | [asterwise.com](../../../../apis/openapi/asterwise.com) | [main](../../../../apis/openapi/asterwise.com/main) |
+| [astrofabric.ai](../../../../apis/openapi/astrofabric.ai) | [main](../../../../apis/openapi/astrofabric.ai/main) |
 | [astronomyapi.com](../../../../apis/openapi/astronomyapi.com) | [main](../../../../apis/openapi/astronomyapi.com/main) |
 | [asuarez.dev](../../../../apis/openapi/asuarez.dev) | [searchly](../../../../apis/openapi/asuarez.dev/searchly) |
 | [aswat.co](../../../../apis/openapi/aswat.co) | [main](../../../../apis/openapi/aswat.co/main) |
