@@ -1,6 +1,6 @@
 # APIs — A
 
-Browsing 439 APIs starting with **A**.
+Browsing 440 APIs starting with **A**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · **A** · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -402,6 +402,7 @@ Browsing 439 APIs starting with **A**.
 | [audienceful.com](../../../../apis/openapi/audienceful.com) | [main](../../../../apis/openapi/audienceful.com/main) |
 | [audiomack.com](../../../../apis/openapi/audiomack.com) | [main](../../../../apis/openapi/audiomack.com/main) |
 | [audiomap.ai](../../../../apis/openapi/audiomap.ai) | [main](../../../../apis/openapi/audiomap.ai/main) |
+| [auditae.app](../../../../apis/openapi/auditae.app) | [main](../../../../apis/openapi/auditae.app/main) |
 | [audome.com](../../../../apis/openapi/audome.com) | [main](../../../../apis/openapi/audome.com/main) |
 | [auphonic.com](../../../../apis/openapi/auphonic.com) | [main](../../../../apis/openapi/auphonic.com/main) |
 | [aurorainbox.com](../../../../apis/openapi/aurorainbox.com) | [main](../../../../apis/openapi/aurorainbox.com/main) |
