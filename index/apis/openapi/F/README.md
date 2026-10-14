@@ -1,6 +1,6 @@
 # APIs — F
 
-Browsing 131 APIs starting with **F**.
+Browsing 132 APIs starting with **F**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · **F** · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -115,6 +115,7 @@ Browsing 131 APIs starting with **F**.
 | [frappe.io](../../../../apis/openapi/frappe.io) | [main](../../../../apis/openapi/frappe.io/main) |
 | [fraudlabspro.com](../../../../apis/openapi/fraudlabspro.com) | [fraudlabs-pro](../../../../apis/openapi/fraudlabspro.com/fraudlabs-pro) · [fraudlabs-pro-fraud-detection](../../../../apis/openapi/fraudlabspro.com/fraudlabs-pro-fraud-detection) · [fraudlabs-pro-sms-verification](../../../../apis/openapi/fraudlabspro.com/fraudlabs-pro-sms-verification) |
 | [fraudlogix.com](../../../../apis/openapi/fraudlogix.com) | [main](../../../../apis/openapi/fraudlogix.com/main) |
+| [freddy.coach](../../../../apis/openapi/freddy.coach) | [main](../../../../apis/openapi/freddy.coach/main) |
 | [freecurrencyapi.com](../../../../apis/openapi/freecurrencyapi.com) | [main](../../../../apis/openapi/freecurrencyapi.com/main) |
 | [freehoroscopeapi](../../../../apis/openapi/freehoroscopeapi) | [main](../../../../apis/openapi/freehoroscopeapi/main) |
 | [freenewsapi.io](../../../../apis/openapi/freenewsapi.io) | [main](../../../../apis/openapi/freenewsapi.io/main) |
