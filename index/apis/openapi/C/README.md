@@ -1,6 +1,6 @@
 # APIs — C
 
-Browsing 456 APIs starting with **C**.
+Browsing 457 APIs starting with **C**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · **C** · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -32,6 +32,7 @@ Browsing 456 APIs starting with **C**.
 | [cancer.gov](../../../../apis/openapi/cancer.gov) | [main](../../../../apis/openapi/cancer.gov/main) |
 | [candid.org](../../../../apis/openapi/candid.org) | [main](../../../../apis/openapi/candid.org/main) |
 | [candis.io](../../../../apis/openapi/candis.io) | [main](../../../../apis/openapi/candis.io/main) |
+| [canhelpto.com](../../../../apis/openapi/canhelpto.com) | [main](../../../../apis/openapi/canhelpto.com/main) |
 | [canibuild.com](../../../../apis/openapi/canibuild.com) | [main](../../../../apis/openapi/canibuild.com/main) |
 | [canny.io](../../../../apis/openapi/canny.io) | [main](../../../../apis/openapi/canny.io/main) |
 | [cantrip.io](../../../../apis/openapi/cantrip.io) | [main](../../../../apis/openapi/cantrip.io/main) |
