@@ -1,6 +1,6 @@
 # APIs — S
 
-Browsing 708 APIs starting with **S**.
+Browsing 709 APIs starting with **S**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · **S** · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -190,6 +190,7 @@ Browsing 708 APIs starting with **S**.
 | [shopify.com](../../../../apis/openapi/shopify.com) | [main](../../../../apis/openapi/shopify.com/main) |
 | [shoprocket.co](../../../../apis/openapi/shoprocket.co) | [main](../../../../apis/openapi/shoprocket.co/main) |
 | [shoprocketapi](../../../../apis/openapi/shoprocketapi) | [main](../../../../apis/openapi/shoprocketapi/main) |
+| [shopsavvy.com](../../../../apis/openapi/shopsavvy.com) | [main](../../../../apis/openapi/shopsavvy.com/main) |
 | [shopware.com](../../../../apis/openapi/shopware.com) | [main](../../../../apis/openapi/shopware.com/main) · [shopware](../../../../apis/openapi/shopware.com/shopware) |
 | [short.io](../../../../apis/openapi/short.io) | [main](../../../../apis/openapi/short.io/main) |
 | [shorten.rest](../../../../apis/openapi/shorten.rest) | [main](../../../../apis/openapi/shorten.rest/main) |
