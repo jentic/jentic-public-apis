@@ -1,6 +1,6 @@
 # APIs — B
 
-Browsing 227 APIs starting with **B**.
+Browsing 228 APIs starting with **B**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · **B** · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -182,6 +182,7 @@ Browsing 227 APIs starting with **B**.
 | [brex.com](../../../../apis/openapi/brex.com) | [main](../../../../apis/openapi/brex.com/main) |
 | [brex.io](../../../../apis/openapi/brex.io) | [main](../../../../apis/openapi/brex.io/main) |
 | [bri.co.id](../../../../apis/openapi/bri.co.id) | [main](../../../../apis/openapi/bri.co.id/main) |
+| [brick.blue](../../../../apis/openapi/brick.blue) | [main](../../../../apis/openapi/brick.blue/main) |
 | [brightdata.com](../../../../apis/openapi/brightdata.com) | [main](../../../../apis/openapi/brightdata.com/main) |
 | [bring.com](../../../../apis/openapi/bring.com) | [main](../../../../apis/openapi/bring.com/main) |
 | [broadcast.threema.ch](../../../../apis/openapi/broadcast.threema.ch) | [main](../../../../apis/openapi/broadcast.threema.ch/main) |
