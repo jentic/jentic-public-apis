@@ -1,6 +1,6 @@
 # APIs — A
 
-Browsing 434 APIs starting with **A**.
+Browsing 435 APIs starting with **A**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · **A** · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -339,6 +339,7 @@ Browsing 434 APIs starting with **A**.
 | [app4legal.dev](../../../../apis/openapi/app4legal.dev) | [main](../../../../apis/openapi/app4legal.dev/main) |
 | [appcenter.ms](../../../../apis/openapi/appcenter.ms) | [main](../../../../apis/openapi/appcenter.ms/main) |
 | [appconnectv3](../../../../apis/openapi/appconnectv3) | [main](../../../../apis/openapi/appconnectv3/main) |
+| [appdeploy.ai](../../../../apis/openapi/appdeploy.ai) | [main](../../../../apis/openapi/appdeploy.ai/main) |
 | [appfolio.com](../../../../apis/openapi/appfolio.com) | [main](../../../../apis/openapi/appfolio.com/main) |
 | [apple.com](../../../../apis/openapi/apple.com) | [app-store-connect](../../../../apis/openapi/apple.com/app-store-connect) · [app-store-connect-api](../../../../apis/openapi/apple.com/app-store-connect-api) · [sirikit-cloud-media](../../../../apis/openapi/apple.com/sirikit-cloud-media) |
 | [applitools.com](../../../../apis/openapi/applitools.com) | [main](../../../../apis/openapi/applitools.com/main) |
