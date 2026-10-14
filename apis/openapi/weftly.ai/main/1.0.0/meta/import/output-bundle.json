@@ -1,0 +1,1595 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Weftly API",
+    "version": "1.0.0",
+    "description": "AI post-production workflow for content creators. Transcribe and summarize audio and video, find compelling clips, cut horizontal clips or 9:16 vertical clips with burned-in captions, and cut a video from an edited transcript. No account required. Two payment rails: Stripe SPT (fiat card payments) and Tempo crypto (USDC via MPP).",
+    "contact": {
+      "name": "Woven Record Media",
+      "email": "support@weftly.ai",
+      "url": "https://weftly.ai",
+      "x-github": "https://github.com/woven-record-media"
+    },
+    "x-guidance": "Weftly is a pay-per-job AI post-production API for audio and video. No account or API key required.\n\nEvery price below is written **USDC / card**. Paying in USDC on Tempo (sign the\n402 challenge with mppx) costs less than paying by card on every job — no\nsubscription or commitment either way.\n\n## Pick the right job_type first\n\n- CLIPS from a video (Reels, TikToks, highlights): start with `find_clips` ($1.70 / $2.00).\n  It transcribes the source AND returns ranked clip candidates in one job. Do NOT\n  call `transcribe` first — find_clips already produces the transcript. Then create\n  an `extract_clip` (horizontal) or `extract_vertical_clip` (9:16) job to cut\n  chosen candidates for $0.20 / $0.50 each, with NO re-upload (see \"Source-reuse\"\n  below). MCP callers reach the same two job types through one tool,\n  `clips_from_job`, selecting `orientation`/`output` instead of a job_type.\n- A BATCH of your OWN chosen vertical clips from one find_clips job, one\n  purchase: `clips_vertical` ($0.20 / $0.50 per clip, N clips billed\n  as N × that via Stripe quantity). Pick candidates from a prior find_clips\n  job, cut them all in one call instead of one extract_vertical_clip per\n  clip. Created via POST /api/v1/jobs/{parent_job_id}/derivatives with\n  job_type:\"clips_vertical\" and a `clips` array. This REST route is card\n  only — it mints no MPP challenge. The USDC rate above is reachable through\n  the `clips_from_job` MCP tool instead (orientation: \"vertical\", output:\n  \"files\"), which charges the same per-clip price on both rails. No\n  publishing.\n- TRANSCRIPT only: `transcribe` (audio $0.20 / $0.50, video $0.70 / $1.00).\n- SUMMARY (also returns transcript): `summarize` (audio $0.45 / $0.75, video $0.95 / $1.25).\n- CLIPS end-to-end from a video you have NOT yet uploaded, in one chained call:\n  `clips_from_video` (9:16 vertical) or `clips_youtube` (16:9 horizontal, cuts\n  only — does not publish). Finds the best moments AND cuts up to 5 of them\n  under one payment. Card rail only — up to $4.50\n  authorized up front, captured for exactly what delivers; no MPP/USDC option\n  (a chain authorizes before the final price is known, which push settlement\n  cannot express). MPP-only callers should use `find_clips` + `extract_clip` /\n  `extract_vertical_clip` instead.\n\n## Two flow shapes (pick by job_type)\n\n### Upload-based — `transcribe`, `summarize`, `find_clips`\n\n  1. POST /api/v1/sessions → session token (free).\n  2. POST /api/v1/jobs with {\"job_type\":\"...\",\"filename\":\"...\",\"content_type\":\"...\"}\n     and Authorization: Bearer <token>. Response carries Stripe checkout URL and/or\n     MPP deposit info (Tempo USDC).\n  3. Pay via Stripe (checkout_url) OR MPP Tempo (send USDC to deposit_address). For\n     agents: use mppx to sign the WWW-Authenticate challenge from step 4 instead.\n  4. GET /api/v1/jobs/{id}/upload-url → presigned R2 upload URL (402+challenge if\n     unpaid; pre-paid via Stripe short-circuits).\n  5. PUT the file bytes to the presigned URL (include Content-Type).\n  6. POST /api/v1/jobs/{id}/complete-upload → verifies upload, starts processing.\n  7. Poll GET /api/v1/jobs/{id} until status=\"completed\".\n  8. GET /api/v1/jobs/{id}/outputs/{role}/download. Transcripts accept\n     ?format=txt|vtt|json|words for inline content.\n\n### Upload-based, card only — `clips_from_video`, `clips_youtube`\n\n  A chain: finds clips in a video AND cuts them under one payment. Same steps 1-2,\n  5-8 above, but step 3-4 differ — there is no MPP option:\n\n  1-2. Same as above.\n  3. Response carries a Stripe checkout URL ONLY (no MPP deposit info). This\n     authorizes the WORST CASE up front, not a charge — a chain cuts clips\n     end-to-end, so the total is not known until it finishes. MPP push\n     settlement cannot express \"authorize now, capture later\"; MPP-only callers\n     should use `find_clips` + `extract_clip`/`extract_vertical_clip` instead.\n  4. GET /api/v1/jobs/{id}/upload-url → presigned R2 upload URL once the card\n     hold is authorized (402+challenge before then; no MPP challenge ever).\n  5-8. Same as above — upload, complete-upload, poll, download. The final\n     charge (captured once, at completion) is for exactly what delivered.\n\n### No-upload — `extract_clip`, `extract_vertical_clip`\n\n  Cuts from a parent job's already-uploaded source. No upload, no re-transcribe.\n\n  1. POST /api/v1/jobs with {\"job_type\":\"extract_clip\"|\"extract_vertical_clip\",\n     \"source_job_id\":\"<parent-job-id>\", \"segments\":[{...}] | \"start\":N,\"end\":M,...}.\n  2. POST /api/v1/jobs/{id}/process with Authorization: Payment <MPP credential> —\n     verifies payment AND starts processing in one call. Do NOT call /upload-url\n     or /complete-upload for these types; both will fail.\n  3. Poll GET /api/v1/jobs/{id} until status=\"completed\", then download as above.\n\n### No-upload, edit-driven — `edit_from_transcript`\n\n  Cuts from a parent job's already-uploaded source, driven by an edited copy of\n  its transcript instead of explicit segments — get the source transcript with\n  ?format=edit, delete/reorder lines, send the edit back.\n\n  1. POST /api/v1/jobs with {\"job_type\":\"edit_from_transcript\",\n     \"source_job_id\":\"<parent-job-id>\", \"edited_transcript\":\"[0001] ...\"}.\n     Validated against the parent's word-level transcript BEFORE any job or\n     payment is created — an invalid edit returns 422 with the failing lines\n     and creates nothing.\n  2. POST /api/v1/jobs/{id}/process with Authorization: Payment <MPP credential> —\n     same as the No-upload shape above; do NOT call /upload-url or\n     /complete-upload, both will fail.\n  3. Poll GET /api/v1/jobs/{id} until status=\"completed\", then download as above.\n\n## Source-reuse (find_clips → extract_*)\n\nEach job carries `expires_at` and (for derivatives) `source_job_id`. After\n`find_clips` the source stays for **72h**; `transcribe`/`summarize` parents stay\nfor **24h**. To cut N clips from one video: one find_clips ($1.70 / $2.00) + N extract_* calls\n($0.20 / $0.50 each) referencing the same find_clips job_id. Re-uploading per cut is the\nslow, expensive path; please don't.\n\n## Pricing (flat per-job, USDC / card)\n\n- transcribe:             audio $0.20 / $0.50, video $0.70 / $1.00\n- summarize:              audio $0.45 / $0.75, video $0.95 / $1.25\n- find_clips:             video $1.70 / $2.00\n- extract_clip:           $0.20 / $0.50 per call (1+ segments, ≤30 min total)\n- extract_vertical_clip:  $0.20 / $0.50 per call (single segment; max duration is profile-dependent — 240s tiktok-primary, 180s instagram-reels, 60s instagram-stories)\n- clips_vertical:         $0.20 / $0.50 per clip (batch cut, up to 5 of your own chosen clips from one find_clips job, one purchase; no publishing). The USDC rate is MCP-tool-only — the REST /derivatives route above is card only.\n- clips_horizontal:       $0.20 / $0.50 per clip (the same batch, cut 16:9 and delivered as N SEPARATE files — not to be confused with extract_clip's multi-segment mode, which concatenates into one file at the single-clip price). Same MCP-tool-only USDC rate.\n- edit_from_transcript:   $1.00 / $1.00 per call (source_job_id + edited_transcript, up to 300 cuts, ≤60 min total)\n\nAuthoritative price table at /.well-known/mpp.json. Failed jobs auto-refund.\nFormats: MP3/WAV/M4A/OGG/FLAC/WebM/AAC audio; MP4/MOV/WebM/MKV/AVI video. JSON bodies throughout.",
+    "x-canonical-spec-url": "https://api.weftly.ai/openapi.json",
+    "x-jentic-source-url": "https://api.weftly.ai/openapi.json"
+  },
+  "servers": [
+    {
+      "url": "https://api.weftly.ai"
+    }
+  ],
+  "paths": {
+    "/api/test": {
+      "get": {
+        "operationId": "mppSmokeTest",
+        "summary": "MPP smoke test ($0.01 USDC)",
+        "description": "Verifies end-to-end MPP payment flow. Charges $0.01 USDC and returns a success confirmation. Optional `echo` query is round-tripped in the response so callers can verify their own request reached the worker.",
+        "tags": [
+          "Test"
+        ],
+        "security": [
+          {
+            "mppPaymentApiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "maxLength": 200,
+              "description": "Optional string echoed back in the response, useful for client-side smoke tests."
+            },
+            "required": false,
+            "description": "Optional string echoed back in the response, useful for client-side smoke tests.",
+            "name": "echo",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Payment verified",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "paid": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "service": {
+                      "type": "string"
+                    },
+                    "echo": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "paid",
+                    "service"
+                  ]
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Payment required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaymentRequired402"
+                }
+              }
+            }
+          }
+        },
+        "x-payment-info": {
+          "intent": "charge",
+          "method": "tempo",
+          "amount": "0.01",
+          "currency": "USDC",
+          "description": "MPP end-to-end smoke test ($0.01 USDC).",
+          "methods": [
+            {
+              "method": "tempo",
+              "amount": "0.01",
+              "currency": "USDC",
+              "intent": "charge"
+            },
+            {
+              "method": "stripe",
+              "amount": "0.01",
+              "currency": "USD",
+              "intent": "charge"
+            }
+          ],
+          "price": {
+            "mode": "fixed",
+            "amount": "0.01",
+            "currency": "USD"
+          },
+          "protocols": [
+            {
+              "mpp": {
+                "method": "tempo",
+                "intent": "charge",
+                "currency": "USDC"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "/api/v1/sessions": {
+      "post": {
+        "operationId": "createSession",
+        "summary": "Create anonymous session",
+        "tags": [
+          "Sessions"
+        ],
+        "security": [
+          {
+            "apiKey": []
+          },
+          {}
+        ],
+        "responses": {
+          "201": {
+            "description": "Session created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateSessionResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/sessions/me": {
+      "get": {
+        "operationId": "getSession",
+        "summary": "Get session status",
+        "tags": [
+          "Sessions"
+        ],
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Session details",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Session"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/jobs": {
+      "post": {
+        "operationId": "createJob",
+        "summary": "Create job with payment options",
+        "description": "Creates a job of any supported job_type and returns payment options + the next endpoint to call.\n\nThree flow shapes by job_type:\n\n1. **Upload-based** (`transcribe`, `summarize`, `find_clips`): pass `filename` + `content_type`. Response includes Stripe SPT checkout URL and MPP deposit info. After payment, GET /api/v1/jobs/{id}/upload-url, PUT the bytes, then POST /api/v1/jobs/{id}/complete-upload.\n\n2. **Upload-based, card only** (`clips_from_video`, `clips_youtube`): a chain — finds clips in a video AND cuts them under one payment. Pass `filename` + `content_type` same as above, but the response includes a Stripe checkout URL ONLY — no MPP deposit info. These job types authorize a Stripe card hold for the worst case before the final price is known (it depends on how many clips are found and delivered), which MPP push settlement cannot express. Same upload steps as above once the hold is authorized; MPP-only callers should use `find_clips` then the relevant `extract_*` derivative instead (see shape 3).\n\n3. **No-upload derivatives** (`extract_clip`, `extract_vertical_clip`): pass `source_job_id` + segments (or `start`/`end` for extract_vertical_clip). MPP-only payment (no Stripe). After payment, POST /api/v1/jobs/{id}/process — do NOT call /upload-url or /complete-upload, both will fail.\n\n4. **No-upload, edit-driven** (`edit_from_transcript`): pass `source_job_id` + `edited_transcript` (the full edited copy of the `edit` transcript format, get it via ?format=edit). Validated against the parent's word-level transcript BEFORE any job or payment is created — an invalid edit returns 422 with the failing lines and creates nothing. Same POST /api/v1/jobs/{id}/process trigger as shape 3 — do NOT call /upload-url or /complete-upload.\n\nFor clip workflows: call `find_clips` ($2.00) once, then `extract_clip` / `extract_vertical_clip` against the find_clips job_id (within its 72h `expires_at`). Do not call `transcribe` first — find_clips includes a transcript.",
+        "tags": [
+          "Jobs"
+        ],
+        "security": [
+          {
+            "apiKey": []
+          },
+          {
+            "mppPaymentApiKey": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateJobRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Job created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateJobResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Payment required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaymentRequired402"
+                }
+              }
+            }
+          }
+        },
+        "x-payment-info": {
+          "intent": "charge",
+          "method": "tempo",
+          "amount": "0.20",
+          "currency": "USDC",
+          "description": "Pay-per-job processing. Price depends on how you pay: USDC on Tempo $0.20–$1.70, credit card $0.50–$4.50. Per job (USDC / card): find_clips is $1.70 / $2.00, summarize video $0.95 / $1.25, transcribe video $0.70 / $1.00, summarize audio $0.45 / $0.75, transcribe audio / extract_clip / extract_vertical_clip $0.20 / $0.50. Authoritative price table at /.well-known/mpp.json.",
+          "methods": [
+            {
+              "method": "tempo",
+              "amount": "0.20",
+              "currency": "USDC",
+              "intent": "charge"
+            },
+            {
+              "method": "stripe",
+              "amount": "0.50",
+              "currency": "USD",
+              "intent": "charge"
+            }
+          ],
+          "price": {
+            "mode": "dynamic",
+            "min": "0.20",
+            "max": "1.70",
+            "currency": "USD"
+          },
+          "protocols": [
+            {
+              "mpp": {
+                "method": "tempo",
+                "intent": "charge",
+                "currency": "USDC"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "/api/v1/jobs/{id}/upload-url": {
+      "get": {
+        "operationId": "getUploadUrl",
+        "summary": "Get presigned upload URL (requires payment)",
+        "tags": [
+          "Jobs"
+        ],
+        "security": [
+          {
+            "apiKey": []
+          },
+          {
+            "mppPaymentApiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Upload URL",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadUrlResponse"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Payment required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaymentRequired402"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "x-payment-info": {
+          "intent": "charge",
+          "method": "tempo",
+          "amount": "0.20",
+          "currency": "USDC",
+          "description": "Pay-per-job processing. Price depends on how you pay: USDC on Tempo $0.20–$1.70, credit card $0.50–$4.50. Per job (USDC / card): find_clips is $1.70 / $2.00, summarize video $0.95 / $1.25, transcribe video $0.70 / $1.00, summarize audio $0.45 / $0.75, transcribe audio / extract_clip / extract_vertical_clip $0.20 / $0.50. Authoritative price table at /.well-known/mpp.json.",
+          "methods": [
+            {
+              "method": "tempo",
+              "amount": "0.20",
+              "currency": "USDC",
+              "intent": "charge"
+            },
+            {
+              "method": "stripe",
+              "amount": "0.50",
+              "currency": "USD",
+              "intent": "charge"
+            }
+          ],
+          "price": {
+            "mode": "dynamic",
+            "min": "0.20",
+            "max": "1.70",
+            "currency": "USD"
+          },
+          "protocols": [
+            {
+              "mpp": {
+                "method": "tempo",
+                "intent": "charge",
+                "currency": "USDC"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "/api/v1/jobs/{id}": {
+      "get": {
+        "operationId": "getJob",
+        "summary": "Get job status and outputs",
+        "tags": [
+          "Jobs"
+        ],
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Job details with outputs",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Job"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/jobs/{id}/complete-upload": {
+      "post": {
+        "operationId": "completeUpload",
+        "summary": "Confirm upload and trigger processing (upload-based jobs only)",
+        "description": "For upload-based jobs (`transcribe`, `summarize`, `find_clips`, `clips_from_video`, `clips_youtube`) only. Verifies that the file landed in R2 storage and that the job is paid, then triggers processing.\n\nDo NOT call this for `extract_clip` / `extract_vertical_clip` / `edit_from_transcript` — those are no-upload derivative jobs and use POST /api/v1/jobs/{id}/process instead.",
+        "tags": [
+          "Jobs"
+        ],
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Processing started",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CompleteUploadResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "File not found in storage, or job is a no-upload type (use /process)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Payment required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaymentRequired402"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Job not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "x-payment-info": {
+          "intent": "charge",
+          "method": "tempo",
+          "amount": "0.20",
+          "currency": "USDC",
+          "description": "Pay-per-job processing. Price depends on how you pay: USDC on Tempo $0.20–$1.70, credit card $0.50–$4.50. Per job (USDC / card): find_clips is $1.70 / $2.00, summarize video $0.95 / $1.25, transcribe video $0.70 / $1.00, summarize audio $0.45 / $0.75, transcribe audio / extract_clip / extract_vertical_clip $0.20 / $0.50. Authoritative price table at /.well-known/mpp.json.",
+          "methods": [
+            {
+              "method": "tempo",
+              "amount": "0.20",
+              "currency": "USDC",
+              "intent": "charge"
+            },
+            {
+              "method": "stripe",
+              "amount": "0.50",
+              "currency": "USD",
+              "intent": "charge"
+            }
+          ],
+          "price": {
+            "mode": "dynamic",
+            "min": "0.20",
+            "max": "1.70",
+            "currency": "USD"
+          },
+          "protocols": [
+            {
+              "mpp": {
+                "method": "tempo",
+                "intent": "charge",
+                "currency": "USDC"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "/api/v1/jobs/{id}/process": {
+      "post": {
+        "operationId": "processJob",
+        "summary": "Verify payment and trigger processing for a no-upload derivative job",
+        "description": "For no-upload derivative jobs (`extract_clip`, `extract_vertical_clip`, `edit_from_transcript`) only. Verifies the MPP payment and triggers processing in a single call — there is no upload step because these jobs cut from the parent job's already-stored source (referenced by `source_job_id` at job creation).\n\nSend Authorization: Payment <MPP credential> on the same call (after the initial 402 + WWW-Authenticate handshake) — the middleware verifies the credential, marks the job paid, and starts processing. After 200, poll GET /api/v1/jobs/{id} for status=\"completed\".\n\nReturns 400 if called for an upload-based job_type (use /complete-upload instead).",
+        "tags": [
+          "Jobs"
+        ],
+        "security": [
+          {
+            "apiKey": []
+          },
+          {
+            "mppPaymentApiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Processing started",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProcessResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Job is an upload-based type (use /complete-upload), or required params are missing",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Payment required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaymentRequired402"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Job not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "x-payment-info": {
+          "intent": "charge",
+          "method": "tempo",
+          "amount": "0.20",
+          "currency": "USDC",
+          "description": "Pay-per-job processing. Price depends on how you pay: USDC on Tempo $0.20–$1.70, credit card $0.50–$4.50. Per job (USDC / card): find_clips is $1.70 / $2.00, summarize video $0.95 / $1.25, transcribe video $0.70 / $1.00, summarize audio $0.45 / $0.75, transcribe audio / extract_clip / extract_vertical_clip $0.20 / $0.50. Authoritative price table at /.well-known/mpp.json.",
+          "methods": [
+            {
+              "method": "tempo",
+              "amount": "0.20",
+              "currency": "USDC",
+              "intent": "charge"
+            },
+            {
+              "method": "stripe",
+              "amount": "0.50",
+              "currency": "USD",
+              "intent": "charge"
+            }
+          ],
+          "price": {
+            "mode": "dynamic",
+            "min": "0.20",
+            "max": "1.70",
+            "currency": "USD"
+          },
+          "protocols": [
+            {
+              "mpp": {
+                "method": "tempo",
+                "intent": "charge",
+                "currency": "USDC"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "/api/v1/jobs/{id}/checkout": {
+      "post": {
+        "operationId": "createJobCheckout",
+        "summary": "Get or create Stripe checkout for a job",
+        "tags": [
+          "Jobs"
+        ],
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Checkout URL",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "checkout_url": {
+                      "type": "string",
+                      "format": "uri"
+                    },
+                    "stripe_checkout_session_id": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "checkout_url",
+                    "stripe_checkout_session_id"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/jobs/{id}/outputs/{role}/download": {
+      "get": {
+        "operationId": "downloadOutput",
+        "summary": "Download a job output (transcript supports format conversion)",
+        "tags": [
+          "Jobs"
+        ],
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "role",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "srt",
+                "txt",
+                "vtt",
+                "json",
+                "words",
+                "edit"
+              ],
+              "description": "Transcript format (only for role=transcript). Omit or \"srt\" for presigned URL; \"txt\", \"vtt\", \"json\", \"words\", or \"edit\" returns converted content directly."
+            },
+            "required": false,
+            "description": "Transcript format (only for role=transcript). Omit or \"srt\" for presigned URL; \"txt\", \"vtt\", \"json\", \"words\", or \"edit\" returns converted content directly.",
+            "name": "format",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Download URL (JSON) or transcript content (when format is txt/vtt/json)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DownloadUrlResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid format",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/jobs/{id}/source": {
+      "delete": {
+        "operationId": "deleteSource",
+        "summary": "Delete source file",
+        "tags": [
+          "Jobs"
+        ],
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "deleted": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    }
+                  },
+                  "required": [
+                    "deleted"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/jobs/{id}/outputs/{role}": {
+      "delete": {
+        "operationId": "deleteOutput",
+        "summary": "Delete a named output",
+        "tags": [
+          "Jobs"
+        ],
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "role",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "deleted": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    }
+                  },
+                  "required": [
+                    "deleted"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "apiKey": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "Authorization",
+        "description": "Anonymous session token from POST /api/v1/sessions, sent as `Authorization: Bearer <token>`."
+      },
+      "mppPaymentApiKey": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "Authorization",
+        "description": "MPP payment credential, sent as `Authorization: Payment <credential>`. Discovery at /.well-known/mpp.json. Supports Tempo crypto and Stripe SPT."
+      }
+    },
+    "schemas": {
+      "CreateSessionResponse": {
+        "type": "object",
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "session_token": {
+            "type": "string"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "session_id",
+          "session_token",
+          "expires_at"
+        ]
+      },
+      "Session": {
+        "type": "object",
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "created",
+              "paid",
+              "uploading",
+              "processing",
+              "completed",
+              "expired"
+            ]
+          },
+          "stripe_checkout_session_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "amount_paid_cents": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "session_id",
+          "status",
+          "expires_at",
+          "created_at",
+          "updated_at"
+        ]
+      },
+      "CreateJobRequest": {
+        "type": "object",
+        "properties": {
+          "job_type": {
+            "type": "string",
+            "enum": [
+              "transcribe",
+              "summarize",
+              "find_clips",
+              "extract_clip",
+              "extract_vertical_clip",
+              "clips_vertical",
+              "clips_from_video",
+              "clips_youtube",
+              "edit_from_transcript"
+            ],
+            "description": "Type of job to run",
+            "example": "transcribe"
+          },
+          "filename": {
+            "type": "string",
+            "example": "meeting.mp4"
+          },
+          "content_type": {
+            "type": "string",
+            "example": "video/mp4"
+          },
+          "query": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "source_job_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "segments": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ExtractClipSegment"
+            },
+            "minItems": 1,
+            "maxItems": 50
+          },
+          "include_transcript": {
+            "type": "boolean"
+          },
+          "title": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "start": {
+            "type": "number",
+            "minimum": 0
+          },
+          "end": {
+            "type": "number",
+            "minimum": 0
+          },
+          "profile": {
+            "type": "string",
+            "enum": [
+              "tiktok-primary",
+              "tiktok-primary-720p",
+              "instagram-reels",
+              "instagram-stories"
+            ],
+            "description": "extract_vertical_clip. Encoding profile to use. tiktok-primary (default): 1080×1920 H.264 fast preset, CRF 22, 6 Mbps cap. tiktok-primary-720p: 720×1280, CBR 3 Mbps — half-resolution mobile-optimized, ~40% faster wall time. instagram-reels: 1080×1920 H.264 slow preset, CBR 4 Mbps. instagram-stories: same encode shape as instagram-reels. All four apply loudness normalization to -14 LUFS / -1.5 dBTP. This also sets the per-clip duration cap (see VERTICAL_CLIP_MAX_SECONDS_BY_PROFILE).",
+            "example": "tiktok-primary"
+          },
+          "subject": {
+            "type": "string",
+            "enum": [
+              "center",
+              "manual",
+              "auto",
+              "subject_id",
+              "follow"
+            ],
+            "description": "extract_vertical_clip: reframing strategy — \"center\" (default), \"manual\", \"auto\", \"subject_id\", or \"follow\". See /.well-known/weftly-subjects-v1.schema.json."
+          },
+          "subject_id": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "subject_box": {
+            "$ref": "#/components/schemas/SubjectBox"
+          },
+          "t_ref": {
+            "type": "number",
+            "minimum": 0
+          },
+          "subject_x_offset": {
+            "type": "number",
+            "minimum": 0
+          },
+          "captions": {
+            "type": "boolean",
+            "description": "extract_vertical_clip. Burn word-level captions onto the clip (docs/vertical-clip-captions-plan.md). Defaults to true. Best-effort: a missing or unusable source transcript renders without captions rather than failing the job."
+          },
+          "edited_transcript": {
+            "type": "string",
+            "minLength": 1,
+            "description": "edit_from_transcript. The full edited copy of the `edit` transcript format, with every [NNNN] marker kept. Max 262144 UTF-8 bytes."
+          },
+          "thread_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The chat thread this job belongs to, if created from a /chat handoff. Optional. Ownership is enforced at payment-settle time, not here — see notifyThreadPaid."
+          }
+        }
+      },
+      "ExtractClipSegment": {
+        "type": "object",
+        "properties": {
+          "start": {
+            "type": "number",
+            "minimum": 0
+          },
+          "end": {
+            "type": "number",
+            "minimum": 0
+          },
+          "label": {
+            "type": "string",
+            "maxLength": 200
+          }
+        },
+        "required": [
+          "start",
+          "end"
+        ]
+      },
+      "SubjectBox": {
+        "type": "object",
+        "properties": {
+          "x": {
+            "type": "number",
+            "minimum": 0,
+            "description": "Box top-left x in source pixels."
+          },
+          "y": {
+            "type": "number",
+            "minimum": 0,
+            "description": "Box top-left y in source pixels."
+          },
+          "w": {
+            "type": "number",
+            "exclusiveMinimum": 0,
+            "description": "Box width in source pixels."
+          },
+          "h": {
+            "type": "number",
+            "exclusiveMinimum": 0,
+            "description": "Box height in source pixels."
+          }
+        },
+        "required": [
+          "x",
+          "y",
+          "w",
+          "h"
+        ]
+      },
+      "CreateJobResponse": {
+        "type": "object",
+        "properties": {
+          "job_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "job_type": {
+            "type": "string",
+            "enum": [
+              "transcribe",
+              "summarize",
+              "find_clips",
+              "extract_clip",
+              "extract_vertical_clip",
+              "clips_vertical",
+              "clips_from_video",
+              "clips_youtube",
+              "edit_from_transcript"
+            ],
+            "description": "Type of job to run"
+          },
+          "payment_status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "authorized",
+              "paid",
+              "refunded",
+              "paid_by_parent"
+            ]
+          },
+          "price_cents": {
+            "type": "integer"
+          },
+          "checkout_url": {
+            "type": "string",
+            "format": "uri",
+            "description": "Stripe SPT hosted checkout URL. Returned for upload-based jobs (transcribe, summarize, find_clips). Not returned for no-upload derivative jobs (extract_clip, extract_vertical_clip), which are MPP-only."
+          },
+          "stripe_checkout_session_id": {
+            "type": "string",
+            "description": "Stripe checkout session id paired with checkout_url. Same conditions as checkout_url."
+          },
+          "source_job_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "For derivative jobs (extract_clip, extract_vertical_clip), echoes back the parent job id this job cuts from."
+          },
+          "next_endpoint": {
+            "type": "string",
+            "enum": [
+              "upload-url",
+              "process"
+            ],
+            "description": "Which endpoint to call after payment. 'upload-url' for transcribe/summarize/find_clips (then PUT bytes, then complete-upload). 'process' for extract_clip/extract_vertical_clip (no upload, /process verifies payment and starts the job in one call)."
+          },
+          "mpp": {
+            "$ref": "#/components/schemas/MppDepositInfo"
+          }
+        },
+        "required": [
+          "job_id",
+          "job_type",
+          "payment_status",
+          "price_cents"
+        ]
+      },
+      "MppDepositInfo": {
+        "type": "object",
+        "properties": {
+          "deposit_address": {
+            "type": "string"
+          },
+          "network": {
+            "type": "string"
+          },
+          "amount": {
+            "type": "string"
+          },
+          "currency": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "deposit_address",
+          "network",
+          "amount",
+          "currency"
+        ]
+      },
+      "Job": {
+        "type": "object",
+        "properties": {
+          "job_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "session_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "job_type": {
+            "type": "string",
+            "enum": [
+              "transcribe",
+              "summarize",
+              "find_clips",
+              "extract_clip",
+              "extract_vertical_clip",
+              "clips_vertical",
+              "clips_from_video",
+              "clips_youtube",
+              "edit_from_transcript"
+            ],
+            "description": "Type of job to run"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "uploading",
+              "extracting_audio",
+              "transcribing",
+              "analyzing",
+              "publishing",
+              "completed",
+              "failed",
+              "deleted"
+            ]
+          },
+          "payment_status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "authorized",
+              "paid",
+              "refunded",
+              "paid_by_parent"
+            ]
+          },
+          "original_filename": {
+            "type": "string"
+          },
+          "content_type": {
+            "type": "string"
+          },
+          "file_size": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "duration_seconds": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "error_message": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "completed_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "source_job_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "For derivative jobs (extract_clip, extract_vertical_clip, or any job created with source_job_id), the parent job whose stored source this job cuts from. Pass this same id to additional derivative calls within `expires_at` to avoid re-uploading."
+          },
+          "bundle_job_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "For bundled child jobs (e.g. a clips_vertical bundle's extract_vertical_clip children), the bundle job that purchased and spawned this one. payment_status is \"paid_by_parent\" for these rows."
+          },
+          "expires_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When this job's source video and outputs are scheduled to be deleted from storage. find_clips: 72h after completion (so multiple extract_* calls can compose). transcribe / summarize: 24h. extract_clip / extract_vertical_clip: 24h. Once expired, derivative calls referencing this job_id as source_job_id will fail."
+          },
+          "outputs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/JobOutput"
+            }
+          }
+        },
+        "required": [
+          "job_id",
+          "job_type",
+          "status",
+          "payment_status",
+          "original_filename",
+          "content_type",
+          "created_at"
+        ]
+      },
+      "JobOutput": {
+        "type": "object",
+        "properties": {
+          "output_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "job_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "role": {
+            "type": "string"
+          },
+          "r2_key": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "external_url": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uri"
+          },
+          "content_type": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "download_url": {
+            "type": "string",
+            "format": "uri"
+          },
+          "attachment_url": {
+            "type": "string",
+            "format": "uri",
+            "description": "Same content as download_url, but signed with response-content-disposition=attachment so clicking it triggers a browser download (with a sensible filename) instead of inline rendering. Use this for download buttons; use download_url for inline playback or fetch."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "output_id",
+          "job_id",
+          "role",
+          "created_at"
+        ]
+      },
+      "ErrorResponse": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "error"
+        ]
+      },
+      "PaymentRequired402": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "status": {
+            "type": "number",
+            "enum": [
+              402
+            ]
+          },
+          "detail": {
+            "type": "string"
+          },
+          "challengeId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
+        ]
+      },
+      "CompleteUploadResponse": {
+        "type": "object",
+        "properties": {
+          "job_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "processing"
+            ]
+          }
+        },
+        "required": [
+          "job_id",
+          "status"
+        ]
+      },
+      "ProcessResponse": {
+        "type": "object",
+        "properties": {
+          "job_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "processing"
+            ]
+          }
+        },
+        "required": [
+          "job_id",
+          "status"
+        ]
+      },
+      "UploadUrlResponse": {
+        "type": "object",
+        "properties": {
+          "job_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "upload_url": {
+            "type": "string",
+            "format": "uri"
+          }
+        },
+        "required": [
+          "job_id",
+          "upload_url"
+        ]
+      },
+      "DownloadUrlResponse": {
+        "type": "object",
+        "properties": {
+          "download_url": {
+            "type": "string",
+            "format": "uri"
+          },
+          "output_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "download_url"
+        ]
+      }
+    },
+    "parameters": {}
+  },
+  "externalDocs": {
+    "description": "Canonical OpenAPI specification",
+    "url": "https://api.weftly.ai/openapi.json"
+  },
+  "x-discovery": {
+    "ownershipProofs": [
+      "dns:weftly.ai"
+    ]
+  },
+  "x-service-info": {
+    "name": "Weftly",
+    "description": "Pay-per-job AI post-production: transcribe, summarize, find clips, and cut horizontal clips or 9:16 vertical clips with burned-in captions from audio and video. No account required.",
+    "categories": [
+      "ai",
+      "media"
+    ],
+    "provider": "Woven Record Media",
+    "homepage": "https://weftly.ai",
+    "paymentMethods": [
+      "tempo",
+      "stripe"
+    ],
+    "paymentDiscovery": "https://api.weftly.ai/.well-known/mpp.json"
+  }
+}
