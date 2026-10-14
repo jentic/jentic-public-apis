@@ -1,11 +1,12 @@
 # APIs — W
 
-Browsing 82 APIs starting with **W**.
+Browsing 83 APIs starting with **W**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · **W** · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
 | Vendor | APIs |
 |--------|------|
+| [waitlio.com](../../../../apis/openapi/waitlio.com) | [main](../../../../apis/openapi/waitlio.com/main) |
 | [waiverfile.com](../../../../apis/openapi/waiverfile.com) | [main](../../../../apis/openapi/waiverfile.com/main) |
 | [wallester.com](../../../../apis/openapi/wallester.com) | [main](../../../../apis/openapi/wallester.com/main) |
 | [walletobjects.googleapis.com](../../../../apis/openapi/walletobjects.googleapis.com) | [pay-passes](../../../../apis/openapi/walletobjects.googleapis.com/pay-passes) |
