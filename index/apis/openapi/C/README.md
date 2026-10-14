@@ -1,6 +1,6 @@
 # APIs — C
 
-Browsing 461 APIs starting with **C**.
+Browsing 462 APIs starting with **C**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · **C** · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -240,6 +240,7 @@ Browsing 461 APIs starting with **C**.
 | [clubplanner.com](../../../../apis/openapi/clubplanner.com) | [main](../../../../apis/openapi/clubplanner.com/main) |
 | [clubworx.com](../../../../apis/openapi/clubworx.com) | [clubworx](../../../../apis/openapi/clubworx.com/clubworx) |
 | [clutch.com](../../../../apis/openapi/clutch.com) | [main](../../../../apis/openapi/clutch.com/main) |
+| [clypmint.com](../../../../apis/openapi/clypmint.com) | [main](../../../../apis/openapi/clypmint.com/main) |
 | [cm.com](../../../../apis/openapi/cm.com) | [main](../../../../apis/openapi/cm.com/main) |
 | [cms.gov](../../../../apis/openapi/cms.gov) | [main](../../../../apis/openapi/cms.gov/main) |
 | [cnab-online.herokuapp.com](../../../../apis/openapi/cnab-online.herokuapp.com) | [main](../../../../apis/openapi/cnab-online.herokuapp.com/main) |
