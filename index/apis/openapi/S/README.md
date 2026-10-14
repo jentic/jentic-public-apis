@@ -1,6 +1,6 @@
 # APIs — S
 
-Browsing 706 APIs starting with **S**.
+Browsing 707 APIs starting with **S**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · **S** · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -430,6 +430,7 @@ Browsing 706 APIs starting with **S**.
 | [stripe.com](../../../../apis/openapi/stripe.com) | [main](../../../../apis/openapi/stripe.com/main) · [stripe](../../../../apis/openapi/stripe.com/stripe) |
 | [strive.asia](../../../../apis/openapi/strive.asia) | [main](../../../../apis/openapi/strive.asia/main) |
 | [strive.com](../../../../apis/openapi/strive.com) | [main](../../../../apis/openapi/strive.com/main) |
+| [strompriseridag.no](../../../../apis/openapi/strompriseridag.no) | [main](../../../../apis/openapi/strompriseridag.no/main) |
 | [stubhub.ie](../../../../apis/openapi/stubhub.ie) | [main](../../../../apis/openapi/stubhub.ie/main) |
 | [stytch.com](../../../../apis/openapi/stytch.com) | [main](../../../../apis/openapi/stytch.com/main) |
 | [styvio.com](../../../../apis/openapi/styvio.com) | [main](../../../../apis/openapi/styvio.com/main) |
