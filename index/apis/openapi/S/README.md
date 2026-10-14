@@ -1,6 +1,6 @@
 # APIs — S
 
-Browsing 715 APIs starting with **S**.
+Browsing 716 APIs starting with **S**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · **S** · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -715,6 +715,7 @@ Browsing 715 APIs starting with **S**.
 | [syncromsp.com](../../../../apis/openapi/syncromsp.com) | [main](../../../../apis/openapi/syncromsp.com/main) |
 | [synctera.com](../../../../apis/openapi/synctera.com) | [main](../../../../apis/openapi/synctera.com/main) |
 | [synduit.com](../../../../apis/openapi/synduit.com) | [main](../../../../apis/openapi/synduit.com/main) |
+| [synlake.ai](../../../../apis/openapi/synlake.ai) | [main](../../../../apis/openapi/synlake.ai/main) |
 | [synonyms.com](../../../../apis/openapi/synonyms.com) | [main](../../../../apis/openapi/synonyms.com/main) |
 | [synq.fm](../../../../apis/openapi/synq.fm) | [main](../../../../apis/openapi/synq.fm/main) · [synq-video](../../../../apis/openapi/synq.fm/synq-video) |
 | [synthesia.io](../../../../apis/openapi/synthesia.io) | [synthesia](../../../../apis/openapi/synthesia.io/synthesia) |
