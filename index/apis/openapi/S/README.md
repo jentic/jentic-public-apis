@@ -1,6 +1,6 @@
 # APIs — S
 
-Browsing 707 APIs starting with **S**.
+Browsing 708 APIs starting with **S**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · **S** · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -207,6 +207,7 @@ Browsing 707 APIs starting with **S**.
 | [sieg.com](../../../../apis/openapi/sieg.com) | [baixar-eventos](../../../../apis/openapi/sieg.com/baixar-eventos) · [baixar-xml-por-nsu](../../../../apis/openapi/sieg.com/baixar-xml-por-nsu) · [buscar-xmls-por-nsu](../../../../apis/openapi/sieg.com/buscar-xmls-por-nsu) · [enviar-xmls](../../../../apis/openapi/sieg.com/enviar-xmls) |
 | [sift.com](../../../../apis/openapi/sift.com) | [main](../../../../apis/openapi/sift.com/main) |
 | [sifterapp.com](../../../../apis/openapi/sifterapp.com) | [main](../../../../apis/openapi/sifterapp.com/main) |
+| [sifting.io](../../../../apis/openapi/sifting.io) | [main](../../../../apis/openapi/sifting.io/main) |
 | [sightmap.com](../../../../apis/openapi/sightmap.com) | [engrain-sight-map](../../../../apis/openapi/sightmap.com/engrain-sight-map) |
 | [sigmamind.ai](../../../../apis/openapi/sigmamind.ai) | [sigmamind-api](../../../../apis/openapi/sigmamind.ai/sigmamind-api) |
 | [signatureapi.com](../../../../apis/openapi/signatureapi.com) | [main](../../../../apis/openapi/signatureapi.com/main) |
