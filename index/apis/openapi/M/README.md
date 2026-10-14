@@ -1,6 +1,6 @@
 # APIs — M
 
-Browsing 264 APIs starting with **M**.
+Browsing 265 APIs starting with **M**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · **M** · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -46,6 +46,7 @@ Browsing 264 APIs starting with **M**.
 | [mandapi.com](../../../../apis/openapi/mandapi.com) | [main](../../../../apis/openapi/mandapi.com/main) |
 | [mandrillapp.com](../../../../apis/openapi/mandrillapp.com) | [main](../../../../apis/openapi/mandrillapp.com/main) |
 | [mangadex.org](../../../../apis/openapi/mangadex.org) | [main](../../../../apis/openapi/mangadex.org/main) |
+| [mangii.ai](../../../../apis/openapi/mangii.ai) | [main](../../../../apis/openapi/mangii.ai/main) |
 | [mangoslab.org](../../../../apis/openapi/mangoslab.org) | [main](../../../../apis/openapi/mangoslab.org/main) |
 | [manifest.ly](../../../../apis/openapi/manifest.ly) | [main](../../../../apis/openapi/manifest.ly/main) |
 | [manus.im](../../../../apis/openapi/manus.im) | [main](../../../../apis/openapi/manus.im/main) |
