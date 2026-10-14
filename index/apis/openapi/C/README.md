@@ -1,6 +1,6 @@
 # APIs — C
 
-Browsing 455 APIs starting with **C**.
+Browsing 456 APIs starting with **C**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · **C** · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -28,6 +28,7 @@ Browsing 455 APIs starting with **C**.
 | [camunda.com](../../../../apis/openapi/camunda.com) | [main](../../../../apis/openapi/camunda.com/main) |
 | [canada-holidays.ca](../../../../apis/openapi/canada-holidays.ca) | [main](../../../../apis/openapi/canada-holidays.ca/main) |
 | [canadapost-postescanada.ca](../../../../apis/openapi/canadapost-postescanada.ca) | [main](../../../../apis/openapi/canadapost-postescanada.ca/main) |
+| [canarics.com](../../../../apis/openapi/canarics.com) | [main](../../../../apis/openapi/canarics.com/main) |
 | [cancer.gov](../../../../apis/openapi/cancer.gov) | [main](../../../../apis/openapi/cancer.gov/main) |
 | [candid.org](../../../../apis/openapi/candid.org) | [main](../../../../apis/openapi/candid.org/main) |
 | [candis.io](../../../../apis/openapi/candis.io) | [main](../../../../apis/openapi/candis.io/main) |
