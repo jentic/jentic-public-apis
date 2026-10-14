@@ -1,6 +1,6 @@
 # APIs — S
 
-Browsing 705 APIs starting with **S**.
+Browsing 706 APIs starting with **S**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · **S** · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -448,6 +448,7 @@ Browsing 705 APIs starting with **S**.
 | [supabase.co](../../../../apis/openapi/supabase.co) | [main](../../../../apis/openapi/supabase.co/main) |
 | [supabase.com](../../../../apis/openapi/supabase.com) | [main](../../../../apis/openapi/supabase.com/main) |
 | [supabugs.io](../../../../apis/openapi/supabugs.io) | [main](../../../../apis/openapi/supabugs.io/main) |
+| [supadata.ai](../../../../apis/openapi/supadata.ai) | [main](../../../../apis/openapi/supadata.ai/main) |
 | [superbot.one](../../../../apis/openapi/superbot.one) | [main](../../../../apis/openapi/superbot.one/main) |
 | [supercell.com](../../../../apis/openapi/supercell.com) | [brawl-stars](../../../../apis/openapi/supercell.com/brawl-stars) · [clash-of-clans](../../../../apis/openapi/supercell.com/clash-of-clans) · [clash-royale](../../../../apis/openapi/supercell.com/clash-royale) |
 | [superfeedr.com](../../../../apis/openapi/superfeedr.com) | [main](../../../../apis/openapi/superfeedr.com/main) |
