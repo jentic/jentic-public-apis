@@ -1,0 +1,2862 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Verifi Agent API",
+    "summary": "Human judgment your AI agent can call, paid per request with x402.",
+    "description": "Verifi routes an agent request to a real human and returns the human verdict.\n\nEvery verification is one chain with three gates, priced in euros and payable on Base mainnet in USDC or EURC. Gate 1 (0.10 EUR) admits the request to the human queue. The unlock then costs 2.90 EUR if the human answered within 60 minutes of admission (SLA window), or 1.45 EUR if the answer came later, within 24 hours (grace window). The price is decided by when the human answered, never by when the agent unlocks. There is no cancellation. EURC amounts are the euro prices. USDC amounts are converted at the ECB euro reference rate and rounded up to the cent; the conversion is disclosed in the terms and never changes after admission. The asset paid at gate 1 binds the unlock. The first 402 carries every price of the chain.\n\nEvery verification is paid; human time is never free. What is free needs no human: this document, MCP discovery, the status endpoint, and the 402 Payment Required response, so an agent can test the connection and read every price before paying. If no human answers within 24 hours the chain fails with reason human_timeout and the wallet's next admission is free.\n\nHuman work can take minutes or hours, so the API is asynchronous and resumable through a durable verify_id. Prefer callback_url over polling. No API key, signup, or account is required: the requester wallet address is the identity.\n\nRates: ECB euro foreign exchange reference rates, published for information purposes only. Source: European Central Bank.\n\nContract version 3.",
+    "x-guidance": "POST /verify with intent, claim and your wallet as agent_id. Pay the 402: its accepts list every asset taken (USDC first) and extensions.service-windows carries every later price. Store verify_id, then wait for the callback or poll GET /verify/{verify_id} (free). When status is ready, POST /verify-unlock?id={verify_id} and pay its single requirement, 2.90 EUR if the human answered within 60 minutes of admission, 1.45 EUR if later, in the asset of the admission. Read the result from the completed response. Never send a private key.",
+    "version": "3.0.0",
+    "contact": {
+      "name": "Verifi",
+      "url": "https://verifi.cloud/contact",
+      "email": "verifi@potamoi.eu"
+    },
+    "license": {
+      "name": "Proprietary",
+      "url": "https://verifi.cloud/"
+    }
+  },
+  "x-agentcash-guidance": {
+    "llmsTxtUrl": "https://verifi.cloud/llms.txt"
+  },
+  "servers": [
+    {
+      "url": "https://verifi.cloud",
+      "description": "Production"
+    }
+  ],
+  "externalDocs": {
+    "description": "Human readable docs and the machine readable agent brief",
+    "url": "https://verifi.cloud/docs/"
+  },
+  "tags": [
+    {
+      "name": "verify",
+      "description": "The three-gate verification chain."
+    },
+    {
+      "name": "service",
+      "description": "Liveness and service metadata."
+    }
+  ],
+  "paths": {
+    "/verify": {
+      "post": {
+        "tags": [
+          "verify"
+        ],
+        "operationId": "createVerify",
+        "summary": "Gate 1: submit a claim and enter the human queue",
+        "description": "Submits work for a human and admits it to the queue.\n\nEvery admission is paid, and every caller first receives a 402. A wallet with an earned admission credit signs that 402 as usual: Verifi checks that the signature comes from agent_id, for the admission price of a valid quote, then uses the credit, answers 202, and never submits the payment. A signature from any other wallet is settled as a normal payment, so nobody can spend another wallet's credit. Its PAYMENT-REQUIRED header carries two exact options for 0.10 EUR, USDC first (converted at the ECB euro reference rate, rounded up to the cent) and EURC second, and the full terms of the chain in extensions[\"service-windows\"]: both windows, the unlock prices for each asset, the conversion, and terms_valid_until. Pick one option, sign it with the requester wallet, and repeat the same request while the quote is valid (about 10 minutes). A payment signed against an expired quote is not settled: the answer is a fresh 402 with fresh terms.\n\nThe asset paid here binds the chain, and the unlock is paid in the same asset. The unlock costs 1.45 to 2.90 EUR, decided by when the human answered: 2.90 EUR if ready_at is within 60 minutes of admitted_at, 1.45 EUR if it is later, within 24 hours. There is no cancellation. If nobody answers within 24 hours the chain fails with reason human_timeout and the wallet's next admission is free.\n\nA paid chain does not enter the human queue before its admission settlement is recorded. A refused request never charges the caller: x402 cancels settlement for any 4xx or 5xx answer, so the signed authorization is never submitted. This endpoint therefore answers 402 whenever the caller has no entitlement, including while the human queue is full, and answers 400, 409, or a full queue 503 only after the payment gate. When no quote can be issued it answers 503 instead of 402.\n\nStore verify_id from the response. It is the only durable handle for the rest of the chain.",
+        "x-payment-info": {
+          "price": {
+            "mode": "fixed",
+            "currency": "EUR",
+            "amount": "0.10"
+          },
+          "protocols": [
+            {
+              "x402": {}
+            }
+          ]
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/PaymentSignature"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VerifyRequest"
+              },
+              "examples": {
+                "polling": {
+                  "summary": "Minimal request, agent polls for the result",
+                  "value": {
+                    "intent": "Publish a launch note to customers",
+                    "claim": "The new pricing takes effect on 1 September and existing customers keep the old price until renewal.",
+                    "agent_id": "0x1111111111111111111111111111111111111111"
+                  }
+                },
+                "callback": {
+                  "summary": "Preferred: receive an event instead of polling",
+                  "value": {
+                    "intent": "Publish a launch note to customers",
+                    "claim": "The new pricing takes effect on 1 September and existing customers keep the old price until renewal.",
+                    "agent_id": "0x1111111111111111111111111111111111111111",
+                    "callback_url": "https://agent.example.com/verifi-events"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Admitted. The terms are bound to the chain. Poll or wait for the callback. On the 202 of a paid admission admitted_at, sla_deadline, and grace_deadline are still null, because the windows start when the admission settlement is recorded; they appear on the first poll. An admission paid with a credit has them at once.",
+            "headers": {
+              "Retry-After": {
+                "$ref": "#/components/headers/RetryAfter"
+              },
+              "PAYMENT-RESPONSE": {
+                "$ref": "#/components/headers/PaymentResponse"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VerifyAccepted"
+                },
+                "examples": {
+                  "paidChainEurc": {
+                    "summary": "Paid in EURC. The windows start when the settlement is recorded, so the deadlines appear on the first poll.",
+                    "value": {
+                      "verify_id": "6b2a1f6e-9a0d-4a2b-91c6-8f0f2d5a7c33",
+                      "work_id": "6b2a1f6e-9a0d-4a2b-91c6-8f0f2d5a7c33",
+                      "contract_version": 3,
+                      "status": "processing",
+                      "human_status": null,
+                      "verdict": null,
+                      "explanation": null,
+                      "response": null,
+                      "response_time_ms": null,
+                      "wallet_address": "0x1111111111111111111111111111111111111111",
+                      "funding": {
+                        "entry_source": "x402",
+                        "free_use_number": null,
+                        "asset": {
+                          "network": "eip155:8453",
+                          "address": "0x60a3E35Cc302bFA44Cb288Bc5a4F316Fdb1adb42",
+                          "symbol": "EURC",
+                          "decimals": 6
+                        },
+                        "entry_amount_atomic": "100000",
+                        "entry_charged_atomic": "100000",
+                        "unlock_source": null,
+                        "unlock_window": null,
+                        "unlock_amount_atomic": "2900000",
+                        "unlock_charged_atomic": "0",
+                        "total_amount_atomic": "3000000",
+                        "total_charged_atomic": "100000",
+                        "entry_list_price_usdc": null,
+                        "entry_charged_usdc": null,
+                        "unlock_list_price_usdc": null,
+                        "unlock_charged_usdc": null,
+                        "total_list_price_usdc": null,
+                        "total_charged_usdc": null
+                      },
+                      "created_at": "2026-10-01T09:00:00+00:00",
+                      "admitted_at": null,
+                      "sla_deadline": null,
+                      "grace_deadline": null,
+                      "ready_at": null,
+                      "expires_at": null,
+                      "responded_at": null,
+                      "unlocked_at": null,
+                      "terms": {
+                        "version": 1,
+                        "terms_id": "st_5f0c2a9e4b7d13a8c6e1f042",
+                        "windows": {
+                          "sla": {
+                            "within_seconds": 3600
+                          },
+                          "grace": {
+                            "within_seconds": 86400
+                          }
+                        },
+                        "price_basis": {
+                          "currency": "EUR",
+                          "admission": "0.10",
+                          "sla": "2.90",
+                          "grace": "1.45"
+                        },
+                        "network": "eip155:8453",
+                        "asset": "0x60a3E35Cc302bFA44Cb288Bc5a4F316Fdb1adb42",
+                        "asset_symbol": "EURC",
+                        "asset_decimals": 6,
+                        "asset_eip712": {
+                          "name": "EURC",
+                          "version": "2"
+                        },
+                        "admission": "100000",
+                        "sla": "2900000",
+                        "grace": "1450000",
+                        "asset_binding": "admission_asset",
+                        "expiry": {
+                          "admission_credit": "next_admission"
+                        },
+                        "cancellation": "none"
+                      },
+                      "next_action": "poll",
+                      "poll_url": "/verify/6b2a1f6e-9a0d-4a2b-91c6-8f0f2d5a7c33",
+                      "retry_after_seconds": 15,
+                      "response_timeout_ms": 86400000,
+                      "message": "Admission accepted. Poll until status is ready or failed."
+                    }
+                  },
+                  "creditChainUsdc": {
+                    "summary": "Admission covered by an earned credit, bound to USDC like the chain that earned it. Admitted at once.",
+                    "value": {
+                      "verify_id": "0f3f7d0a-6a1c-4a1e-9d7a-2f6b5b0f9c11",
+                      "work_id": "0f3f7d0a-6a1c-4a1e-9d7a-2f6b5b0f9c11",
+                      "contract_version": 3,
+                      "status": "processing",
+                      "human_status": null,
+                      "verdict": null,
+                      "explanation": null,
+                      "response": null,
+                      "response_time_ms": null,
+                      "wallet_address": "0x1111111111111111111111111111111111111111",
+                      "funding": {
+                        "entry_source": "failure_credit",
+                        "free_use_number": null,
+                        "asset": {
+                          "network": "eip155:8453",
+                          "address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+                          "symbol": "USDC",
+                          "decimals": 6
+                        },
+                        "entry_amount_atomic": "120000",
+                        "entry_charged_atomic": "0",
+                        "unlock_source": null,
+                        "unlock_window": null,
+                        "unlock_amount_atomic": "3400000",
+                        "unlock_charged_atomic": "0",
+                        "total_amount_atomic": "3520000",
+                        "total_charged_atomic": "0",
+                        "entry_list_price_usdc": "0.12",
+                        "entry_charged_usdc": "0.00",
+                        "unlock_list_price_usdc": "3.40",
+                        "unlock_charged_usdc": "0.00",
+                        "total_list_price_usdc": "3.52",
+                        "total_charged_usdc": "0.00"
+                      },
+                      "created_at": "2026-10-01T09:00:00+00:00",
+                      "admitted_at": "2026-10-01T09:00:02+00:00",
+                      "sla_deadline": "2026-10-01T10:00:02+00:00",
+                      "grace_deadline": "2026-10-02T09:00:02+00:00",
+                      "ready_at": null,
+                      "expires_at": "2026-10-02T09:00:02+00:00",
+                      "responded_at": null,
+                      "unlocked_at": null,
+                      "terms": {
+                        "version": 1,
+                        "terms_id": "st_5f0c2a9e4b7d13a8c6e1f042",
+                        "windows": {
+                          "sla": {
+                            "within_seconds": 3600
+                          },
+                          "grace": {
+                            "within_seconds": 86400
+                          }
+                        },
+                        "price_basis": {
+                          "currency": "EUR",
+                          "admission": "0.10",
+                          "sla": "2.90",
+                          "grace": "1.45"
+                        },
+                        "network": "eip155:8453",
+                        "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+                        "asset_symbol": "USDC",
+                        "asset_decimals": 6,
+                        "asset_eip712": {
+                          "name": "USD Coin",
+                          "version": "2"
+                        },
+                        "admission": "120000",
+                        "sla": "3400000",
+                        "grace": "1700000",
+                        "asset_binding": "admission_asset",
+                        "expiry": {
+                          "admission_credit": "next_admission"
+                        },
+                        "cancellation": "none",
+                        "conversion": {
+                          "from": "EUR",
+                          "rate": "1.17",
+                          "source": "ECB euro reference rate",
+                          "as_of": "2026-09-30",
+                          "rounding": "up_to_cent"
+                        }
+                      },
+                      "next_action": "poll",
+                      "poll_url": "/verify/0f3f7d0a-6a1c-4a1e-9d7a-2f6b5b0f9c11",
+                      "retry_after_seconds": 15,
+                      "response_timeout_ms": 86400000,
+                      "message": "Admission accepted. Poll until status is ready or failed."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "402": {
+            "$ref": "#/components/responses/PaymentRequiredEntry"
+          },
+          "409": {
+            "description": "The wallet's admission credit was consumed by a concurrent request, or the paid terms could not be bound. Nothing was charged. Retry: the next answer carries fresh x402 payment requirements.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "examples": {
+                  "entitlementConsumed": {
+                    "value": {
+                      "error": "entry entitlement was consumed by another request",
+                      "detail": "Retry POST /verify. The next response will contain x402 payment requirements."
+                    }
+                  },
+                  "termsNotBound": {
+                    "value": {
+                      "error": "the paid terms could not be bound",
+                      "detail": "Retry POST /verify for a fresh quote. No payment was taken."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "The wallet already has an active chain. One active chain per wallet is allowed. Nothing was charged.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "one active verify per agent_id",
+                  "detail": "Poll the previous verify until it is completed or failed."
+                }
+              }
+            }
+          },
+          "502": {
+            "$ref": "#/components/responses/BackendUnavailable"
+          },
+          "503": {
+            "description": "The human queue is full, admission is temporarily unavailable, pricing is temporarily unavailable (no quote can be issued right now), or the paid gates are unavailable or not configured. Nothing was charged. Retry after the advertised delay.",
+            "headers": {
+              "Retry-After": {
+                "$ref": "#/components/headers/RetryAfter"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "examples": {
+                  "queueFull": {
+                    "value": {
+                      "error": "human queue is full",
+                      "detail": "Retry in a couple of minutes. No payment was taken."
+                    }
+                  },
+                  "pricingUnavailable": {
+                    "value": {
+                      "error": "pricing is temporarily unavailable",
+                      "detail": "No quote can be issued right now. Retry shortly. No payment was taken."
+                    }
+                  },
+                  "admissionUnavailable": {
+                    "value": {
+                      "error": "admission is temporarily unavailable",
+                      "detail": "Retry shortly. No payment was taken."
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": []
+      }
+    },
+    "/verify/{verify_id}": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/VerifyIdPath"
+        }
+      ],
+      "get": {
+        "tags": [
+          "verify"
+        ],
+        "operationId": "getVerify",
+        "summary": "Poll the state of a chain",
+        "description": "Returns the current state. Polling never costs money and never reveals a locked result.\n\nWhile status is processing, honor retry_after_seconds. A processing response carries admitted_at, sla_deadline, and grace_deadline, so the agent can plan its polling; expires_at equals grace_deadline, the last deadline. Human work can take minutes or hours, up to 24 hours, so do not assume a short fixed deadline. Prefer callback_url and use polling as the recovery path.\n\nA ready response states exactly what the unlock costs and why: service_window.applied (sla or grace, decided by ready_at alone) and service_window.unlock_amount in the bound asset.",
+        "responses": {
+          "200": {
+            "description": "Current state of the chain.",
+            "headers": {
+              "Retry-After": {
+                "$ref": "#/components/headers/RetryAfter"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VerifyState"
+                },
+                "examples": {
+                  "processing": {
+                    "summary": "A human is working. Poll again.",
+                    "value": {
+                      "verify_id": "0f3f7d0a-6a1c-4a1e-9d7a-2f6b5b0f9c11",
+                      "work_id": "0f3f7d0a-6a1c-4a1e-9d7a-2f6b5b0f9c11",
+                      "contract_version": 3,
+                      "status": "processing",
+                      "verdict": null,
+                      "explanation": null,
+                      "response": null,
+                      "admitted_at": "2026-10-01T09:00:02+00:00",
+                      "sla_deadline": "2026-10-01T10:00:02+00:00",
+                      "grace_deadline": "2026-10-02T09:00:02+00:00",
+                      "ready_at": null,
+                      "expires_at": "2026-10-02T09:00:02+00:00",
+                      "next_action": "poll",
+                      "poll_url": "/verify/0f3f7d0a-6a1c-4a1e-9d7a-2f6b5b0f9c11",
+                      "retry_after_seconds": 15
+                    }
+                  },
+                  "readySlaUsdc": {
+                    "summary": "USDC chain. The human answered inside the SLA window, so the unlock costs the SLA amount.",
+                    "value": {
+                      "verify_id": "0f3f7d0a-6a1c-4a1e-9d7a-2f6b5b0f9c11",
+                      "work_id": "0f3f7d0a-6a1c-4a1e-9d7a-2f6b5b0f9c11",
+                      "contract_version": 3,
+                      "status": "ready",
+                      "verdict": null,
+                      "explanation": null,
+                      "response": null,
+                      "admitted_at": "2026-10-01T09:00:02+00:00",
+                      "sla_deadline": "2026-10-01T10:00:02+00:00",
+                      "grace_deadline": "2026-10-02T09:00:02+00:00",
+                      "ready_at": "2026-10-01T09:41:15+00:00",
+                      "responded_at": "2026-10-01T09:41:15+00:00",
+                      "next_action": "unlock",
+                      "unlock_url": "https://verifi.cloud/verify-unlock?id=0f3f7d0a-6a1c-4a1e-9d7a-2f6b5b0f9c11",
+                      "unlock": {
+                        "method": "POST",
+                        "url": "/verify-unlock?id=0f3f7d0a-6a1c-4a1e-9d7a-2f6b5b0f9c11",
+                        "price_usdc": "3.40",
+                        "payment_required": true,
+                        "funded_by": "x402",
+                        "network": "eip155:8453",
+                        "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+                        "asset_symbol": "USDC",
+                        "amount_atomic": "3400000",
+                        "amount_decimal": "3.40",
+                        "applied_window": "sla"
+                      },
+                      "service_window": {
+                        "applied": "sla",
+                        "sla_deadline": "2026-10-01T10:00:02+00:00",
+                        "grace_deadline": "2026-10-02T09:00:02+00:00",
+                        "network": "eip155:8453",
+                        "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+                        "unlock_amount": "3400000"
+                      }
+                    }
+                  },
+                  "readyGraceEurc": {
+                    "summary": "EURC chain. The human answered after the SLA window, so the unlock costs the grace amount.",
+                    "value": {
+                      "verify_id": "6b2a1f6e-9a0d-4a2b-91c6-8f0f2d5a7c33",
+                      "work_id": "6b2a1f6e-9a0d-4a2b-91c6-8f0f2d5a7c33",
+                      "contract_version": 3,
+                      "status": "ready",
+                      "verdict": null,
+                      "explanation": null,
+                      "response": null,
+                      "admitted_at": "2026-10-01T09:00:02+00:00",
+                      "sla_deadline": "2026-10-01T10:00:02+00:00",
+                      "grace_deadline": "2026-10-02T09:00:02+00:00",
+                      "ready_at": "2026-10-01T13:12:40+00:00",
+                      "responded_at": "2026-10-01T13:12:40+00:00",
+                      "next_action": "unlock",
+                      "unlock_url": "https://verifi.cloud/verify-unlock?id=6b2a1f6e-9a0d-4a2b-91c6-8f0f2d5a7c33",
+                      "unlock": {
+                        "method": "POST",
+                        "url": "/verify-unlock?id=6b2a1f6e-9a0d-4a2b-91c6-8f0f2d5a7c33",
+                        "price_usdc": null,
+                        "payment_required": true,
+                        "funded_by": "x402",
+                        "network": "eip155:8453",
+                        "asset": "0x60a3E35Cc302bFA44Cb288Bc5a4F316Fdb1adb42",
+                        "asset_symbol": "EURC",
+                        "amount_atomic": "1450000",
+                        "amount_decimal": "1.45",
+                        "applied_window": "grace"
+                      },
+                      "service_window": {
+                        "applied": "grace",
+                        "sla_deadline": "2026-10-01T10:00:02+00:00",
+                        "grace_deadline": "2026-10-02T09:00:02+00:00",
+                        "network": "eip155:8453",
+                        "asset": "0x60a3E35Cc302bFA44Cb288Bc5a4F316Fdb1adb42",
+                        "unlock_amount": "1450000"
+                      }
+                    }
+                  },
+                  "failedEurc": {
+                    "summary": "Nobody answered within 24 hours. Stop. The next admission of this wallet is free, in EURC.",
+                    "value": {
+                      "verify_id": "6b2a1f6e-9a0d-4a2b-91c6-8f0f2d5a7c33",
+                      "work_id": "6b2a1f6e-9a0d-4a2b-91c6-8f0f2d5a7c33",
+                      "contract_version": 3,
+                      "status": "failed",
+                      "next_action": "stop",
+                      "failure": {
+                        "reason": "human_timeout",
+                        "entry_credit_granted": true,
+                        "entry_credit_value_usdc": null,
+                        "entry_credit": "next_admission"
+                      }
+                    }
+                  },
+                  "failedUsdc": {
+                    "summary": "The same on a USDC chain: entry_credit_value_usdc is the admission price paid.",
+                    "value": {
+                      "verify_id": "0f3f7d0a-6a1c-4a1e-9d7a-2f6b5b0f9c11",
+                      "work_id": "0f3f7d0a-6a1c-4a1e-9d7a-2f6b5b0f9c11",
+                      "contract_version": 3,
+                      "status": "failed",
+                      "next_action": "stop",
+                      "failure": {
+                        "reason": "human_timeout",
+                        "entry_credit_granted": true,
+                        "entry_credit_value_usdc": "0.12",
+                        "entry_credit": "next_admission"
+                      }
+                    }
+                  },
+                  "completed": {
+                    "summary": "The unlock already passed. The answer is visible.",
+                    "value": {
+                      "verify_id": "6b2a1f6e-9a0d-4a2b-91c6-8f0f2d5a7c33",
+                      "work_id": "6b2a1f6e-9a0d-4a2b-91c6-8f0f2d5a7c33",
+                      "contract_version": 3,
+                      "status": "completed",
+                      "human_status": "refined",
+                      "verdict": "refined",
+                      "explanation": "Correct except the date. Pricing starts 1 October, not 1 September.",
+                      "response": "Correct except the date. Pricing starts 1 October, not 1 September.",
+                      "response_time_ms": 15278000,
+                      "ready_at": "2026-10-01T13:12:40+00:00",
+                      "unlocked_at": "2026-10-01T13:20:05+00:00",
+                      "next_action": "done"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The verify id is not a UUID.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "invalid verify id"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "502": {
+            "$ref": "#/components/responses/BackendUnavailable"
+          }
+        },
+        "security": []
+      }
+    },
+    "/verify-unlock": {
+      "post": {
+        "tags": [
+          "verify"
+        ],
+        "operationId": "unlockVerify",
+        "summary": "Gates 2 and 3: unlock the ready human result",
+        "description": "Call this only when status is ready. Before that the endpoint answers 409 and asks for no payment.\n\nWithout ?id= naming a chain, or with an unknown id, the endpoint answers 402 with the unlock price band: every accepted asset at both the SLA and the grace price, from the current quote. That 402 describes the prices; it unlocks nothing. A payment made against it is refused with 400 or 404 and never settled.\n\nThe unlock costs 1.45 to 2.90 EUR, decided by when the human answered: 2.90 EUR (SLA price) if ready_at is within 60 minutes of admitted_at, 1.45 EUR (grace price) if it is later, within 24 hours. A boundary instant belongs to the earlier window. When the agent polls or unlocks does not change the price.\n\nThe endpoint answers 402 with exactly one exact requirement: the asset the admission was paid in, at service_window.unlock_amount. With 1 EUR = 1.17 USD that is 3400000 (SLA) or 1700000 (grace) atomic USDC, and 2900000 or 1450000 atomic EURC. Its extensions[\"service-windows\"].info repeats terms_id, applied, admitted_at, ready_at, network, asset, and unlock_amount, so the agent can check the arithmetic against the terms it paid for at admission. Refuse to sign if the asset differs or the amount is higher than the bound amount for the applied window. Sign the requirement with the requester wallet and repeat the same request. An admission credit never covers this gate.\n\nThe result body is released only after the unlock settlement succeeds. Unlocking twice does not charge twice: once the chain is completed, the answer is returned without a new payment.",
+        "x-payment-info": {
+          "price": {
+            "mode": "dynamic",
+            "currency": "EUR",
+            "min": "1.45",
+            "max": "2.90"
+          },
+          "protocols": [
+            {
+              "x402": {}
+            }
+          ]
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/VerifyIdQuery"
+          },
+          {
+            "$ref": "#/components/parameters/PaymentSignature"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Completed. The human answer is included. The body is built before the settlement is recorded, so unlocked_at is still null here; it appears on the next poll.",
+            "headers": {
+              "PAYMENT-RESPONSE": {
+                "$ref": "#/components/headers/PaymentResponse"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VerifyState"
+                },
+                "examples": {
+                  "slaUsdc": {
+                    "summary": "USDC chain unlocked at the SLA price: 0.12 + 3.40 USDC.",
+                    "value": {
+                      "verify_id": "0f3f7d0a-6a1c-4a1e-9d7a-2f6b5b0f9c11",
+                      "work_id": "0f3f7d0a-6a1c-4a1e-9d7a-2f6b5b0f9c11",
+                      "contract_version": 3,
+                      "status": "completed",
+                      "human_status": "refined",
+                      "verdict": "refined",
+                      "explanation": "Correct except the date. Pricing starts 1 October, not 1 September.",
+                      "response": "Correct except the date. Pricing starts 1 October, not 1 September.",
+                      "response_time_ms": 2473000,
+                      "wallet_address": "0x1111111111111111111111111111111111111111",
+                      "funding": {
+                        "entry_source": "x402",
+                        "free_use_number": null,
+                        "asset": {
+                          "network": "eip155:8453",
+                          "address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+                          "symbol": "USDC",
+                          "decimals": 6
+                        },
+                        "entry_amount_atomic": "120000",
+                        "entry_charged_atomic": "120000",
+                        "unlock_source": "x402",
+                        "unlock_window": "sla",
+                        "unlock_amount_atomic": "3400000",
+                        "unlock_charged_atomic": "3400000",
+                        "total_amount_atomic": "3520000",
+                        "total_charged_atomic": "3520000",
+                        "entry_list_price_usdc": "0.12",
+                        "entry_charged_usdc": "0.12",
+                        "unlock_list_price_usdc": "3.40",
+                        "unlock_charged_usdc": "3.40",
+                        "total_list_price_usdc": "3.52",
+                        "total_charged_usdc": "3.52"
+                      },
+                      "created_at": "2026-10-01T09:00:00+00:00",
+                      "admitted_at": "2026-10-01T09:00:02+00:00",
+                      "sla_deadline": "2026-10-01T10:00:02+00:00",
+                      "grace_deadline": "2026-10-02T09:00:02+00:00",
+                      "ready_at": "2026-10-01T09:41:15+00:00",
+                      "expires_at": "2026-10-02T09:00:02+00:00",
+                      "responded_at": "2026-10-01T09:41:15+00:00",
+                      "unlocked_at": null,
+                      "terms": {
+                        "version": 1,
+                        "terms_id": "st_5f0c2a9e4b7d13a8c6e1f042",
+                        "windows": {
+                          "sla": {
+                            "within_seconds": 3600
+                          },
+                          "grace": {
+                            "within_seconds": 86400
+                          }
+                        },
+                        "price_basis": {
+                          "currency": "EUR",
+                          "admission": "0.10",
+                          "sla": "2.90",
+                          "grace": "1.45"
+                        },
+                        "network": "eip155:8453",
+                        "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+                        "asset_symbol": "USDC",
+                        "asset_decimals": 6,
+                        "asset_eip712": {
+                          "name": "USD Coin",
+                          "version": "2"
+                        },
+                        "admission": "120000",
+                        "sla": "3400000",
+                        "grace": "1700000",
+                        "asset_binding": "admission_asset",
+                        "expiry": {
+                          "admission_credit": "next_admission"
+                        },
+                        "cancellation": "none",
+                        "conversion": {
+                          "from": "EUR",
+                          "rate": "1.17",
+                          "source": "ECB euro reference rate",
+                          "as_of": "2026-09-30",
+                          "rounding": "up_to_cent"
+                        }
+                      },
+                      "next_action": "done"
+                    }
+                  },
+                  "graceEurc": {
+                    "summary": "EURC chain unlocked at the grace price: 0.10 + 1.45 EURC.",
+                    "value": {
+                      "verify_id": "6b2a1f6e-9a0d-4a2b-91c6-8f0f2d5a7c33",
+                      "work_id": "6b2a1f6e-9a0d-4a2b-91c6-8f0f2d5a7c33",
+                      "contract_version": 3,
+                      "status": "completed",
+                      "human_status": "refined",
+                      "verdict": "refined",
+                      "explanation": "Correct except the date. Pricing starts 1 October, not 1 September.",
+                      "response": "Correct except the date. Pricing starts 1 October, not 1 September.",
+                      "response_time_ms": 15278000,
+                      "wallet_address": "0x1111111111111111111111111111111111111111",
+                      "funding": {
+                        "entry_source": "x402",
+                        "free_use_number": null,
+                        "asset": {
+                          "network": "eip155:8453",
+                          "address": "0x60a3E35Cc302bFA44Cb288Bc5a4F316Fdb1adb42",
+                          "symbol": "EURC",
+                          "decimals": 6
+                        },
+                        "entry_amount_atomic": "100000",
+                        "entry_charged_atomic": "100000",
+                        "unlock_source": "x402",
+                        "unlock_window": "grace",
+                        "unlock_amount_atomic": "1450000",
+                        "unlock_charged_atomic": "1450000",
+                        "total_amount_atomic": "1550000",
+                        "total_charged_atomic": "1550000",
+                        "entry_list_price_usdc": null,
+                        "entry_charged_usdc": null,
+                        "unlock_list_price_usdc": null,
+                        "unlock_charged_usdc": null,
+                        "total_list_price_usdc": null,
+                        "total_charged_usdc": null
+                      },
+                      "created_at": "2026-10-01T09:00:00+00:00",
+                      "admitted_at": "2026-10-01T09:00:02+00:00",
+                      "sla_deadline": "2026-10-01T10:00:02+00:00",
+                      "grace_deadline": "2026-10-02T09:00:02+00:00",
+                      "ready_at": "2026-10-01T13:12:40+00:00",
+                      "expires_at": "2026-10-02T09:00:02+00:00",
+                      "responded_at": "2026-10-01T13:12:40+00:00",
+                      "unlocked_at": null,
+                      "terms": {
+                        "version": 1,
+                        "terms_id": "st_5f0c2a9e4b7d13a8c6e1f042",
+                        "windows": {
+                          "sla": {
+                            "within_seconds": 3600
+                          },
+                          "grace": {
+                            "within_seconds": 86400
+                          }
+                        },
+                        "price_basis": {
+                          "currency": "EUR",
+                          "admission": "0.10",
+                          "sla": "2.90",
+                          "grace": "1.45"
+                        },
+                        "network": "eip155:8453",
+                        "asset": "0x60a3E35Cc302bFA44Cb288Bc5a4F316Fdb1adb42",
+                        "asset_symbol": "EURC",
+                        "asset_decimals": 6,
+                        "asset_eip712": {
+                          "name": "EURC",
+                          "version": "2"
+                        },
+                        "admission": "100000",
+                        "sla": "2900000",
+                        "grace": "1450000",
+                        "asset_binding": "admission_asset",
+                        "expiry": {
+                          "admission_credit": "next_admission"
+                        },
+                        "cancellation": "none"
+                      },
+                      "next_action": "done"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Returned only for a payment made against the unlock price band when the id query parameter is missing or is not a UUID. The payment was refused and not taken.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "pass the verify id as ?id=<uuid>"
+                }
+              }
+            }
+          },
+          "402": {
+            "$ref": "#/components/responses/PaymentRequiredUnlock"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound",
+            "description": "Returned only for a payment made against the unlock price band when no chain has this id. The payment was refused and not taken."
+          },
+          "409": {
+            "description": "The chain is not in a state that can be unlocked: the human has not answered yet, or the chain failed. No payment is requested.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "examples": {
+                  "notReady": {
+                    "value": {
+                      "error": "result is not ready",
+                      "status": "processing"
+                    }
+                  },
+                  "failed": {
+                    "value": {
+                      "error": "failed verifies cannot be unlocked",
+                      "status": "failed"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "502": {
+            "$ref": "#/components/responses/BackendUnavailable"
+          },
+          "503": {
+            "description": "Paid unlock is not configured on this deployment, or the unlock price cannot be issued right now. Nothing was charged. Retry after the advertised delay.",
+            "headers": {
+              "Retry-After": {
+                "$ref": "#/components/headers/RetryAfter"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "examples": {
+                  "pricingUnavailable": {
+                    "value": {
+                      "error": "pricing is temporarily unavailable",
+                      "detail": "No quote can be issued right now. Retry shortly. No payment was taken."
+                    }
+                  },
+                  "notConfigured": {
+                    "value": {
+                      "error": "paid unlock is not configured"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": []
+      }
+    },
+    "/verify/{verify_id}/unlock": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/VerifyIdPath"
+        }
+      ],
+      "post": {
+        "tags": [
+          "verify"
+        ],
+        "operationId": "unlockVerifyLegacy",
+        "summary": "Legacy unlock path",
+        "description": "Permanent redirect to POST /verify-unlock?id={verify_id}. The method and body are preserved.",
+        "responses": {
+          "308": {
+            "description": "Permanent redirect to the canonical unlock endpoint.",
+            "headers": {
+              "Location": {
+                "description": "The canonical unlock URL.",
+                "schema": {
+                  "type": "string",
+                  "examples": [
+                    "/verify-unlock?id=0f3f7d0a-6a1c-4a1e-9d7a-2f6b5b0f9c11"
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "deprecated": true,
+        "security": []
+      }
+    },
+    "/verify-api/health": {
+      "get": {
+        "tags": [
+          "service"
+        ],
+        "operationId": "health",
+        "summary": "Liveness probe",
+        "responses": {
+          "200": {
+            "description": "The API is up.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    }
+                  }
+                },
+                "example": {
+                  "ok": true
+                }
+              }
+            }
+          }
+        },
+        "security": []
+      }
+    }
+  },
+  "components": {
+    "parameters": {
+      "VerifyIdPath": {
+        "name": "verify_id",
+        "in": "path",
+        "required": true,
+        "description": "The durable chain handle returned by POST /verify.",
+        "schema": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "example": "0f3f7d0a-6a1c-4a1e-9d7a-2f6b5b0f9c11"
+      },
+      "VerifyIdQuery": {
+        "name": "id",
+        "in": "query",
+        "required": true,
+        "description": "The durable chain handle returned by POST /verify.",
+        "schema": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "example": "0f3f7d0a-6a1c-4a1e-9d7a-2f6b5b0f9c11"
+      },
+      "PaymentSignature": {
+        "name": "PAYMENT-SIGNATURE",
+        "in": "header",
+        "required": false,
+        "description": "Base64 encoded x402 payment payload. x402 aware clients such as @x402/fetch add this automatically when they retry a 402. Never send a private key: this is a signed, single use authorization.",
+        "schema": {
+          "type": "string"
+        }
+      }
+    },
+    "headers": {
+      "RetryAfter": {
+        "description": "Seconds to wait before the next call.",
+        "schema": {
+          "type": "integer"
+        },
+        "example": 15
+      },
+      "PaymentRequired": {
+        "description": "Base64 encoded x402 v2 PaymentRequired object. Decode it to get the payment options in accepts and the terms in extensions[\"service-windows\"]. Over HTTP the JSON body of a 402 is empty: this header is the requirement.",
+        "schema": {
+          "type": "string",
+          "contentEncoding": "base64",
+          "contentMediaType": "application/json",
+          "contentSchema": {
+            "$ref": "#/components/schemas/PaymentRequired"
+          }
+        }
+      },
+      "PaymentResponse": {
+        "description": "Base64 encoded x402 settlement receipt, present after a paid gate succeeds. Decode it to get the PaymentResponse object.",
+        "schema": {
+          "type": "string"
+        }
+      }
+    },
+    "responses": {
+      "BadRequest": {
+        "description": "The request body failed validation.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            },
+            "examples": {
+              "wallet": {
+                "value": {
+                  "error": "agent_id must be the requester wallet address (0x + 40 hex characters)"
+                }
+              },
+              "fields": {
+                "value": {
+                  "error": "intent and claim are required strings"
+                }
+              },
+              "length": {
+                "value": {
+                  "error": "intent max 2000 chars, claim max 4000 chars"
+                }
+              },
+              "callback": {
+                "value": {
+                  "error": "callback_url must be an https URL, max 2048 chars"
+                }
+              }
+            }
+          }
+        }
+      },
+      "NotFound": {
+        "description": "No chain exists for that verify_id.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            },
+            "example": {
+              "error": "verify not found"
+            }
+          }
+        }
+      },
+      "BackendUnavailable": {
+        "description": "The verification backend is temporarily unavailable. Nothing was charged. Retry.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            },
+            "example": {
+              "error": "verification backend unavailable"
+            }
+          }
+        }
+      },
+      "PaymentRequiredEntry": {
+        "description": "Gate 1 requires payment: 0.10 EUR on Base mainnet, payable in USDC (converted at the ECB euro reference rate, rounded up to the cent) or EURC. The same answer, with fresh terms, follows a payment signed against an expired quote: sign the fresh terms. The PAYMENT-REQUIRED header decodes to a PaymentRequired object with two accepts options, USDC first and EURC second, and the terms of the chain in extensions[\"service-windows\"]. Sign one option with the requester wallet and repeat the same request before terms_valid_until.",
+        "headers": {
+          "PAYMENT-REQUIRED": {
+            "$ref": "#/components/headers/PaymentRequired"
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "maxProperties": 0,
+              "description": "Empty over HTTP. The requirement is in the PAYMENT-REQUIRED header; decoded examples are in the PaymentRequired schema."
+            },
+            "example": {}
+          }
+        }
+      },
+      "PaymentRequiredUnlock": {
+        "description": "The unlock requires payment: exactly one requirement, in the asset the admission was paid in, at the amount decided when the human answered (the SLA or the grace price). The PAYMENT-REQUIRED header decodes to a PaymentRequired object whose extensions[\"service-windows\"].info repeats terms_id, applied, admitted_at, ready_at, network, asset, and unlock_amount. Check them against the bound terms, sign with the requester wallet, and repeat the same request.",
+        "headers": {
+          "PAYMENT-REQUIRED": {
+            "$ref": "#/components/headers/PaymentRequired"
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "maxProperties": 0,
+              "description": "Empty over HTTP. The requirement is in the PAYMENT-REQUIRED header; decoded examples are in the PaymentRequired schema."
+            },
+            "example": {}
+          }
+        }
+      }
+    },
+    "schemas": {
+      "VerifyRequest": {
+        "type": "object",
+        "required": [
+          "intent",
+          "claim",
+          "agent_id"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "intent": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000,
+            "description": "What your agent is trying to do. Gives the human the context to judge the claim.",
+            "examples": [
+              "Publish a launch note to customers"
+            ]
+          },
+          "claim": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4000,
+            "description": "The claim, draft, or question a human should judge.",
+            "examples": [
+              "The new pricing takes effect on 1 September."
+            ]
+          },
+          "agent_id": {
+            "type": "string",
+            "pattern": "^0x[0-9a-fA-F]{40}$",
+            "description": "The requester wallet address. It identifies free use and signs paid x402 authorizations. No account or API key exists beyond this address.",
+            "examples": [
+              "0x1111111111111111111111111111111111111111"
+            ]
+          },
+          "callback_url": {
+            "type": "string",
+            "format": "uri",
+            "maxLength": 2048,
+            "description": "Optional HTTPS endpoint that receives verify.ready or verify.failed. Preferred over polling. It never carries the locked result, only the next action. Must be https on port 443 and must resolve to a public address.",
+            "examples": [
+              "https://agent.example.com/verifi-events"
+            ]
+          }
+        }
+      },
+      "Funding": {
+        "type": "object",
+        "description": "Exactly what this chain costs and was charged, per gate. A contract 3 chain states the bound asset and every amount as a string in that asset's atomic units (6 decimals for USDC and EURC). The *_usdc fields keep their meaning, decimal USDC, on a USDC chain and are null on an EURC chain. A chain admitted before contract 3 has only the *_usdc fields, at the old fixed prices.",
+        "properties": {
+          "entry_source": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "initial_free",
+              "failure_credit",
+              "x402",
+              null
+            ],
+            "description": "How gate 1 was funded. failure_credit: an earned admission credit, bound to the asset of the chain that earned it."
+          },
+          "free_use_number": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 1,
+            "maximum": 5,
+            "description": "Legacy field: which historical free chain this was, when funded by initial_free. Null for new chains, since free human work is no longer granted."
+          },
+          "asset": {
+            "type": "object",
+            "description": "The asset the chain is bound to. The unlock is paid in it.",
+            "properties": {
+              "network": {
+                "type": "string",
+                "examples": [
+                  "eip155:8453"
+                ]
+              },
+              "address": {
+                "type": "string",
+                "examples": [
+                  "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+                  "0x60a3E35Cc302bFA44Cb288Bc5a4F316Fdb1adb42"
+                ]
+              },
+              "symbol": {
+                "type": "string",
+                "enum": [
+                  "USDC",
+                  "EURC"
+                ]
+              },
+              "decimals": {
+                "type": "integer",
+                "examples": [
+                  6
+                ]
+              }
+            }
+          },
+          "entry_amount_atomic": {
+            "type": "string",
+            "description": "The admission price in the bound asset.",
+            "examples": [
+              "120000",
+              "100000"
+            ]
+          },
+          "entry_charged_atomic": {
+            "type": "string",
+            "description": "What gate 1 actually charged. 0 when an admission credit paid it.",
+            "examples": [
+              "120000",
+              "100000",
+              "0"
+            ]
+          },
+          "unlock_source": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "initial_free",
+              "x402",
+              null
+            ],
+            "description": "How the unlock was funded. Null until the result is unlocked."
+          },
+          "unlock_window": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "sla",
+              "grace",
+              null
+            ],
+            "description": "The window that priced the unlock. Null until the human answers."
+          },
+          "unlock_amount_atomic": {
+            "type": "string",
+            "description": "The unlock price in the bound asset. Until the human answers, the SLA amount: the most the unlock can cost.",
+            "examples": [
+              "3400000",
+              "1700000",
+              "2900000",
+              "1450000"
+            ]
+          },
+          "unlock_charged_atomic": {
+            "type": "string",
+            "examples": [
+              "0",
+              "3400000",
+              "1450000"
+            ]
+          },
+          "total_amount_atomic": {
+            "type": "string",
+            "examples": [
+              "3520000",
+              "1550000"
+            ]
+          },
+          "total_charged_atomic": {
+            "type": "string",
+            "examples": [
+              "120000",
+              "3520000",
+              "1550000"
+            ]
+          },
+          "entry_list_price_usdc": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "examples": [
+              "0.12",
+              null
+            ]
+          },
+          "entry_charged_usdc": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "examples": [
+              "0.12",
+              "0.00",
+              null
+            ]
+          },
+          "unlock_list_price_usdc": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "examples": [
+              "3.40",
+              "1.70",
+              null
+            ]
+          },
+          "unlock_charged_usdc": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "examples": [
+              "3.40",
+              "0.00",
+              null
+            ]
+          },
+          "total_list_price_usdc": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "examples": [
+              "3.52",
+              null
+            ]
+          },
+          "total_charged_usdc": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "examples": [
+              "3.52",
+              "0.12",
+              null
+            ]
+          }
+        }
+      },
+      "UnlockAction": {
+        "type": "object",
+        "description": "How to pass the unlock gate. Present when status is ready.",
+        "properties": {
+          "method": {
+            "type": "string",
+            "examples": [
+              "POST"
+            ]
+          },
+          "url": {
+            "type": "string",
+            "examples": [
+              "/verify-unlock?id=0f3f7d0a-6a1c-4a1e-9d7a-2f6b5b0f9c11"
+            ]
+          },
+          "price_usdc": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The unlock price in decimal USDC on a USDC chain. Null on an EURC chain.",
+            "examples": [
+              "3.40",
+              "1.70",
+              null
+            ]
+          },
+          "payment_required": {
+            "type": "boolean",
+            "description": "False only for a legacy chain whose unlock a free entitlement covers."
+          },
+          "funded_by": {
+            "type": "string",
+            "enum": [
+              "initial_free",
+              "x402"
+            ]
+          },
+          "network": {
+            "type": "string",
+            "examples": [
+              "eip155:8453"
+            ]
+          },
+          "asset": {
+            "type": "string",
+            "description": "The bound asset.",
+            "examples": [
+              "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+              "0x60a3E35Cc302bFA44Cb288Bc5a4F316Fdb1adb42"
+            ]
+          },
+          "asset_symbol": {
+            "type": "string",
+            "enum": [
+              "USDC",
+              "EURC"
+            ]
+          },
+          "amount_atomic": {
+            "type": "string",
+            "description": "The unlock amount in atomic units. Equals service_window.unlock_amount.",
+            "examples": [
+              "3400000",
+              "1450000"
+            ]
+          },
+          "amount_decimal": {
+            "type": "string",
+            "examples": [
+              "3.40",
+              "1.45"
+            ]
+          },
+          "applied_window": {
+            "type": "string",
+            "enum": [
+              "sla",
+              "grace"
+            ]
+          }
+        }
+      },
+      "FailureInfo": {
+        "type": "object",
+        "description": "Why the chain ended without a redeemable result. Present when status is failed.",
+        "properties": {
+          "reason": {
+            "type": "string",
+            "enum": [
+              "human_timeout",
+              "entry_not_settled",
+              "processing_failed"
+            ],
+            "description": "human_timeout: no human answered within the last window, 24 hours after admitted_at (60 minutes for chains admitted before contract 3). entry_not_settled: the gate 1 settlement never arrived, so the chain never entered the queue."
+          },
+          "entry_credit_granted": {
+            "type": "boolean",
+            "description": "True when the wallet received one admission credit: its next admission is free, bound to the asset this chain was paid in. The credit never pays an unlock. Granted when gate 1 was actually paid with x402. When gate 1 was funded by an earned credit, that credit is returned to the wallet instead, so it is not lost."
+          },
+          "entry_credit_value_usdc": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The admission price as decimal USDC on a USDC chain, 0.00 when no credit was granted. Null on an EURC chain.",
+            "examples": [
+              "0.12",
+              "0.00",
+              null
+            ]
+          },
+          "entry_credit": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "next_admission",
+              null
+            ],
+            "description": "What the credit covers. Null when no credit was granted. Contract 3 chains only."
+          }
+        }
+      },
+      "ServiceWindow": {
+        "type": "object",
+        "description": "Why the unlock costs what it costs. Present when status is ready on a contract 3 chain.",
+        "properties": {
+          "applied": {
+            "type": "string",
+            "enum": [
+              "sla",
+              "grace"
+            ],
+            "description": "sla if ready_at is at or before sla_deadline, otherwise grace. A boundary instant belongs to the earlier window."
+          },
+          "sla_deadline": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "grace_deadline": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "network": {
+            "type": "string",
+            "examples": [
+              "eip155:8453"
+            ]
+          },
+          "asset": {
+            "type": "string",
+            "examples": [
+              "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+              "0x60a3E35Cc302bFA44Cb288Bc5a4F316Fdb1adb42"
+            ]
+          },
+          "unlock_amount": {
+            "type": "string",
+            "description": "The one unlock amount, in the bound asset's atomic units.",
+            "examples": [
+              "3400000",
+              "1700000",
+              "2900000",
+              "1450000"
+            ]
+          }
+        }
+      },
+      "BoundTerms": {
+        "type": "object",
+        "description": "The terms bound to this chain at admission, for the asset it was paid in. They never change afterwards.",
+        "properties": {
+          "version": {
+            "const": 1
+          },
+          "terms_id": {
+            "type": "string",
+            "examples": [
+              "st_5f0c2a9e4b7d13a8c6e1f042"
+            ]
+          },
+          "windows": {
+            "type": "object",
+            "required": [
+              "sla"
+            ],
+            "properties": {
+              "sla": {
+                "type": "object",
+                "required": [
+                  "within_seconds"
+                ],
+                "properties": {
+                  "within_seconds": {
+                    "type": "integer",
+                    "minimum": 1
+                  }
+                }
+              },
+              "grace": {
+                "type": "object",
+                "required": [
+                  "within_seconds"
+                ],
+                "properties": {
+                  "within_seconds": {
+                    "type": "integer",
+                    "minimum": 1
+                  }
+                }
+              }
+            }
+          },
+          "price_basis": {
+            "type": "object",
+            "required": [
+              "currency",
+              "admission",
+              "sla"
+            ],
+            "properties": {
+              "currency": {
+                "type": "string"
+              },
+              "admission": {
+                "type": "string"
+              },
+              "sla": {
+                "type": "string"
+              },
+              "grace": {
+                "type": "string"
+              }
+            }
+          },
+          "network": {
+            "type": "string",
+            "examples": [
+              "eip155:8453"
+            ]
+          },
+          "asset": {
+            "type": "string",
+            "examples": [
+              "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+              "0x60a3E35Cc302bFA44Cb288Bc5a4F316Fdb1adb42"
+            ]
+          },
+          "asset_symbol": {
+            "type": "string",
+            "enum": [
+              "USDC",
+              "EURC"
+            ]
+          },
+          "asset_decimals": {
+            "type": "integer",
+            "examples": [
+              6
+            ]
+          },
+          "asset_eip712": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "examples": [
+                  "USD Coin",
+                  "EURC"
+                ]
+              },
+              "version": {
+                "type": "string",
+                "examples": [
+                  "2"
+                ]
+              }
+            }
+          },
+          "admission": {
+            "type": "string",
+            "pattern": "^[0-9]+$",
+            "examples": [
+              "120000",
+              "100000"
+            ]
+          },
+          "sla": {
+            "type": "string",
+            "pattern": "^[0-9]+$",
+            "examples": [
+              "3400000",
+              "2900000"
+            ]
+          },
+          "grace": {
+            "type": "string",
+            "pattern": "^[0-9]+$",
+            "examples": [
+              "1700000",
+              "1450000"
+            ]
+          },
+          "asset_binding": {
+            "enum": [
+              "admission_asset"
+            ]
+          },
+          "expiry": {
+            "type": "object",
+            "properties": {
+              "admission_credit": {
+                "enum": [
+                  "next_admission",
+                  "none"
+                ]
+              }
+            }
+          },
+          "cancellation": {
+            "enum": [
+              "none"
+            ]
+          },
+          "conversion": {
+            "type": "object",
+            "required": [
+              "from",
+              "rate",
+              "source",
+              "as_of"
+            ],
+            "properties": {
+              "from": {
+                "type": "string"
+              },
+              "rate": {
+                "type": "string"
+              },
+              "source": {
+                "type": "string"
+              },
+              "as_of": {
+                "type": "string"
+              },
+              "rounding": {
+                "enum": [
+                  "up_to_cent",
+                  "none"
+                ]
+              }
+            },
+            "description": "Present on a USDC chain: how the euro prices were converted."
+          }
+        }
+      },
+      "ServiceWindowsInfo": {
+        "type": "object",
+        "required": [
+          "version",
+          "terms_id",
+          "windows",
+          "prices",
+          "asset_binding",
+          "expiry",
+          "cancellation"
+        ],
+        "properties": {
+          "version": {
+            "const": 1
+          },
+          "terms_id": {
+            "type": "string"
+          },
+          "terms_valid_until": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "windows": {
+            "type": "object",
+            "required": [
+              "sla"
+            ],
+            "properties": {
+              "sla": {
+                "type": "object",
+                "required": [
+                  "within_seconds"
+                ],
+                "properties": {
+                  "within_seconds": {
+                    "type": "integer",
+                    "minimum": 1
+                  }
+                }
+              },
+              "grace": {
+                "type": "object",
+                "required": [
+                  "within_seconds"
+                ],
+                "properties": {
+                  "within_seconds": {
+                    "type": "integer",
+                    "minimum": 1
+                  }
+                }
+              }
+            }
+          },
+          "price_basis": {
+            "type": "object",
+            "required": [
+              "currency",
+              "admission",
+              "sla"
+            ],
+            "properties": {
+              "currency": {
+                "type": "string"
+              },
+              "admission": {
+                "type": "string"
+              },
+              "sla": {
+                "type": "string"
+              },
+              "grace": {
+                "type": "string"
+              }
+            }
+          },
+          "prices": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "required": [
+                "network",
+                "asset",
+                "admission",
+                "sla"
+              ],
+              "properties": {
+                "network": {
+                  "type": "string"
+                },
+                "asset": {
+                  "type": "string"
+                },
+                "admission": {
+                  "type": "string",
+                  "pattern": "^[0-9]+$"
+                },
+                "sla": {
+                  "type": "string",
+                  "pattern": "^[0-9]+$"
+                },
+                "grace": {
+                  "type": "string",
+                  "pattern": "^[0-9]+$"
+                },
+                "conversion": {
+                  "type": "object",
+                  "required": [
+                    "from",
+                    "rate",
+                    "source",
+                    "as_of"
+                  ],
+                  "properties": {
+                    "from": {
+                      "type": "string"
+                    },
+                    "rate": {
+                      "type": "string"
+                    },
+                    "source": {
+                      "type": "string"
+                    },
+                    "as_of": {
+                      "type": "string"
+                    },
+                    "rounding": {
+                      "enum": [
+                        "up_to_cent",
+                        "none"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "asset_binding": {
+            "enum": [
+              "admission_asset"
+            ]
+          },
+          "expiry": {
+            "type": "object",
+            "properties": {
+              "admission_credit": {
+                "enum": [
+                  "next_admission",
+                  "none"
+                ]
+              }
+            }
+          },
+          "cancellation": {
+            "enum": [
+              "none",
+              "after_sla_admission_credit"
+            ]
+          },
+          "status_url_template": {
+            "type": "string"
+          },
+          "unlock_url_template": {
+            "type": "string"
+          }
+        },
+        "description": "The terms in extensions[\"service-windows\"].info of the gate 1 402: the service-windows x402 extension, draft spec Appendix A. Amounts in prices are atomic units of each asset; amounts in price_basis are decimal euros. For each asset, prices[].admission equals the amount of its accepts option."
+      },
+      "ServiceWindowsUnlockInfo": {
+        "type": "object",
+        "required": [
+          "version"
+        ],
+        "properties": {
+          "version": {
+            "const": 1
+          },
+          "terms_id": {
+            "type": "string"
+          },
+          "applied": {
+            "enum": [
+              "sla",
+              "grace"
+            ]
+          },
+          "admitted_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "ready_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "network": {
+            "type": "string"
+          },
+          "asset": {
+            "type": "string"
+          },
+          "unlock_amount": {
+            "type": "string",
+            "pattern": "^[0-9]+$"
+          }
+        },
+        "description": "extensions[\"service-windows\"].info of an unlock 402: the decided window and amount, and the timestamps that decided it."
+      },
+      "ServiceWindowsExtension": {
+        "type": "object",
+        "description": "The service-windows x402 extension: info, and the JSON Schema that describes info.",
+        "properties": {
+          "info": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ServiceWindowsInfo"
+              },
+              {
+                "$ref": "#/components/schemas/ServiceWindowsUnlockInfo"
+              }
+            ]
+          },
+          "schema": {
+            "type": "object",
+            "description": "JSON Schema for info."
+          }
+        }
+      },
+      "VerifyState": {
+        "type": "object",
+        "description": "The state of one chain. verdict, explanation, and response stay null until the unlock has been passed.",
+        "properties": {
+          "verify_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The durable handle for this chain. Persist it."
+          },
+          "work_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Alias of verify_id, as the service-windows extension names it."
+          },
+          "contract_version": {
+            "type": "integer",
+            "enum": [
+              2,
+              3
+            ],
+            "description": "3 for chains admitted under the three-gate contract. 2 for chains that finish under the old fixed USDC prices."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "processing",
+              "ready",
+              "failed",
+              "completed"
+            ],
+            "description": "processing: admission is settling or a human is working. ready: a human answered but the result is locked. failed: stop. completed: the unlock passed and the answer is available."
+          },
+          "human_status": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "accepted",
+              "rejected",
+              "refined",
+              null
+            ],
+            "description": "The raw human action. Null until completed."
+          },
+          "verdict": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "true",
+              "false",
+              "refined",
+              null
+            ],
+            "description": "The parseable verdict. true: the claim holds. false: it does not. refined: the human supplied a better version in explanation. Null until completed."
+          },
+          "explanation": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The human's free text when the verdict is refined. Null until completed."
+          },
+          "response": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The raw human response text. Null until completed."
+          },
+          "response_time_ms": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "How long the human took. Null until completed."
+          },
+          "wallet_address": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The requester wallet that owns this chain."
+          },
+          "funding": {
+            "$ref": "#/components/schemas/Funding"
+          },
+          "created_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "admitted_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When the admission settlement was recorded and the chain entered the human queue. The windows start here. Null on the 202 of a paid admission."
+          },
+          "sla_deadline": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "admitted_at plus 60 minutes. An answer at or before it unlocks at the SLA price."
+          },
+          "grace_deadline": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "admitted_at plus 24 hours. An answer after sla_deadline and at or before it unlocks at the grace price."
+          },
+          "ready_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When the human answered. It alone decides the unlock price."
+          },
+          "expires_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When unanswered work fails with human_timeout. On a contract 3 chain it equals grace_deadline, the last deadline, once the chain is admitted: 24 hours after admitted_at. Chains from before contract 3 expire 60 minutes after creation. It is null on the 202 of a paid admission, because the windows have not started yet; read it from the first poll."
+          },
+          "responded_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "unlocked_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When the unlock passed. Null in the unlock response itself; set on later polls."
+          },
+          "terms": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BoundTerms"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The terms bound at admission. Null on chains from before contract 3."
+          },
+          "next_action": {
+            "type": "string",
+            "enum": [
+              "poll",
+              "unlock",
+              "stop",
+              "done"
+            ],
+            "description": "What the agent should do next. Follow this instead of inferring from status."
+          },
+          "poll_url": {
+            "type": "string",
+            "description": "Present when next_action is poll."
+          },
+          "retry_after_seconds": {
+            "type": "integer",
+            "description": "Present when next_action is poll. Honor it.",
+            "examples": [
+              15
+            ]
+          },
+          "unlock_url": {
+            "type": "string",
+            "description": "Absolute unlock URL. Present when next_action is unlock.",
+            "examples": [
+              "https://verifi.cloud/verify-unlock?id=0f3f7d0a-6a1c-4a1e-9d7a-2f6b5b0f9c11"
+            ]
+          },
+          "unlock": {
+            "$ref": "#/components/schemas/UnlockAction"
+          },
+          "service_window": {
+            "$ref": "#/components/schemas/ServiceWindow"
+          },
+          "failure": {
+            "$ref": "#/components/schemas/FailureInfo"
+          }
+        }
+      },
+      "VerifyAccepted": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/VerifyState"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "response_timeout_ms": {
+                "type": "integer",
+                "description": "How long the human has to answer before the chain expires: the last window of the bound terms, 24 hours.",
+                "examples": [
+                  86400000
+                ]
+              },
+              "message": {
+                "type": "string",
+                "examples": [
+                  "Admission accepted. Poll until status is ready or failed."
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "PaymentRequired": {
+        "type": "object",
+        "description": "x402 version 2 PaymentRequired. Over HTTP it is delivered base64 encoded in the PAYMENT-REQUIRED header, and the 402 body is empty. Over MCP it is the structured tool result. See https://docs.x402.org for the canonical schema.",
+        "properties": {
+          "x402Version": {
+            "type": "integer",
+            "examples": [
+              2
+            ]
+          },
+          "error": {
+            "type": "string",
+            "description": "Human readable reason the request was not fulfilled."
+          },
+          "resource": {
+            "type": "object",
+            "description": "The resource being paid for.",
+            "properties": {
+              "url": {
+                "type": "string",
+                "examples": [
+                  "https://verifi.cloud/verify"
+                ]
+              },
+              "description": {
+                "type": "string"
+              },
+              "mimeType": {
+                "type": "string",
+                "examples": [
+                  "application/json"
+                ]
+              }
+            }
+          },
+          "accepts": {
+            "type": "array",
+            "description": "The payment options the server accepts. Pick one, sign it, and retry the same request. Gate 1 lists USDC first and EURC second. An unlock lists exactly one option, in the bound asset.",
+            "items": {
+              "type": "object",
+              "properties": {
+                "scheme": {
+                  "type": "string",
+                  "examples": [
+                    "exact"
+                  ]
+                },
+                "network": {
+                  "type": "string",
+                  "description": "CAIP-2 chain id. Verifi settles on Base mainnet.",
+                  "examples": [
+                    "eip155:8453"
+                  ]
+                },
+                "amount": {
+                  "type": "string",
+                  "description": "The required amount in the token's smallest unit. USDC and EURC both have 6 decimals, so 0.10 EURC is 100000.",
+                  "examples": [
+                    "120000",
+                    "100000",
+                    "3400000",
+                    "1450000"
+                  ]
+                },
+                "asset": {
+                  "type": "string",
+                  "description": "The token contract. USDC on Base is 0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913, EURC on Base is 0x60a3E35Cc302bFA44Cb288Bc5a4F316Fdb1adb42.",
+                  "examples": [
+                    "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+                    "0x60a3E35Cc302bFA44Cb288Bc5a4F316Fdb1adb42"
+                  ]
+                },
+                "payTo": {
+                  "type": "string",
+                  "description": "The receiving address. Funds move from the buyer wallet straight to it."
+                },
+                "maxTimeoutSeconds": {
+                  "type": "integer",
+                  "examples": [
+                    300
+                  ]
+                },
+                "extra": {
+                  "type": "object",
+                  "description": "The token's EIP-712 domain name and version, and the id of the quote this option belongs to.",
+                  "properties": {
+                    "name": {
+                      "type": "string",
+                      "examples": [
+                        "USD Coin",
+                        "EURC"
+                      ]
+                    },
+                    "version": {
+                      "type": "string",
+                      "examples": [
+                        "2"
+                      ]
+                    },
+                    "terms_id": {
+                      "type": "string",
+                      "examples": [
+                        "st_5f0c2a9e4b7d13a8c6e1f042"
+                      ]
+                    }
+                  },
+                  "additionalProperties": true
+                }
+              },
+              "additionalProperties": true
+            }
+          },
+          "extensions": {
+            "type": "object",
+            "properties": {
+              "service-windows": {
+                "$ref": "#/components/schemas/ServiceWindowsExtension"
+              },
+              "bazaar": {
+                "type": "object",
+                "description": "Bazaar discovery metadata: how to call gate 1. Gate 1 only."
+              }
+            },
+            "additionalProperties": true
+          },
+          "paymentRequiredHeader": {
+            "type": "string",
+            "description": "MCP only: the raw base64 requirement, echoed for clients that prefer the encoded form."
+          }
+        },
+        "additionalProperties": true,
+        "examples": [
+          {
+            "x402Version": 2,
+            "error": "Payment required",
+            "resource": {
+              "url": "https://verifi.cloud/verify",
+              "description": "Gate 1 of one Verifi chain. Admit one request to the human queue.",
+              "mimeType": "application/json"
+            },
+            "accepts": [
+              {
+                "scheme": "exact",
+                "network": "eip155:8453",
+                "amount": "120000",
+                "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+                "payTo": "0x0000000000000000000000000000000000000000",
+                "maxTimeoutSeconds": 300,
+                "extra": {
+                  "name": "USD Coin",
+                  "version": "2",
+                  "terms_id": "st_5f0c2a9e4b7d13a8c6e1f042"
+                }
+              },
+              {
+                "scheme": "exact",
+                "network": "eip155:8453",
+                "amount": "100000",
+                "asset": "0x60a3E35Cc302bFA44Cb288Bc5a4F316Fdb1adb42",
+                "payTo": "0x0000000000000000000000000000000000000000",
+                "maxTimeoutSeconds": 300,
+                "extra": {
+                  "name": "EURC",
+                  "version": "2",
+                  "terms_id": "st_5f0c2a9e4b7d13a8c6e1f042"
+                }
+              }
+            ],
+            "extensions": {
+              "service-windows": {
+                "info": {
+                  "version": 1,
+                  "terms_id": "st_5f0c2a9e4b7d13a8c6e1f042",
+                  "terms_valid_until": "2026-10-01T09:10:00.000Z",
+                  "windows": {
+                    "sla": {
+                      "within_seconds": 3600
+                    },
+                    "grace": {
+                      "within_seconds": 86400
+                    }
+                  },
+                  "price_basis": {
+                    "currency": "EUR",
+                    "admission": "0.10",
+                    "sla": "2.90",
+                    "grace": "1.45"
+                  },
+                  "prices": [
+                    {
+                      "network": "eip155:8453",
+                      "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+                      "admission": "120000",
+                      "sla": "3400000",
+                      "grace": "1700000",
+                      "conversion": {
+                        "from": "EUR",
+                        "rate": "1.17",
+                        "source": "ECB euro reference rate",
+                        "as_of": "2026-09-30",
+                        "rounding": "up_to_cent"
+                      }
+                    },
+                    {
+                      "network": "eip155:8453",
+                      "asset": "0x60a3E35Cc302bFA44Cb288Bc5a4F316Fdb1adb42",
+                      "admission": "100000",
+                      "sla": "2900000",
+                      "grace": "1450000"
+                    }
+                  ],
+                  "asset_binding": "admission_asset",
+                  "expiry": {
+                    "admission_credit": "next_admission"
+                  },
+                  "cancellation": "none",
+                  "status_url_template": "https://verifi.cloud/verify/{work_id}",
+                  "unlock_url_template": "https://verifi.cloud/verify-unlock?id={work_id}"
+                },
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "version",
+                    "terms_id",
+                    "windows",
+                    "prices",
+                    "asset_binding",
+                    "expiry",
+                    "cancellation"
+                  ],
+                  "properties": {
+                    "version": {
+                      "const": 1
+                    },
+                    "terms_id": {
+                      "type": "string"
+                    },
+                    "terms_valid_until": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "windows": {
+                      "type": "object",
+                      "required": [
+                        "sla"
+                      ],
+                      "properties": {
+                        "sla": {
+                          "type": "object",
+                          "required": [
+                            "within_seconds"
+                          ],
+                          "properties": {
+                            "within_seconds": {
+                              "type": "integer",
+                              "minimum": 1
+                            }
+                          }
+                        },
+                        "grace": {
+                          "type": "object",
+                          "required": [
+                            "within_seconds"
+                          ],
+                          "properties": {
+                            "within_seconds": {
+                              "type": "integer",
+                              "minimum": 1
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "price_basis": {
+                      "type": "object",
+                      "required": [
+                        "currency",
+                        "admission",
+                        "sla"
+                      ],
+                      "properties": {
+                        "currency": {
+                          "type": "string"
+                        },
+                        "admission": {
+                          "type": "string"
+                        },
+                        "sla": {
+                          "type": "string"
+                        },
+                        "grace": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "prices": {
+                      "type": "array",
+                      "minItems": 1,
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "network",
+                          "asset",
+                          "admission",
+                          "sla"
+                        ],
+                        "properties": {
+                          "network": {
+                            "type": "string"
+                          },
+                          "asset": {
+                            "type": "string"
+                          },
+                          "admission": {
+                            "type": "string",
+                            "pattern": "^[0-9]+$"
+                          },
+                          "sla": {
+                            "type": "string",
+                            "pattern": "^[0-9]+$"
+                          },
+                          "grace": {
+                            "type": "string",
+                            "pattern": "^[0-9]+$"
+                          },
+                          "conversion": {
+                            "type": "object",
+                            "required": [
+                              "from",
+                              "rate",
+                              "source",
+                              "as_of"
+                            ],
+                            "properties": {
+                              "from": {
+                                "type": "string"
+                              },
+                              "rate": {
+                                "type": "string"
+                              },
+                              "source": {
+                                "type": "string"
+                              },
+                              "as_of": {
+                                "type": "string"
+                              },
+                              "rounding": {
+                                "enum": [
+                                  "up_to_cent",
+                                  "none"
+                                ]
+                              }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "asset_binding": {
+                      "enum": [
+                        "admission_asset"
+                      ]
+                    },
+                    "expiry": {
+                      "type": "object",
+                      "properties": {
+                        "admission_credit": {
+                          "enum": [
+                            "next_admission",
+                            "none"
+                          ]
+                        }
+                      }
+                    },
+                    "cancellation": {
+                      "enum": [
+                        "none",
+                        "after_sla_admission_credit"
+                      ]
+                    },
+                    "status_url_template": {
+                      "type": "string"
+                    },
+                    "unlock_url_template": {
+                      "type": "string"
+                    }
+                  }
+                }
+              },
+              "bazaar": {
+                "info": {
+                  "input": {
+                    "type": "http",
+                    "bodyType": "json",
+                    "body": {
+                      "intent": "Check that this claim is true before I act on it.",
+                      "claim": "The Eiffel Tower is in Paris.",
+                      "agent_id": "0x0000000000000000000000000000000000000001"
+                    },
+                    "method": "POST"
+                  },
+                  "output": {
+                    "type": "json",
+                    "example": {
+                      "verify_id": "0f3f7d0a-0000-4000-8000-000000000000",
+                      "status": "processing",
+                      "next_action": "poll",
+                      "poll_url": "/verify/0f3f7d0a-0000-4000-8000-000000000000",
+                      "contract_version": 3
+                    }
+                  }
+                },
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "type": "object",
+                  "properties": {
+                    "input": {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "const": "http"
+                        },
+                        "method": {
+                          "type": "string",
+                          "enum": [
+                            "POST"
+                          ]
+                        },
+                        "bodyType": {
+                          "type": "string",
+                          "enum": [
+                            "json",
+                            "form-data",
+                            "text"
+                          ]
+                        },
+                        "body": {
+                          "type": "object",
+                          "required": [
+                            "intent",
+                            "claim",
+                            "agent_id"
+                          ],
+                          "additionalProperties": false,
+                          "properties": {
+                            "intent": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 2000,
+                              "description": "What the agent wants to do and why it needs a human check."
+                            },
+                            "claim": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 4000,
+                              "description": "The statement a human should verify."
+                            },
+                            "agent_id": {
+                              "type": "string",
+                              "pattern": "^0x[0-9a-fA-F]{40}$",
+                              "description": "The requester wallet address."
+                            },
+                            "callback_url": {
+                              "type": "string",
+                              "pattern": "^https://",
+                              "maxLength": 2048,
+                              "description": "Optional https URL notified when the result is ready or failed. Polling always works."
+                            }
+                          }
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "method",
+                        "bodyType",
+                        "body"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "output": {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string"
+                        },
+                        "example": {
+                          "type": "object"
+                        }
+                      },
+                      "required": [
+                        "type"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "input"
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "x402Version": 2,
+            "error": "Payment required",
+            "resource": {
+              "url": "https://verifi.cloud/verify-unlock?id=0f3f7d0a-6a1c-4a1e-9d7a-2f6b5b0f9c11",
+              "description": "Gates 2 and 3 of the same Verifi chain. Unlock its ready human result at the SLA or grace price decided when the human answered, in the asset the admission was paid in.",
+              "mimeType": "application/json"
+            },
+            "accepts": [
+              {
+                "scheme": "exact",
+                "network": "eip155:8453",
+                "amount": "3400000",
+                "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+                "payTo": "0x0000000000000000000000000000000000000000",
+                "maxTimeoutSeconds": 300,
+                "extra": {
+                  "name": "USD Coin",
+                  "version": "2",
+                  "terms_id": "st_5f0c2a9e4b7d13a8c6e1f042"
+                }
+              }
+            ],
+            "extensions": {
+              "service-windows": {
+                "info": {
+                  "version": 1,
+                  "terms_id": "st_5f0c2a9e4b7d13a8c6e1f042",
+                  "applied": "sla",
+                  "admitted_at": "2026-10-01T09:00:02+00:00",
+                  "ready_at": "2026-10-01T09:41:15+00:00",
+                  "network": "eip155:8453",
+                  "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+                  "unlock_amount": "3400000"
+                },
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "version"
+                  ],
+                  "properties": {
+                    "version": {
+                      "const": 1
+                    },
+                    "terms_id": {
+                      "type": "string"
+                    },
+                    "applied": {
+                      "enum": [
+                        "sla",
+                        "grace"
+                      ]
+                    },
+                    "admitted_at": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "ready_at": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "network": {
+                      "type": "string"
+                    },
+                    "asset": {
+                      "type": "string"
+                    },
+                    "unlock_amount": {
+                      "type": "string",
+                      "pattern": "^[0-9]+$"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          {
+            "x402Version": 2,
+            "error": "Payment required",
+            "resource": {
+              "url": "https://verifi.cloud/verify-unlock?id=6b2a1f6e-9a0d-4a2b-91c6-8f0f2d5a7c33",
+              "description": "Gates 2 and 3 of the same Verifi chain. Unlock its ready human result at the SLA or grace price decided when the human answered, in the asset the admission was paid in.",
+              "mimeType": "application/json"
+            },
+            "accepts": [
+              {
+                "scheme": "exact",
+                "network": "eip155:8453",
+                "amount": "1450000",
+                "asset": "0x60a3E35Cc302bFA44Cb288Bc5a4F316Fdb1adb42",
+                "payTo": "0x0000000000000000000000000000000000000000",
+                "maxTimeoutSeconds": 300,
+                "extra": {
+                  "name": "EURC",
+                  "version": "2",
+                  "terms_id": "st_5f0c2a9e4b7d13a8c6e1f042"
+                }
+              }
+            ],
+            "extensions": {
+              "service-windows": {
+                "info": {
+                  "version": 1,
+                  "terms_id": "st_5f0c2a9e4b7d13a8c6e1f042",
+                  "applied": "grace",
+                  "admitted_at": "2026-10-01T09:00:02+00:00",
+                  "ready_at": "2026-10-01T13:12:40+00:00",
+                  "network": "eip155:8453",
+                  "asset": "0x60a3E35Cc302bFA44Cb288Bc5a4F316Fdb1adb42",
+                  "unlock_amount": "1450000"
+                },
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "version"
+                  ],
+                  "properties": {
+                    "version": {
+                      "const": 1
+                    },
+                    "terms_id": {
+                      "type": "string"
+                    },
+                    "applied": {
+                      "enum": [
+                        "sla",
+                        "grace"
+                      ]
+                    },
+                    "admitted_at": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "ready_at": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "network": {
+                      "type": "string"
+                    },
+                    "asset": {
+                      "type": "string"
+                    },
+                    "unlock_amount": {
+                      "type": "string",
+                      "pattern": "^[0-9]+$"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "PaymentResponse": {
+        "type": "object",
+        "description": "x402 settlement receipt, delivered base64 encoded in the PAYMENT-RESPONSE header after a paid gate succeeds.",
+        "properties": {
+          "success": {
+            "type": "boolean"
+          },
+          "transaction": {
+            "type": "string",
+            "description": "The on-chain transaction hash for this gate. Admission and unlock have separate hashes tied to the same verify_id."
+          },
+          "network": {
+            "type": "string",
+            "examples": [
+              "eip155:8453"
+            ]
+          },
+          "payer": {
+            "type": "string",
+            "description": "The wallet that paid."
+          }
+        },
+        "additionalProperties": true
+      },
+      "Error": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "string",
+            "description": "What went wrong."
+          },
+          "detail": {
+            "type": "string",
+            "description": "What to do about it, when there is a useful next step."
+          },
+          "status": {
+            "type": "string",
+            "description": "The chain status, on lifecycle conflicts."
+          }
+        }
+      }
+    }
+  }
+}
