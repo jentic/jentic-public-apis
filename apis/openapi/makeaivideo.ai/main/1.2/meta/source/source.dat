@@ -1,0 +1,5674 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "MakeAIVideo API",
+    "version": "1.2",
+    "description": "Public v1 API for MakeAIVideo: turn a brief or your own script into a finished short-form video (script, voiceover, AI or stock scenes, captions, music), edit and regenerate parts of it, and fetch the MP4. Everything the product can do, agents can do.\n\n## Authentication\nAll endpoints except the device-login pair accept an API key:\n```\nAuthorization: Bearer mav_...\n```\nCreate keys under Settings, Advanced, API keys, or with `makeaivideo login` (CLI device flow). Keys carry scopes (`read`, `write`, `ai`); each operation lists its scope under `x-scope`. `read` lists and inspects; `write` creates, edits, regenerates, deletes (and spends credits); `ai` covers generation helpers (scripts, ideas, portraits, previews, music). A missing scope returns `403 forbidden`.\n\n## Envelope\nEvery JSON response is `{ data, error, meta }`. On failure `data` is null and `error` is `{ message, code, retryable, details? }`. `retryable` is true only for 5xx and 429; never retry a 4xx without changing the request. Two endpoints return files instead of JSON: `GET /videos/{id}/captions`.\n\n## The core loop\n1. `GET /tools` (what we can make). 2. `POST /videos/estimate` (free quote). 3. `POST /videos` with `tool` + `fields`, or with your own `script` (202, `video_id`). 4. Poll `GET /videos/{id}` respecting `poll_after_seconds`, or subscribe to `video.ready` with `POST /webhooks`. 5. `GET /videos/{id}/download`.\n\nRenders take minutes. Set `idempotency_key` on create so a retry never produces (and charges for) a second video.\n\n## Publishing to social accounts\nPost finished videos to the workspace's connected accounts: TikTok, Instagram (as a Reel), YouTube (9:16 as a Short, 16:9 as a regular video), Facebook Pages, LinkedIn, X (videos up to 140 seconds), Threads, Pinterest, Bluesky, Telegram and Discord.\n1. `GET /publishing/accounts` lists connected accounts (`acc_...` ids, `can_post`, `needs_reconnection`), the plan's account limit and every platform. 2. To add an OAuth account, `POST /publishing/accounts/connect` returns a short-lived `url` that a PERSON must open in a browser and approve; an agent cannot complete it. Bluesky, Telegram and Discord connect with credentials in the web app only (the Accounts page). 3. `POST /videos/{id}/publish` with `account_ids` and `caption` answers 202 with a post (`pub_...`); set `idempotency_key` so a retry never posts twice. 4. Poll `GET /publishing/posts/{id}` until `done` is true, or subscribe to `post.published`, `post.partially_failed` and `post.failed`. Each destination carries its own `status`, live `url` and `error`.\nA workspace where publishing is not switched on gets `403 publishing_unavailable` (not retryable).\n\n## Webhooks\n`POST /webhooks` with a public https URL and events. Every delivery is signed: `X-MakeAIVideo-Signature: sha256=<HMAC-SHA256(raw body, secret)>`, with `X-MakeAIVideo-Event`, `X-MakeAIVideo-Event-Id` (dedup key), `X-MakeAIVideo-Timestamp` and `X-MakeAIVideo-Attempt`. Non-2xx responses retry at 30s, 2m, 10m, 1h, 6h, then stop. Twenty consecutive failures disable the webhook until you PATCH `is_active: true`.\nEvents: `video.created`, `video.ready`, `video.failed`, `character.created`, and for publishing `post.published` (every destination went out), `post.partially_failed` and `post.failed`. A `post.*` event's `data` is the same Post object `GET /publishing/posts/{id}` returns. A post can emit a second outcome if a failed destination is retried later."
+  },
+  "servers": [
+    {
+      "url": "https://app.makeaivideo.ai/api/v1",
+      "description": "Production"
+    }
+  ],
+  "security": [
+    {
+      "apiKey": []
+    }
+  ],
+  "tags": [
+    {
+      "name": "Introspection"
+    },
+    {
+      "name": "Videos",
+      "description": "Create, inspect, edit, regenerate, export and download videos."
+    },
+    {
+      "name": "Scripts",
+      "description": "Write or structure a script before rendering."
+    },
+    {
+      "name": "Characters"
+    },
+    {
+      "name": "Voices"
+    },
+    {
+      "name": "Music"
+    },
+    {
+      "name": "Uploads"
+    },
+    {
+      "name": "Brand kit"
+    },
+    {
+      "name": "Workspace"
+    },
+    {
+      "name": "Ideas"
+    },
+    {
+      "name": "Publishing",
+      "description": "Connect social accounts and post finished videos to them."
+    },
+    {
+      "name": "Webhooks"
+    },
+    {
+      "name": "Auth",
+      "description": "CLI device-code login (RFC 8628). Unauthenticated."
+    }
+  ],
+  "paths": {
+    "/me": {
+      "get": {
+        "tags": [
+          "Introspection"
+        ],
+        "summary": "Who am I",
+        "operationId": "getMe",
+        "x-scope": "read",
+        "responses": {
+          "200": {
+            "description": "Key, user, organization and credits",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/Me"
+                    },
+                    "error": {
+                      "type": "null"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/Meta"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/credits": {
+      "get": {
+        "tags": [
+          "Introspection"
+        ],
+        "summary": "Credit balance",
+        "operationId": "getCredits",
+        "x-scope": "read",
+        "responses": {
+          "200": {
+            "description": "Balance",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/Credits"
+                    },
+                    "error": {
+                      "type": "null"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/Meta"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/tools": {
+      "get": {
+        "tags": [
+          "Introspection"
+        ],
+        "summary": "List create tools and their brief fields",
+        "operationId": "listTools",
+        "x-scope": "read",
+        "responses": {
+          "200": {
+            "description": "Tools",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/Tools"
+                    },
+                    "error": {
+                      "type": "null"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/Meta"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/workspace": {
+      "get": {
+        "tags": [
+          "Workspace"
+        ],
+        "summary": "The workspace this key works in",
+        "operationId": "getWorkspace",
+        "x-scope": "read",
+        "responses": {
+          "200": {
+            "description": "Workspace",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "workspace": {
+                          "$ref": "#/components/schemas/Workspace"
+                        }
+                      }
+                    },
+                    "error": {
+                      "type": "null"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/Meta"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "Workspace"
+        ],
+        "summary": "Update workspace defaults",
+        "operationId": "updateWorkspace",
+        "x-scope": "write",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "description": {
+                    "type": "string"
+                  },
+                  "default_aspect_ratio": {
+                    "type": "string",
+                    "enum": [
+                      "9:16",
+                      "1:1",
+                      "16:9"
+                    ]
+                  },
+                  "default_style": {
+                    "type": "string",
+                    "enum": [
+                      "talking-head",
+                      "cinematic"
+                    ]
+                  },
+                  "default_character_id": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Workspace",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "workspace": {
+                          "$ref": "#/components/schemas/Workspace"
+                        }
+                      }
+                    },
+                    "error": {
+                      "type": "null"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/Meta"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Owners and admins only",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/videos": {
+      "get": {
+        "tags": [
+          "Videos"
+        ],
+        "summary": "List videos",
+        "operationId": "listVideos",
+        "x-scope": "read",
+        "responses": {
+          "200": {
+            "description": "Videos",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/VideoList"
+                    },
+                    "error": {
+                      "type": "null"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/Meta"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Videos"
+        ],
+        "summary": "Create a video from a brief or your own script",
+        "operationId": "createVideo",
+        "x-scope": "write",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateVideo"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Accepted. status is `generating`, or `draft` when start_generation is false",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/VideoCreated"
+                    },
+                    "error": {
+                      "type": "null"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/Meta"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid brief or script",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Not enough credits or no active subscription",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Key lacks the write scope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate or spend limit reached; see Retry-After",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/videos/estimate": {
+      "post": {
+        "tags": [
+          "Videos"
+        ],
+        "summary": "Free credit quote",
+        "operationId": "estimateVideo",
+        "x-scope": "read",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "tool": {
+                    "type": "string"
+                  },
+                  "duration_seconds": {
+                    "type": "integer"
+                  },
+                  "aspect_ratio": {
+                    "type": "string",
+                    "enum": [
+                      "9:16",
+                      "1:1",
+                      "16:9"
+                    ]
+                  }
+                },
+                "required": [
+                  "tool"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Quote",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "tool": {
+                          "type": "string"
+                        },
+                        "duration_seconds": {
+                          "type": "integer"
+                        },
+                        "aspect_ratio": {
+                          "type": "string"
+                        },
+                        "credits": {
+                          "type": "integer"
+                        },
+                        "note": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "error": {
+                      "type": "null"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/Meta"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/videos/{id}": {
+      "get": {
+        "tags": [
+          "Videos"
+        ],
+        "summary": "Video status and progress",
+        "operationId": "getVideo",
+        "x-scope": "read",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Public video id, e.g. vid_abc123"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/Video"
+                    },
+                    "error": {
+                      "type": "null"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/Meta"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown video",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "Videos"
+        ],
+        "summary": "Edit title, topic, script or caption settings",
+        "operationId": "updateVideo",
+        "x-scope": "write",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Public video id, e.g. vid_abc123"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "title": {
+                    "type": "string"
+                  },
+                  "topic": {
+                    "type": "string"
+                  },
+                  "script": {
+                    "type": "object",
+                    "properties": {
+                      "title": {
+                        "type": "string"
+                      },
+                      "hook": {
+                        "type": "string"
+                      },
+                      "visual_thread": {
+                        "type": "string"
+                      },
+                      "total_duration_seconds": {
+                        "type": "number"
+                      },
+                      "hashtags": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "scenes": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "scene_number": {
+                              "type": "integer"
+                            },
+                            "narration": {
+                              "type": "string"
+                            },
+                            "visual_description": {
+                              "type": "string"
+                            },
+                            "duration_seconds": {
+                              "type": "number"
+                            },
+                            "scene_type": {
+                              "type": "string",
+                              "enum": [
+                                "character",
+                                "scene"
+                              ]
+                            },
+                            "image_prompt": {
+                              "type": "string"
+                            },
+                            "video_prompt": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "scene_number",
+                            "narration",
+                            "visual_description",
+                            "duration_seconds"
+                          ]
+                        }
+                      }
+                    },
+                    "required": [
+                      "title",
+                      "hook",
+                      "scenes",
+                      "total_duration_seconds"
+                    ]
+                  },
+                  "caption_style": {
+                    "type": "string"
+                  },
+                  "caption_alignment": {
+                    "type": "string",
+                    "enum": [
+                      "top",
+                      "middle",
+                      "bottom"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Saved. Script changes apply on the next generate",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "video_id": {
+                          "type": "string"
+                        },
+                        "saved_at": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "error": {
+                      "type": "null"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/Meta"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown video",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Videos"
+        ],
+        "summary": "Delete a video and its files",
+        "operationId": "deleteVideo",
+        "x-scope": "write",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Public video id, e.g. vid_abc123"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "video_id": {
+                          "type": "string"
+                        },
+                        "deleted": {
+                          "type": "boolean"
+                        }
+                      }
+                    },
+                    "error": {
+                      "type": "null"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/Meta"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown video",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/videos/{id}/generate": {
+      "post": {
+        "tags": [
+          "Videos"
+        ],
+        "summary": "Start or re-run generation (drafts, or after edits)",
+        "operationId": "generateVideo",
+        "x-scope": "write",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Public video id, e.g. vid_abc123"
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "video_id": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "string"
+                        },
+                        "poll_after_seconds": {
+                          "type": [
+                            "integer",
+                            "null"
+                          ]
+                        },
+                        "credits_estimate": {
+                          "type": [
+                            "integer",
+                            "null"
+                          ]
+                        }
+                      }
+                    },
+                    "error": {
+                      "type": "null"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/Meta"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Already generating",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/videos/{id}/cancel": {
+      "post": {
+        "tags": [
+          "Videos"
+        ],
+        "summary": "Cancel a running render and release its credits",
+        "operationId": "cancelVideo",
+        "x-scope": "write",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Public video id, e.g. vid_abc123"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Cancelled",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "video_id": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "failed"
+                          ]
+                        },
+                        "cancelled": {
+                          "type": "boolean"
+                        },
+                        "released_credits": {
+                          "type": "integer"
+                        }
+                      }
+                    },
+                    "error": {
+                      "type": "null"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/Meta"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Not running",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/videos/{id}/download": {
+      "get": {
+        "tags": [
+          "Videos"
+        ],
+        "summary": "Signed download URL for the finished MP4",
+        "operationId": "downloadVideo",
+        "x-scope": "read",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Public video id, e.g. vid_abc123"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "URL valid 15 minutes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "video_id": {
+                          "type": "string"
+                        },
+                        "download_url": {
+                          "type": "string",
+                          "format": "uri"
+                        },
+                        "expires_in": {
+                          "type": "integer"
+                        },
+                        "note": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "error": {
+                      "type": "null"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/Meta"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown video",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Not ready yet (retryable)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/videos/{id}/renders": {
+      "get": {
+        "tags": [
+          "Videos"
+        ],
+        "summary": "Past exports",
+        "operationId": "listRenders",
+        "x-scope": "read",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Public video id, e.g. vid_abc123"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Renders",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "renders": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "additionalProperties": true
+                          }
+                        }
+                      }
+                    },
+                    "error": {
+                      "type": "null"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/Meta"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Videos"
+        ],
+        "summary": "Export again (after edits)",
+        "operationId": "createRender",
+        "x-scope": "write",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Public video id, e.g. vid_abc123"
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "video_id": {
+                          "type": "string"
+                        },
+                        "render_id": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "status": {
+                          "type": "string"
+                        },
+                        "poll_after_seconds": {
+                          "type": "integer"
+                        }
+                      }
+                    },
+                    "error": {
+                      "type": "null"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/Meta"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/videos/{id}/renders/progress": {
+      "get": {
+        "tags": [
+          "Videos"
+        ],
+        "summary": "Current export progress",
+        "operationId": "renderProgress",
+        "x-scope": "read",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Public video id, e.g. vid_abc123"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Progress",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "video_id": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "done": {
+                          "type": "boolean"
+                        },
+                        "percent": {
+                          "type": [
+                            "number",
+                            "null"
+                          ]
+                        },
+                        "output_url": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "error": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "poll_after_seconds": {
+                          "type": [
+                            "integer",
+                            "null"
+                          ]
+                        }
+                      }
+                    },
+                    "error": {
+                      "type": "null"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/Meta"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/videos/{id}/scenes/{n}/regenerate": {
+      "post": {
+        "tags": [
+          "Videos"
+        ],
+        "summary": "Regenerate one scene (optionally with new narration)",
+        "operationId": "regenerateScene",
+        "x-scope": "write",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Public video id, e.g. vid_abc123"
+          },
+          {
+            "name": "n",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "Scene number, 1-based"
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "narration": {
+                    "type": "string",
+                    "maxLength": 2000
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "video_id": {
+                          "type": "string"
+                        },
+                        "scene": {
+                          "type": "integer"
+                        },
+                        "status": {
+                          "type": "string"
+                        },
+                        "credits_estimate": {
+                          "type": [
+                            "integer",
+                            "null"
+                          ]
+                        },
+                        "poll_after_seconds": {
+                          "type": "integer"
+                        }
+                      }
+                    },
+                    "error": {
+                      "type": "null"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/Meta"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/videos/{id}/voice": {
+      "post": {
+        "tags": [
+          "Videos"
+        ],
+        "summary": "Regenerate the voiceover with another voice",
+        "operationId": "regenerateVoice",
+        "x-scope": "write",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Public video id, e.g. vid_abc123"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "voice_id": {
+                    "type": "string"
+                  },
+                  "voice_stability": {
+                    "type": "string",
+                    "enum": [
+                      "stable",
+                      "balanced",
+                      "expressive"
+                    ]
+                  },
+                  "scenes": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "scene_number": {
+                          "type": "integer"
+                        },
+                        "narration": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                },
+                "required": [
+                  "voice_id"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": true
+                    },
+                    "error": {
+                      "type": "null"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/Meta"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "Videos"
+        ],
+        "summary": "Voice regeneration progress",
+        "operationId": "voiceProgress",
+        "x-scope": "read",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Public video id, e.g. vid_abc123"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Progress",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": true
+                    },
+                    "error": {
+                      "type": "null"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/Meta"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/videos/{id}/captions": {
+      "get": {
+        "tags": [
+          "Videos"
+        ],
+        "summary": "Caption file (SRT or VTT), returned as text",
+        "operationId": "getCaptions",
+        "x-scope": "read",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Public video id, e.g. vid_abc123"
+          },
+          {
+            "name": "format",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "srt",
+                "vtt"
+              ],
+              "default": "srt"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Caption file",
+            "content": {
+              "application/x-subrip": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "text/vtt": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "No caption data yet",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/videos/{id}/share-link": {
+      "post": {
+        "tags": [
+          "Videos"
+        ],
+        "summary": "Public, expiring link to the MP4 for people without an account",
+        "operationId": "createShareLink",
+        "x-scope": "write",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Public video id, e.g. vid_abc123"
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "expires_in_seconds": {
+                    "type": "integer",
+                    "minimum": 60,
+                    "maximum": 604800,
+                    "default": 86400
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Link",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "video_id": {
+                          "type": "string"
+                        },
+                        "url": {
+                          "type": "string",
+                          "format": "uri"
+                        },
+                        "expires_at": {
+                          "type": "string"
+                        },
+                        "ttl_seconds": {
+                          "type": "integer"
+                        }
+                      }
+                    },
+                    "error": {
+                      "type": "null"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/Meta"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/videos/{id}/report": {
+      "post": {
+        "tags": [
+          "Videos"
+        ],
+        "summary": "Flag a generated video for review",
+        "operationId": "reportVideo",
+        "x-scope": "write",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Public video id, e.g. vid_abc123"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "reason": {
+                    "type": "string",
+                    "maxLength": 1000
+                  },
+                  "category": {
+                    "type": "string",
+                    "enum": [
+                      "nsfw",
+                      "violence",
+                      "trademark",
+                      "harassment",
+                      "other"
+                    ]
+                  }
+                },
+                "required": [
+                  "reason"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Reported",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "video_id": {
+                          "type": "string"
+                        },
+                        "reported": {
+                          "type": "boolean"
+                        }
+                      }
+                    },
+                    "error": {
+                      "type": "null"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/Meta"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/videos/script": {
+      "post": {
+        "tags": [
+          "Scripts"
+        ],
+        "summary": "Write a script from a topic or a brief (no video yet)",
+        "operationId": "generateScript",
+        "x-scope": "ai",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "topic": {
+                    "type": "string"
+                  },
+                  "brief": {
+                    "type": "object",
+                    "properties": {
+                      "tool": {
+                        "type": "string",
+                        "description": "A tool id from GET /tools"
+                      },
+                      "fields": {
+                        "type": "object",
+                        "additionalProperties": {
+                          "type": "string"
+                        },
+                        "description": "The tool's brief fields by name"
+                      },
+                      "duration_seconds": {
+                        "type": "integer"
+                      },
+                      "aspect_ratio": {
+                        "type": "string",
+                        "enum": [
+                          "9:16",
+                          "1:1",
+                          "16:9"
+                        ]
+                      },
+                      "language": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "tool",
+                      "fields"
+                    ]
+                  },
+                  "mode": {
+                    "type": "string",
+                    "enum": [
+                      "talking-head",
+                      "cinematic",
+                      "hybrid",
+                      "stock-narrated",
+                      "smart-mix"
+                    ]
+                  },
+                  "target_duration": {
+                    "type": "integer"
+                  },
+                  "language": {
+                    "type": "string"
+                  },
+                  "character_name": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Script",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "script": {
+                          "type": "object",
+                          "properties": {
+                            "title": {
+                              "type": "string"
+                            },
+                            "hook": {
+                              "type": "string"
+                            },
+                            "visual_thread": {
+                              "type": "string"
+                            },
+                            "total_duration_seconds": {
+                              "type": "number"
+                            },
+                            "hashtags": {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              }
+                            },
+                            "scenes": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "scene_number": {
+                                    "type": "integer"
+                                  },
+                                  "narration": {
+                                    "type": "string"
+                                  },
+                                  "visual_description": {
+                                    "type": "string"
+                                  },
+                                  "duration_seconds": {
+                                    "type": "number"
+                                  },
+                                  "scene_type": {
+                                    "type": "string",
+                                    "enum": [
+                                      "character",
+                                      "scene"
+                                    ]
+                                  },
+                                  "image_prompt": {
+                                    "type": "string"
+                                  },
+                                  "video_prompt": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "scene_number",
+                                  "narration",
+                                  "visual_description",
+                                  "duration_seconds"
+                                ]
+                              }
+                            }
+                          },
+                          "required": [
+                            "title",
+                            "hook",
+                            "scenes",
+                            "total_duration_seconds"
+                          ]
+                        },
+                        "credits": {
+                          "type": [
+                            "integer",
+                            "null"
+                          ]
+                        }
+                      }
+                    },
+                    "error": {
+                      "type": "null"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/Meta"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/videos/scriptify": {
+      "post": {
+        "tags": [
+          "Scripts"
+        ],
+        "summary": "Structure your own prose into a scene script",
+        "operationId": "scriptify",
+        "x-scope": "ai",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "text": {
+                    "type": "string",
+                    "minLength": 20,
+                    "maxLength": 5000
+                  },
+                  "mode": {
+                    "type": "string"
+                  },
+                  "target_duration": {
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "text"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Script",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": true
+                    },
+                    "error": {
+                      "type": "null"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/Meta"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/videos/fetch-url": {
+      "post": {
+        "tags": [
+          "Scripts"
+        ],
+        "summary": "Fetch a public article's readable text (for the article tool)",
+        "operationId": "fetchUrl",
+        "x-scope": "ai",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "url": {
+                    "type": "string",
+                    "format": "uri"
+                  }
+                },
+                "required": [
+                  "url"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Page",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "url": {
+                          "type": "string"
+                        },
+                        "title": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "site_name": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "text": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "error": {
+                      "type": "null"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/Meta"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/ideas": {
+      "post": {
+        "tags": [
+          "Ideas"
+        ],
+        "summary": "Scored video ideas for a niche",
+        "operationId": "generateIdeas",
+        "x-scope": "ai",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "niche": {
+                    "type": "string"
+                  },
+                  "audience": {
+                    "type": "string"
+                  },
+                  "tone": {
+                    "type": "string",
+                    "enum": [
+                      "educational",
+                      "entertaining",
+                      "inspirational",
+                      "humorous",
+                      "controversial"
+                    ]
+                  },
+                  "count": {
+                    "type": "integer",
+                    "minimum": 3,
+                    "maximum": 15
+                  }
+                },
+                "required": [
+                  "niche"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Ideas",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": true
+                    },
+                    "error": {
+                      "type": "null"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/Meta"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/ai/enhance-prompt": {
+      "post": {
+        "tags": [
+          "Ideas"
+        ],
+        "summary": "Rewrite a rough topic into a stronger brief",
+        "operationId": "enhancePrompt",
+        "x-scope": "ai",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "topic": {
+                    "type": "string"
+                  },
+                  "mode": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "topic"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Enhanced",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "enhanced": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "error": {
+                      "type": "null"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/Meta"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/characters": {
+      "get": {
+        "tags": [
+          "Characters"
+        ],
+        "summary": "Preset and workspace characters",
+        "operationId": "listCharacters",
+        "x-scope": "read",
+        "responses": {
+          "200": {
+            "description": "Characters",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "presets": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "additionalProperties": true
+                          }
+                        },
+                        "characters": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "additionalProperties": true
+                          }
+                        }
+                      }
+                    },
+                    "error": {
+                      "type": "null"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/Meta"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Characters"
+        ],
+        "summary": "Save a character from generated or uploaded assets",
+        "operationId": "createCharacter",
+        "x-scope": "write",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "description": {
+                    "type": "string"
+                  },
+                  "style": {
+                    "type": "string"
+                  },
+                  "tags": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "portrait_temp_key": {
+                    "type": "string",
+                    "description": "r2_key from POST /characters/variations or a key from /uploads/reference"
+                  },
+                  "voice_preview_temp_key": {
+                    "type": "string",
+                    "description": "from POST /characters/voice-previews"
+                  },
+                  "reference_temp_keys": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "voice_id": {
+                    "type": "string"
+                  },
+                  "voice_settings": {
+                    "type": "object",
+                    "additionalProperties": true
+                  },
+                  "generation_prompt": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name",
+                  "style",
+                  "portrait_temp_key",
+                  "voice_preview_temp_key",
+                  "voice_id"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Character",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "character": {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      }
+                    },
+                    "error": {
+                      "type": "null"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/Meta"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/characters/{id}": {
+      "get": {
+        "tags": [
+          "Characters"
+        ],
+        "summary": "Character detail with signed asset URLs",
+        "operationId": "getCharacter",
+        "x-scope": "read",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "Numeric character id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Character",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "character": {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      }
+                    },
+                    "error": {
+                      "type": "null"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/Meta"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown character",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "Characters"
+        ],
+        "summary": "Update name, description or voice",
+        "operationId": "updateCharacter",
+        "x-scope": "write",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "Numeric character id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "description": {
+                    "type": "string"
+                  },
+                  "voice_id": {
+                    "type": "string"
+                  },
+                  "voice_settings": {
+                    "type": "object",
+                    "properties": {
+                      "stability": {
+                        "type": "number"
+                      },
+                      "similarity_boost": {
+                        "type": "number"
+                      },
+                      "style": {
+                        "type": "number"
+                      },
+                      "use_speaker_boost": {
+                        "type": "boolean"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "character_id": {
+                          "type": "integer"
+                        },
+                        "updated": {
+                          "type": "boolean"
+                        }
+                      }
+                    },
+                    "error": {
+                      "type": "null"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/Meta"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Characters"
+        ],
+        "summary": "Delete a workspace character",
+        "operationId": "deleteCharacter",
+        "x-scope": "write",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "Numeric character id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "character_id": {
+                          "type": "integer"
+                        },
+                        "deleted": {
+                          "type": "boolean"
+                        }
+                      }
+                    },
+                    "error": {
+                      "type": "null"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/Meta"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/characters/variations": {
+      "post": {
+        "tags": [
+          "Characters"
+        ],
+        "summary": "Generate 1-4 portrait candidates (spends credits)",
+        "operationId": "generatePortraits",
+        "x-scope": "ai",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "prompt": {
+                    "type": "string",
+                    "description": "Required unless reference_image_urls has at least one photo"
+                  },
+                  "style": {
+                    "type": "string"
+                  },
+                  "reference_image_urls": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "format": "uri"
+                    }
+                  },
+                  "count": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 4
+                  }
+                },
+                "required": [
+                  "style"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Portraits",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "batch_id": {
+                          "type": "string"
+                        },
+                        "variations": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "index": {
+                                "type": "integer"
+                              },
+                              "r2_key": {
+                                "type": "string"
+                              },
+                              "url": {
+                                "type": "string"
+                              }
+                            }
+                          }
+                        },
+                        "credits_used": {
+                          "type": "integer"
+                        }
+                      }
+                    },
+                    "error": {
+                      "type": "null"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/Meta"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/characters/voice-previews": {
+      "post": {
+        "tags": [
+          "Characters"
+        ],
+        "summary": "Candidate voices reading a sample line",
+        "operationId": "generateVoicePreviews",
+        "x-scope": "ai",
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "sample_text": {
+                    "type": "string",
+                    "maxLength": 200
+                  },
+                  "gender_hint": {
+                    "type": "string",
+                    "enum": [
+                      "male",
+                      "female"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Previews",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": true
+                    },
+                    "error": {
+                      "type": "null"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/Meta"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/voices": {
+      "get": {
+        "tags": [
+          "Voices"
+        ],
+        "summary": "Voice catalog plus curated picks",
+        "operationId": "listVoices",
+        "x-scope": "read",
+        "parameters": [
+          {
+            "name": "gender",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "accent",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "age",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "use_case",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Voices",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": true
+                    },
+                    "error": {
+                      "type": "null"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/Meta"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/voices/preview": {
+      "post": {
+        "tags": [
+          "Voices"
+        ],
+        "summary": "Hear any voice say your text (1-hour audio URL)",
+        "operationId": "previewVoiceText",
+        "x-scope": "ai",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "voice_id": {
+                    "type": "string"
+                  },
+                  "text": {
+                    "type": "string",
+                    "maxLength": 500
+                  },
+                  "stability": {
+                    "type": "number"
+                  },
+                  "similarity_boost": {
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "voice_id",
+                  "text"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Audio",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "voice_id": {
+                          "type": "string"
+                        },
+                        "audio_url": {
+                          "type": "string",
+                          "format": "uri"
+                        },
+                        "duration_ms": {
+                          "type": [
+                            "integer",
+                            "null"
+                          ]
+                        },
+                        "expires_in": {
+                          "type": "integer"
+                        }
+                      }
+                    },
+                    "error": {
+                      "type": "null"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/Meta"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/voices/{id}/preview": {
+      "get": {
+        "tags": [
+          "Voices"
+        ],
+        "summary": "Stock sample line for a picker voice",
+        "operationId": "previewVoice",
+        "x-scope": "read",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Voice id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Preview",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "voice_id": {
+                          "type": "string"
+                        },
+                        "preview_url": {
+                          "type": "string",
+                          "format": "uri"
+                        }
+                      }
+                    },
+                    "error": {
+                      "type": "null"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/Meta"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown voice",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/music": {
+      "get": {
+        "tags": [
+          "Music"
+        ],
+        "summary": "Your generated background tracks",
+        "operationId": "listMusic",
+        "x-scope": "read",
+        "responses": {
+          "200": {
+            "description": "Tracks",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "tracks": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "additionalProperties": true
+                          }
+                        }
+                      }
+                    },
+                    "error": {
+                      "type": "null"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/Meta"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Music"
+        ],
+        "summary": "Generate a background track from a prompt",
+        "operationId": "generateMusic",
+        "x-scope": "ai",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "prompt": {
+                    "type": "string",
+                    "minLength": 10,
+                    "maxLength": 500
+                  },
+                  "duration": {
+                    "type": "integer",
+                    "enum": [
+                      15,
+                      30,
+                      60
+                    ]
+                  },
+                  "mood": {
+                    "type": "string",
+                    "enum": [
+                      "calm",
+                      "upbeat",
+                      "cinematic",
+                      "emotional",
+                      "curious",
+                      "adventure",
+                      "electronic",
+                      "inspirational",
+                      "tense",
+                      "quirky"
+                    ]
+                  }
+                },
+                "required": [
+                  "prompt"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Track",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "track": {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      }
+                    },
+                    "error": {
+                      "type": "null"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/Meta"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/uploads/reference": {
+      "post": {
+        "tags": [
+          "Uploads"
+        ],
+        "summary": "Upload reference images (multipart, field `files`)",
+        "operationId": "uploadReference",
+        "x-scope": "write",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "files": {
+                    "type": "string",
+                    "format": "binary",
+                    "description": "One or more images, up to 25 MB each"
+                  }
+                },
+                "required": [
+                  "files"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Uploads",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "uploads": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "additionalProperties": true
+                          }
+                        }
+                      }
+                    },
+                    "error": {
+                      "type": "null"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/Meta"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/uploads/reference-from-url": {
+      "post": {
+        "tags": [
+          "Uploads"
+        ],
+        "summary": "Import a reference image from a public URL",
+        "operationId": "uploadReferenceFromUrl",
+        "x-scope": "write",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "image_url": {
+                    "type": "string",
+                    "format": "uri"
+                  }
+                },
+                "required": [
+                  "image_url"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Uploads",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "uploads": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "additionalProperties": true
+                          }
+                        }
+                      }
+                    },
+                    "error": {
+                      "type": "null"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/Meta"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/uploads/video-from-url": {
+      "post": {
+        "tags": [
+          "Uploads"
+        ],
+        "summary": "Import a video from a public URL (MP4/MOV/WebM, up to 100 MB) for talking-avatar or character-swap",
+        "operationId": "uploadVideoFromUrl",
+        "x-scope": "write",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "video_url": {
+                    "type": "string",
+                    "format": "uri"
+                  }
+                },
+                "required": [
+                  "video_url"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Upload",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": true
+                    },
+                    "error": {
+                      "type": "null"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/Meta"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/videos/image-to-video": {
+      "post": {
+        "tags": [
+          "Videos"
+        ],
+        "summary": "Animate one image into a 5 or 10 s clip; optional narration makes the subject speak it (voice + lip-sync)",
+        "operationId": "createImageToVideo",
+        "x-scope": "ai",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "image_key": {
+                    "type": "string",
+                    "description": "From /uploads/reference or /uploads/reference-from-url"
+                  },
+                  "duration_seconds": {
+                    "type": "integer",
+                    "enum": [
+                      5,
+                      10
+                    ]
+                  },
+                  "animation_prompt": {
+                    "type": "string",
+                    "maxLength": 500
+                  },
+                  "narration": {
+                    "type": "string",
+                    "maxLength": 1000
+                  },
+                  "voice_id": {
+                    "type": "string"
+                  },
+                  "title": {
+                    "type": "string"
+                  },
+                  "idempotency_key": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "image_key"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/VideoCreated"
+                    },
+                    "error": {
+                      "type": "null"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/Meta"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Not enough credits",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/videos/talking-avatar": {
+      "post": {
+        "tags": [
+          "Videos"
+        ],
+        "summary": "Your own filmed video speaks a new script (voice + lip-sync onto your clip). For an AI presenter use POST /videos with mode talking-head",
+        "operationId": "createTalkingAvatar",
+        "x-scope": "ai",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "avatar_video_key": {
+                    "type": "string",
+                    "description": "From /uploads/video-avatar or /uploads/video-from-url"
+                  },
+                  "script": {
+                    "type": "string",
+                    "minLength": 10,
+                    "maxLength": 5000
+                  },
+                  "voice_id": {
+                    "type": "string"
+                  },
+                  "add_broll": {
+                    "type": "boolean"
+                  },
+                  "title": {
+                    "type": "string"
+                  },
+                  "idempotency_key": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "avatar_video_key",
+                  "script",
+                  "voice_id"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/VideoCreated"
+                    },
+                    "error": {
+                      "type": "null"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/Meta"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Not enough credits",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/videos/character-swap": {
+      "post": {
+        "tags": [
+          "Videos"
+        ],
+        "summary": "Character Swap: the person in your video becomes a character or the person in your photos. Motion, camera, room and the original audio are kept; lips stay in sync. 3-60 s",
+        "operationId": "createCharacterSwap",
+        "x-scope": "ai",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "source_video_key": {
+                    "type": "string",
+                    "description": "From /uploads/video-avatar or /uploads/video-from-url"
+                  },
+                  "character_id": {
+                    "type": "integer",
+                    "description": "A preset or your own character. Send this OR photo_keys"
+                  },
+                  "photo_keys": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "1-4 photos of the new person (face-on first). Send this OR character_id"
+                  },
+                  "direction": {
+                    "type": "string",
+                    "maxLength": 400
+                  },
+                  "duration_seconds": {
+                    "type": "number",
+                    "description": "Length of the source clip, 3-60"
+                  },
+                  "rights_confirmed": {
+                    "type": "boolean",
+                    "description": "Must be true: you own the video (or have permission) and have the right to use the likeness"
+                  },
+                  "title": {
+                    "type": "string"
+                  },
+                  "idempotency_key": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "source_video_key",
+                  "duration_seconds",
+                  "rights_confirmed"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/VideoCreated"
+                    },
+                    "error": {
+                      "type": "null"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/Meta"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Not enough credits",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/uploads/video-avatar": {
+      "post": {
+        "tags": [
+          "Uploads"
+        ],
+        "summary": "Upload a talking video for the avatar mode (multipart, field `file`)",
+        "operationId": "uploadVideoAvatar",
+        "x-scope": "write",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "file": {
+                    "type": "string",
+                    "format": "binary",
+                    "description": "A short video of a person talking"
+                  }
+                },
+                "required": [
+                  "file"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Upload",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": true
+                    },
+                    "error": {
+                      "type": "null"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/Meta"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/brand-kit": {
+      "get": {
+        "tags": [
+          "Brand kit"
+        ],
+        "summary": "Watermark settings",
+        "operationId": "getBrandKit",
+        "x-scope": "read",
+        "responses": {
+          "200": {
+            "description": "Brand kit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "watermark_url": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "show_watermark": {
+                          "type": "boolean"
+                        }
+                      }
+                    },
+                    "error": {
+                      "type": "null"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/Meta"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "Brand kit"
+        ],
+        "summary": "Toggle or remove the watermark",
+        "operationId": "updateBrandKit",
+        "x-scope": "write",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "show_watermark": {
+                    "type": "boolean"
+                  },
+                  "remove_watermark": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Brand kit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "watermark_url": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "show_watermark": {
+                          "type": "boolean"
+                        }
+                      }
+                    },
+                    "error": {
+                      "type": "null"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/Meta"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/brand-kit/watermark": {
+      "post": {
+        "tags": [
+          "Brand kit"
+        ],
+        "summary": "Upload a watermark image (multipart, field `file`)",
+        "operationId": "uploadWatermark",
+        "x-scope": "write",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "file": {
+                    "type": "string",
+                    "format": "binary",
+                    "description": "PNG with transparency works best"
+                  }
+                },
+                "required": [
+                  "file"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Uploaded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "watermark_url": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        }
+                      }
+                    },
+                    "error": {
+                      "type": "null"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/Meta"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/templates": {
+      "get": {
+        "tags": [
+          "Videos"
+        ],
+        "summary": "Template library",
+        "operationId": "listTemplates",
+        "x-scope": "read",
+        "responses": {
+          "200": {
+            "description": "Templates",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "templates": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "additionalProperties": true
+                          }
+                        }
+                      }
+                    },
+                    "error": {
+                      "type": "null"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/Meta"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/webhooks": {
+      "get": {
+        "tags": [
+          "Webhooks"
+        ],
+        "summary": "List webhooks",
+        "operationId": "listWebhooks",
+        "x-scope": "read",
+        "responses": {
+          "200": {
+            "description": "Webhooks",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "webhooks": {
+                          "type": "array",
+                          "items": {
+                            "$ref": "#/components/schemas/Webhook"
+                          }
+                        },
+                        "valid_events": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    },
+                    "error": {
+                      "type": "null"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/Meta"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Webhooks"
+        ],
+        "summary": "Create a webhook (secret returned once)",
+        "operationId": "createWebhook",
+        "x-scope": "write",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "url": {
+                    "type": "string",
+                    "format": "uri",
+                    "description": "Public https URL"
+                  },
+                  "events": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "video.created",
+                        "video.ready",
+                        "video.failed",
+                        "character.created",
+                        "post.published",
+                        "post.partially_failed",
+                        "post.failed"
+                      ]
+                    }
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "description": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "url",
+                  "events"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created; `secret` appears only here",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "$ref": "#/components/schemas/Webhook",
+                        "secret": {
+                          "type": "string"
+                        },
+                        "secret_warning": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "error": {
+                      "type": "null"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/Meta"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad URL or unknown event",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/webhooks/{id}": {
+      "get": {
+        "tags": [
+          "Webhooks"
+        ],
+        "summary": "Webhook detail",
+        "operationId": "getWebhook",
+        "x-scope": "read",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Webhook id, e.g. wh_abc123"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Webhook",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/Webhook"
+                    },
+                    "error": {
+                      "type": "null"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/Meta"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "Webhooks"
+        ],
+        "summary": "Update URL, events, name, or re-enable",
+        "operationId": "updateWebhook",
+        "x-scope": "write",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Webhook id, e.g. wh_abc123"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "url": {
+                    "type": "string"
+                  },
+                  "events": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "name": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "description": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "is_active": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Webhook",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/Webhook"
+                    },
+                    "error": {
+                      "type": "null"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/Meta"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Webhooks"
+        ],
+        "summary": "Delete a webhook",
+        "operationId": "deleteWebhook",
+        "x-scope": "write",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Webhook id, e.g. wh_abc123"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "deleted": {
+                          "type": "boolean"
+                        }
+                      }
+                    },
+                    "error": {
+                      "type": "null"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/Meta"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/webhooks/{id}/test": {
+      "post": {
+        "tags": [
+          "Webhooks"
+        ],
+        "summary": "Send a signed test ping (data.test = true)",
+        "operationId": "testWebhook",
+        "x-scope": "write",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Webhook id, e.g. wh_abc123"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "delivered": {
+                          "type": "boolean"
+                        },
+                        "status_code": {
+                          "type": "integer"
+                        },
+                        "duration_ms": {
+                          "type": "integer"
+                        },
+                        "error": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        }
+                      }
+                    },
+                    "error": {
+                      "type": "null"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/Meta"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/webhooks/{id}/deliveries": {
+      "get": {
+        "tags": [
+          "Webhooks"
+        ],
+        "summary": "Last 50 delivery attempts",
+        "operationId": "listDeliveries",
+        "x-scope": "read",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Webhook id, e.g. wh_abc123"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Deliveries",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "deliveries": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "additionalProperties": true
+                          }
+                        }
+                      }
+                    },
+                    "error": {
+                      "type": "null"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/Meta"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/publishing/accounts": {
+      "get": {
+        "tags": [
+          "Publishing"
+        ],
+        "summary": "Connected social accounts, the plan's account limit, and every platform",
+        "operationId": "listSocialAccounts",
+        "x-scope": "read",
+        "responses": {
+          "200": {
+            "description": "Accounts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/SocialAccounts"
+                    },
+                    "error": {
+                      "type": "null"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/Meta"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "publishing_unavailable: publishing is not switched on for this workspace",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "publishing_unreachable: the publishing service did not answer (retryable)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/publishing/accounts/connect": {
+      "post": {
+        "tags": [
+          "Publishing"
+        ],
+        "summary": "Link a PERSON opens to connect one OAuth account",
+        "operationId": "createConnectLink",
+        "x-scope": "write",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "platform": {
+                    "type": "string",
+                    "enum": [
+                      "tiktok",
+                      "instagram",
+                      "youtube",
+                      "facebook",
+                      "linkedin",
+                      "threads",
+                      "pinterest",
+                      "bluesky",
+                      "telegram",
+                      "discord",
+                      "x"
+                    ],
+                    "description": "OAuth platforms only. bluesky, telegram and discord return 422 connect_in_web_app."
+                  }
+                },
+                "required": [
+                  "platform"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Link. A person must open `url` in a browser and approve; afterwards they land on the web app's Accounts page. Poll GET /publishing/accounts for the new account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "platform": {
+                          "type": "string"
+                        },
+                        "url": {
+                          "type": "string",
+                          "format": "uri"
+                        },
+                        "expires_in_seconds": {
+                          "type": "integer"
+                        },
+                        "note": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "error": {
+                      "type": "null"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/Meta"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "publishing_unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "account_limit: the plan's account limit is reached (details.limit)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "connect_in_web_app (Bluesky, Telegram, Discord)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "The publishing service refused or failed (retryable)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/videos/{id}/publish": {
+      "post": {
+        "tags": [
+          "Publishing"
+        ],
+        "summary": "Post a finished video to connected accounts, now or scheduled (async)",
+        "operationId": "publishVideo",
+        "x-scope": "write",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Public video id, e.g. vid_abc123"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "account_ids": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "acc_... ids from GET /publishing/accounts (1-20)"
+                  },
+                  "caption": {
+                    "type": "string",
+                    "maxLength": 10000,
+                    "description": "Caption for every platform"
+                  },
+                  "caption_overrides": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": "string",
+                      "maxLength": 10000
+                    },
+                    "description": "Per-platform caption keyed by platform id; replaces caption there"
+                  },
+                  "youtube_title": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "maxLength": 100,
+                    "description": "YouTube title. Default: the video's title"
+                  },
+                  "scheduled_for": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "format": "date-time",
+                    "description": "Omit or null to post now. Posts go out within about 2 minutes of this time"
+                  },
+                  "timezone": {
+                    "type": "string",
+                    "description": "IANA timezone, e.g. Europe/London"
+                  },
+                  "idempotency_key": {
+                    "type": "string",
+                    "description": "Same key within 24 hours returns the same post instead of posting again"
+                  }
+                },
+                "required": [
+                  "account_ids",
+                  "caption"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Accepted. Poll GET /publishing/posts/{id} until done is true",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/Post"
+                    },
+                    "error": {
+                      "type": "null"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/Meta"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Video not ready, or a bad account id",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "publishing_unavailable, or the key lacks the write scope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown video",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "no_accounts, account_unavailable (details.account_ids need reconnecting), or an idempotency_key still in flight",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "video_too_large (a platform's size or length limit, such as X's 140 seconds)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "The publishing service refused or failed (retryable)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/publishing/posts": {
+      "get": {
+        "tags": [
+          "Publishing"
+        ],
+        "summary": "Publish history, newest first (keyset pagination)",
+        "operationId": "listPosts",
+        "x-scope": "read",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "next_cursor from the previous page"
+          },
+          {
+            "name": "video_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Only this video's posts"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Posts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "posts": {
+                          "type": "array",
+                          "items": {
+                            "$ref": "#/components/schemas/Post"
+                          }
+                        },
+                        "has_more": {
+                          "type": "boolean"
+                        },
+                        "next_cursor": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        }
+                      }
+                    },
+                    "error": {
+                      "type": "null"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/Meta"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/publishing/posts/{id}": {
+      "get": {
+        "tags": [
+          "Publishing"
+        ],
+        "summary": "One post: status and per-destination results",
+        "operationId": "getPost",
+        "x-scope": "read",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Publish job (post) id, e.g. pub_abc123"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Post",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/Post"
+                    },
+                    "error": {
+                      "type": "null"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/Meta"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown post",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/device": {
+      "post": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Start a device login",
+        "operationId": "deviceStart",
+        "security": [],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "client_name": {
+                    "type": "string",
+                    "maxLength": 100
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "device_code": {
+                          "type": "string"
+                        },
+                        "user_code": {
+                          "type": "string"
+                        },
+                        "verification_uri": {
+                          "type": "string"
+                        },
+                        "verification_uri_complete": {
+                          "type": "string"
+                        },
+                        "expires_in": {
+                          "type": "integer"
+                        },
+                        "interval": {
+                          "type": "integer"
+                        }
+                      }
+                    },
+                    "error": {
+                      "type": "null"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/Meta"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many starts from this IP",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/device/token": {
+      "post": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Poll a device login; receives the key once",
+        "operationId": "deviceToken",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "device_code": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "device_code"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "pending | slow_down | expired | denied | authorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "pending",
+                            "slow_down",
+                            "expired",
+                            "denied",
+                            "authorized"
+                          ]
+                        },
+                        "api_key": {
+                          "type": "string",
+                          "description": "Only on authorized; shown once"
+                        },
+                        "api_key_id": {
+                          "type": "integer"
+                        },
+                        "scopes": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "organization_id": {
+                          "type": "integer"
+                        },
+                        "user": {
+                          "type": [
+                            "object",
+                            "null"
+                          ]
+                        }
+                      }
+                    },
+                    "error": {
+                      "type": "null"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/Meta"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "apiKey": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "mav_...",
+        "description": "Organization API key."
+      }
+    },
+    "schemas": {
+      "Meta": {
+        "type": "object",
+        "properties": {
+          "request_id": {
+            "type": "string"
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "ErrorEnvelope": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "null"
+          },
+          "error": {
+            "type": "object",
+            "properties": {
+              "message": {
+                "type": "string"
+              },
+              "code": {
+                "type": "string"
+              },
+              "retryable": {
+                "type": "boolean"
+              },
+              "details": {}
+            }
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        }
+      },
+      "Me": {
+        "type": "object",
+        "properties": {
+          "api_key": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "properties": {
+              "id": {
+                "type": "integer"
+              },
+              "name": {
+                "type": "string"
+              },
+              "key_prefix": {
+                "type": "string"
+              },
+              "scopes": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "created_at": {
+                "type": "string"
+              },
+              "last_used_at": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "expires_at": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            }
+          },
+          "scopes": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "read",
+                "write",
+                "ai"
+              ]
+            }
+          },
+          "user": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "email": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "role": {
+                "type": "string"
+              }
+            }
+          },
+          "organization": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "plan": {
+                "type": "string"
+              },
+              "subscription_status": {
+                "type": "string"
+              },
+              "trial_end": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "entitled": {
+                "type": "boolean"
+              }
+            }
+          },
+          "credits": {
+            "$ref": "#/components/schemas/Credits"
+          }
+        }
+      },
+      "Credits": {
+        "type": "object",
+        "properties": {
+          "plan": {
+            "type": "string"
+          },
+          "subscription_status": {
+            "type": "string"
+          },
+          "allowance": {
+            "type": "integer"
+          },
+          "bonus": {
+            "type": "integer"
+          },
+          "used": {
+            "type": "integer"
+          },
+          "remaining": {
+            "type": "integer"
+          }
+        }
+      },
+      "Workspace": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "default_aspect_ratio": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "default_style": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "default_character_id": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "created_at": {
+            "type": "string"
+          }
+        }
+      },
+      "Tools": {
+        "type": "object",
+        "properties": {
+          "tools": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "label": {
+                  "type": "string"
+                },
+                "title": {
+                  "type": "string"
+                },
+                "description": {
+                  "type": "string"
+                },
+                "fields": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "name": {
+                        "type": "string"
+                      },
+                      "label": {
+                        "type": "string"
+                      },
+                      "hint": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "required": {
+                        "type": "boolean"
+                      },
+                      "multiline": {
+                        "type": "boolean"
+                      },
+                      "max_length": {
+                        "type": [
+                          "integer",
+                          "null"
+                        ]
+                      },
+                      "example": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                },
+                "defaults": {
+                  "type": "object",
+                  "properties": {
+                    "duration_seconds": {
+                      "type": "integer"
+                    },
+                    "durations": {
+                      "type": "array",
+                      "items": {
+                        "type": "integer"
+                      }
+                    },
+                    "aspect_ratio": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "VideoScript": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string"
+          },
+          "hook": {
+            "type": "string"
+          },
+          "visual_thread": {
+            "type": "string"
+          },
+          "total_duration_seconds": {
+            "type": "number"
+          },
+          "hashtags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "scenes": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "scene_number": {
+                  "type": "integer"
+                },
+                "narration": {
+                  "type": "string"
+                },
+                "visual_description": {
+                  "type": "string"
+                },
+                "duration_seconds": {
+                  "type": "number"
+                },
+                "scene_type": {
+                  "type": "string",
+                  "enum": [
+                    "character",
+                    "scene"
+                  ]
+                },
+                "image_prompt": {
+                  "type": "string"
+                },
+                "video_prompt": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "scene_number",
+                "narration",
+                "visual_description",
+                "duration_seconds"
+              ]
+            }
+          }
+        },
+        "required": [
+          "title",
+          "hook",
+          "scenes",
+          "total_duration_seconds"
+        ]
+      },
+      "CreateVideo": {
+        "type": "object",
+        "properties": {
+          "tool": {
+            "type": "string",
+            "description": "Path A: a tool id from GET /tools; we write the script"
+          },
+          "fields": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "duration_seconds": {
+            "type": "integer"
+          },
+          "script": {
+            "type": "object",
+            "properties": {
+              "title": {
+                "type": "string"
+              },
+              "hook": {
+                "type": "string"
+              },
+              "visual_thread": {
+                "type": "string"
+              },
+              "total_duration_seconds": {
+                "type": "number"
+              },
+              "hashtags": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "scenes": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "scene_number": {
+                      "type": "integer"
+                    },
+                    "narration": {
+                      "type": "string"
+                    },
+                    "visual_description": {
+                      "type": "string"
+                    },
+                    "duration_seconds": {
+                      "type": "number"
+                    },
+                    "scene_type": {
+                      "type": "string",
+                      "enum": [
+                        "character",
+                        "scene"
+                      ]
+                    },
+                    "image_prompt": {
+                      "type": "string"
+                    },
+                    "video_prompt": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "scene_number",
+                    "narration",
+                    "visual_description",
+                    "duration_seconds"
+                  ]
+                }
+              }
+            },
+            "required": [
+              "title",
+              "hook",
+              "scenes",
+              "total_duration_seconds"
+            ],
+            "description": "Path B: your own script (from /videos/script, /videos/scriptify, or hand-written)"
+          },
+          "title": {
+            "type": "string"
+          },
+          "topic": {
+            "type": "string"
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "talking-head",
+              "cinematic",
+              "hybrid",
+              "stock-narrated",
+              "smart-mix"
+            ]
+          },
+          "style": {
+            "type": "string",
+            "enum": [
+              "talking-head",
+              "cinematic"
+            ]
+          },
+          "character_id": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "voice_id": {
+            "type": "string"
+          },
+          "music_id": {
+            "type": "string"
+          },
+          "caption_style": {
+            "type": "string"
+          },
+          "aspect_ratio": {
+            "type": "string",
+            "enum": [
+              "9:16",
+              "1:1",
+              "16:9"
+            ]
+          },
+          "language": {
+            "type": "string"
+          },
+          "start_generation": {
+            "type": "boolean"
+          },
+          "idempotency_key": {
+            "type": "string",
+            "description": "Same key = same video. Set it when retrying."
+          },
+          "video_model": {
+            "type": "string",
+            "enum": [
+              "minimax-h3-max",
+              "minimax-h3-max-turbo",
+              "kling-2.6"
+            ],
+            "description": "Video model family. Default minimax-h3-max (fastest, arena top-3). kling-2.6 renders 1080p but takes 2-4 minutes per clip."
+          }
+        },
+        "description": "Send either tool + fields, or script. Not both."
+      },
+      "VideoCreated": {
+        "type": "object",
+        "properties": {
+          "video_id": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "generating",
+              "draft"
+            ]
+          },
+          "title": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "scene_count": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "poll_after_seconds": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "next": {
+            "type": "string"
+          }
+        }
+      },
+      "VideoList": {
+        "type": "object",
+        "properties": {
+          "videos": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "video_id": {
+                  "type": "string"
+                },
+                "title": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "status": {
+                  "type": "string"
+                },
+                "created_at": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "thumbnail_url": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "Video": {
+        "type": "object",
+        "properties": {
+          "video_id": {
+            "type": "string"
+          },
+          "title": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "idea",
+              "draft",
+              "scripting",
+              "generating",
+              "scenes-ready",
+              "composing",
+              "ready",
+              "failed"
+            ],
+            "description": "Terminal: ready, failed. A cancelled render ends as failed."
+          },
+          "progress": {
+            "type": "object",
+            "properties": {
+              "note": {
+                "type": "string"
+              },
+              "scenes_done": {
+                "type": "integer"
+              },
+              "scenes_total": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              }
+            }
+          },
+          "duration_seconds": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "aspect_ratio": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "credits_used": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "download": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "created_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "updated_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "poll_after_seconds": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "null when terminal"
+          }
+        }
+      },
+      "SocialAccount": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "acc_<n>"
+          },
+          "platform": {
+            "type": "string",
+            "enum": [
+              "tiktok",
+              "instagram",
+              "youtube",
+              "facebook",
+              "linkedin",
+              "threads",
+              "pinterest",
+              "bluesky",
+              "telegram",
+              "discord",
+              "x"
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "avatar_url": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "can_post": {
+            "type": "boolean"
+          },
+          "needs_reconnection": {
+            "type": "boolean"
+          },
+          "health_status": {
+            "type": "string"
+          },
+          "connected_at": {
+            "type": "string"
+          }
+        }
+      },
+      "SocialAccounts": {
+        "type": "object",
+        "properties": {
+          "accounts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SocialAccount"
+            }
+          },
+          "account_limit": {
+            "type": "object",
+            "properties": {
+              "limit": {
+                "type": "integer"
+              },
+              "used": {
+                "type": "integer"
+              },
+              "plan": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            }
+          },
+          "platforms": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "enum": [
+                    "tiktok",
+                    "instagram",
+                    "youtube",
+                    "facebook",
+                    "linkedin",
+                    "threads",
+                    "pinterest",
+                    "bluesky",
+                    "telegram",
+                    "discord",
+                    "x"
+                  ]
+                },
+                "label": {
+                  "type": "string"
+                },
+                "available": {
+                  "type": "boolean"
+                },
+                "connect": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "enum": [
+                    "api_link",
+                    "web_app",
+                    null
+                  ],
+                  "description": "api_link: POST /publishing/accounts/connect. web_app: credentials, on the Accounts page only. null: not available"
+                },
+                "note": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              }
+            }
+          },
+          "accounts_page_url": {
+            "type": "string",
+            "format": "uri"
+          }
+        }
+      },
+      "PostDestination": {
+        "type": "object",
+        "properties": {
+          "platform": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "account_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "account_name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "published",
+              "failed"
+            ]
+          },
+          "platform_status": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The publishing service's own value: queued, scheduled, publishing, done, failed, cancelled"
+          },
+          "url": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The live post, once published"
+          },
+          "published_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "next_retry_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "Post": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "pub_..."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "preparing",
+              "importing",
+              "pending",
+              "scheduled",
+              "publishing",
+              "published",
+              "partial",
+              "failed"
+            ],
+            "description": "Terminal: published, partial, failed"
+          },
+          "done": {
+            "type": "boolean"
+          },
+          "video_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "video_title": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "caption": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "account_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "scheduled_for": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why the whole job failed before posting (per-destination errors are on destinations)"
+          },
+          "destinations": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PostDestination"
+            }
+          },
+          "summary": {
+            "type": "object",
+            "properties": {
+              "total": {
+                "type": "integer"
+              },
+              "published": {
+                "type": "integer"
+              },
+              "failed": {
+                "type": "integer"
+              },
+              "pending": {
+                "type": "integer"
+              }
+            }
+          },
+          "created_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "updated_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "poll_after_seconds": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "null when done"
+          }
+        }
+      },
+      "Webhook": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          },
+          "events": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "is_active": {
+            "type": "boolean"
+          },
+          "consecutive_failures": {
+            "type": "integer"
+          },
+          "auto_disabled_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "last_delivery_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "last_success_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "last_failure_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}
