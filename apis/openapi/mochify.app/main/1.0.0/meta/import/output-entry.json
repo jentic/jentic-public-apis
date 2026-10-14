@@ -1,0 +1,1139 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Mochify API",
+    "version": "1.0.0",
+    "description": "Mochify's REST API for zero-retention image compression, PDF page extraction/splitting, and AI image generation. Images and PDFs are streamed into RAM at api.mochify.app, processed, and returned; the original bytes are never written to disk. Authenticate with an x-api-key header (dashboard-issued key) for quota tracking, or omit auth entirely for anonymous, IP-metered use on the free tier.",
+    "contact": {
+      "url": "https://mochify.app/docs"
+    },
+    "x-jentic-source-url": "https://api.mochify.app/openapi.json"
+  },
+  "servers": [
+    {
+      "url": "https://api.mochify.app",
+      "description": "Production"
+    }
+  ],
+  "paths": {
+    "/v1/squish": {
+      "post": {
+        "operationId": "squishImage",
+        "tags": [
+          "Image"
+        ],
+        "summary": "Compress and/or convert an image",
+        "description": "Accepts raw image bytes as the request body (no multipart wrapper) and returns the transformed image, or a ZIP when multiple format/size variants are requested via `types`/`sizes`. Every request is metered against the caller's quota (25/mo free, 300/mo Seller, 1200/mo Pro, anonymous callers get 3 per session/batch, IP-based). File size ceilings: 20 MB on the free tier, 75 MB on paid plans.",
+        "parameters": [
+          {
+            "name": "type",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "jpg",
+                "png",
+                "webp",
+                "avif",
+                "jxl"
+              ],
+              "default": "jpg"
+            },
+            "description": "Output format. Ignored if `types` is also present."
+          },
+          {
+            "name": "width",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "description": "Target width in pixels. 0 or omitted preserves aspect ratio from height, or leaves the original size if both are omitted."
+          },
+          {
+            "name": "height",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "description": "Target height in pixels. Same rules as width."
+          },
+          {
+            "name": "types",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "CSV of output formats for a multi-variant response, e.g. `webp,avif`. Combines with `sizes` to produce the full formats × sizes matrix, returned as a ZIP."
+          },
+          {
+            "name": "sizes",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "CSV of target widths for a multi-variant response, e.g. `500,1200`. See `types`."
+          },
+          {
+            "name": "quality",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 65
+            },
+            "description": "Output quality. Under `smartCompress` it is the quality of the SUBJECT — smartCompress saves bytes by softening the background, not by lowering this. `quality=100` is the best LOSSY setting, not lossless — use `lossless` for that."
+          },
+          {
+            "name": "lossless",
+            "in": "query",
+            "schema": {
+              "type": "boolean",
+              "default": false
+            },
+            "description": "Pixel-exact output. Only `jxl`, `webp` and `png` can honour it; any other format (including a `types` list containing one) is a 400. Overrides `quality`, and disables `smartCompress` softening. A source that is already lossy (JPEG, AVIF, HEIC) is downgraded to the best lossy encode instead of rejected — see the X-Mochify-Lossless response header. A `png` output always reports true: pngsave is pixel-exact regardless. Expect output LARGER than the input: lossless preserves pixels, not file size.",
+            "example": true
+          },
+          {
+            "name": "targetBytes",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1024
+            },
+            "description": "Ceiling on the emitted file size, in bytes. Nothing can predict an encoded size without encoding — libvips has no estimator and no saver takes a byte target — so this runs a short measured search (typically 1–3 encodes, at most 5) rather than a single guess. A quality guessed up front cannot work: bytes at a fixed quality are a property of the PIXELS, and span ~3x (JPEG) to ~10x (AVIF) between a flat graphic and a noisy photo at the same dimensions. Treated as an upper bound, never a quota to fill — if the requested (or default) quality already fits, that encode is the answer and the quality is left alone. Cannot be combined with `lossless` (400). Minimum 1024. See the X-Mochify-Target response header for whether the ceiling was actually reached.",
+            "example": 1000000
+          },
+          {
+            "name": "targetLever",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "quality",
+                "dimensions",
+                "both"
+              ],
+              "default": "both"
+            },
+            "description": "Which knob `targetBytes` may turn. `quality` re-encodes lower but never resizes (\"under 1MB but do not resize\"); `dimensions` downscales but leaves quality alone (\"1MB, don't change the quality\"); `both` lowers quality first and only then downscales. Requires `targetBytes` (a lever alone is a 400). `quality` is a 400 for `png`, which has no quality control at all — use `dimensions` or `both`. The `dimensions` lever is withheld when an HDR gain map is being carried (`hdr=1` on an Ultra HDR source), because resizing the base would invalidate the map: quality alone is used and the target may report `floor`."
+          },
+          {
+            "name": "smartCompress",
+            "in": "query",
+            "schema": {
+              "type": "boolean",
+              "default": false
+            },
+            "description": "Saliency-guided background softening (ONNX U²-Net-p subject mask): the background is lightly low-passed before the encode so it costs fewer bytes, while the subject is left pixel-identical and encoded at `quality` (or the default). Skipped when there is no clear subject, the subject fills the frame, the background was removed, HDR is being carried, or `lossless` is set — see the X-Mochify-SmartCompress response header."
+          },
+          {
+            "name": "smartCrop",
+            "in": "query",
+            "schema": {
+              "type": "boolean",
+              "default": false
+            },
+            "description": "Saliency/face-anchored crop centred on the subject; requires `width` and `height`. Alias of `crop` — either flag triggers the same behavior."
+          },
+          {
+            "name": "crop",
+            "in": "query",
+            "schema": {
+              "type": "boolean",
+              "default": false
+            },
+            "description": "Alias of `smartCrop`."
+          },
+          {
+            "name": "removeBackground",
+            "in": "query",
+            "schema": {
+              "type": "boolean",
+              "default": false
+            },
+            "description": "AI background removal (ONNX BiRefNet-lite). Available on every plan, including anonymous/Free — not gated to a paid tier. Output retains alpha for PNG/WebP; JPEG flattens to `background` (default white)."
+          },
+          {
+            "name": "generate",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "",
+                "shadow",
+                "background"
+              ]
+            },
+            "description": "AI scene composition after subject isolation: `shadow` adds a drop shadow under the subject; `background` composites a described/generated scene. Empty/omitted skips this step. Distinct from `POST /v1/generate` (text-to-image from scratch)."
+          },
+          {
+            "name": "background",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Flatten/composite background color (used when flattening alpha to JPEG, or as the base under `generate`)."
+          },
+          {
+            "name": "rotate",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "enum": [
+                0,
+                90,
+                180,
+                270
+              ],
+              "default": 0
+            },
+            "description": "Clockwise rotation in degrees."
+          },
+          {
+            "name": "stripExif",
+            "in": "query",
+            "schema": {
+              "type": "boolean",
+              "default": true
+            },
+            "description": "Strip EXIF/metadata (GPS, device identifiers, timestamps). Defaults to true at the API level — pass `false` or `0` to preserve metadata. Note: the mochify.app browser UI does not uniformly default this toggle the same way across its upload components, so surface-level defaults can differ from this API default."
+          },
+          {
+            "name": "optimizeForWeb",
+            "in": "query",
+            "schema": {
+              "type": "boolean",
+              "default": false
+            },
+            "description": "Progressive encoding + 4:2:0 chroma subsampling for the smallest browser-delivered file."
+          },
+          {
+            "name": "brightness",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": -100,
+              "maximum": 100,
+              "default": 0
+            },
+            "description": "Exposure adjustment."
+          },
+          {
+            "name": "clarity",
+            "in": "query",
+            "schema": {
+              "type": "boolean",
+              "default": false
+            },
+            "description": "Midtone contrast enhancement."
+          },
+          {
+            "name": "hdr",
+            "in": "query",
+            "schema": {
+              "type": "boolean",
+              "default": false
+            },
+            "description": "Preserve an HDR gain map as Ultra HDR / ISO 21496-1 JPEG. Silently ignored if the source has no HDR gain map."
+          },
+          {
+            "name": "dpi",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 8,
+              "maximum": 4800,
+              "default": 96
+            },
+            "description": "Output DPI metadata."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "image/jpeg": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            },
+            "image/png": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            },
+            "image/webp": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            },
+            "image/avif": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            },
+            "image/heic": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            },
+            "application/octet-stream": {
+              "schema": {
+                "type": "string",
+                "format": "binary",
+                "description": "Raw bytes; format is detected from magic bytes, not the Content-Type header."
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Transformed image (single variant) or a ZIP archive (multi-variant, when `types`/`sizes` resolve to more than one output).",
+            "headers": {
+              "X-Latency-Ms": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Server-side processing time in milliseconds."
+              },
+              "X-Mochify-Optimized": {
+                "schema": {
+                  "type": "boolean"
+                },
+                "description": "Whether the output is smaller than the input."
+              },
+              "X-Mochify-Saliency": {
+                "schema": {
+                  "type": "number"
+                },
+                "description": "Subject coverage 0.000–1.000 (mean of the saliency mask). Present only when smartCompress was used."
+              },
+              "X-Mochify-SmartCompress": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "background",
+                    "skipped:no-subject",
+                    "skipped:subject-fills-frame",
+                    "skipped:background-removed",
+                    "skipped:hdr",
+                    "skipped:lossless"
+                  ]
+                },
+                "description": "Present only when smartCompress was used. Describes the emitted bytes: `background` = the background was softened; `skipped:<reason>` = the pixels were left alone and why. One value for a multi-variant ZIP."
+              },
+              "X-Mochify-Quality": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "The quality the returned bytes were encoded at. Present when `smartCompress` was used, or when a `targetBytes` search did — in which case it is the value the search settled on, not the one that was requested."
+              },
+              "X-Mochify-BgRemoved": {
+                "schema": {
+                  "type": "boolean"
+                },
+                "description": "Present and true only when background removal ran."
+              },
+              "X-Mochify-HDR": {
+                "schema": {
+                  "type": "boolean"
+                },
+                "description": "Present when the output format supports HDR gain maps; true if one was carried through."
+              },
+              "X-Mochify-Lossless": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "true",
+                    "downgraded"
+                  ]
+                },
+                "description": "Present only when `lossless` was requested. `true` = the bytes are pixel-exact. `downgraded` = they are the best lossy encode instead, because the source was already lossy or because HDR reconstruction replaced the submitted pixels."
+              },
+              "X-Mochify-Target": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "hit",
+                    "floor"
+                  ]
+                },
+                "description": "Present only when `targetBytes` was set. `hit` = the returned bytes are at or under the ceiling. `floor` = the levers ran out first and this is the smallest output that could honestly be produced — still the best available file, not an error. For a multi-variant ZIP, `hit` means every entry fits."
+              },
+              "X-Mochify-Target-Encodes": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Encodes the target search spent, including the first one the pipeline would have performed anyway. Summed across variants for a ZIP."
+              },
+              "X-Mochify-Target-Scale": {
+                "schema": {
+                  "type": "number"
+                },
+                "description": "Extra downscale the dimensions lever applied, relative to the geometry that was requested (e.g. 0.710). Omitted when the lever did not move, i.e. the output is exactly the size asked for."
+              }
+            },
+            "content": {
+              "image/jpeg": {},
+              "image/png": {},
+              "image/webp": {},
+              "image/avif": {},
+              "image/jxl": {},
+              "application/zip": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary",
+                  "description": "Returned instead of a single image when the request resolves to multiple format/size variants."
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Empty body, or an invalid types/sizes/type/width/height combination.",
+            "content": {
+              "text/plain": {}
+            }
+          },
+          "401": {
+            "description": "x-api-key was present but not resolvable.",
+            "content": {
+              "text/plain": {}
+            }
+          },
+          "413": {
+            "description": "File exceeds the plan's size ceiling (20 MB free, 75 MB paid), or the image's pixel dimensions / megapixels exceed the decompression-bomb ceiling.",
+            "content": {
+              "text/plain": {}
+            }
+          },
+          "415": {
+            "description": "Unrecognized image format (magic-byte check failed).",
+            "content": {
+              "text/plain": {}
+            }
+          },
+          "422": {
+            "description": "Image could not be processed: corrupt or truncated (unreadable header), or dimensions below the minimum. X-Mochify-Reject carries the taxonomy slug (e.g. corrupt-image, image-too-small).",
+            "content": {
+              "text/plain": {}
+            }
+          },
+          "429": {
+            "description": "Monthly quota exhausted.",
+            "content": {
+              "text/plain": {}
+            }
+          },
+          "503": {
+            "description": "Worker pool at capacity; retry after the Retry-After header (1s).",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            },
+            "content": {
+              "text/plain": {}
+            }
+          }
+        }
+      }
+    },
+    "/v1/checkTokens": {
+      "get": {
+        "operationId": "checkTokens",
+        "tags": [
+          "Image"
+        ],
+        "summary": "Check remaining quota",
+        "description": "Read-only — does not consume a token. Works anonymously (IP-based) or with an x-api-key.",
+        "responses": {
+          "200": {
+            "description": "Quota status.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "available": {
+                      "type": "boolean"
+                    },
+                    "remaining": {
+                      "type": "integer",
+                      "description": "Omitted on a cache miss (unseeded bucket, i.e. a caller who hasn't made a request yet)."
+                    },
+                    "quota": {
+                      "type": "integer"
+                    },
+                    "plan": {
+                      "type": "string"
+                    },
+                    "error": {
+                      "type": "string",
+                      "description": "Present only when x-api-key was supplied but invalid (\"invalid_api_key\"); available is then false."
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/pdf": {
+      "post": {
+        "operationId": "processPdf",
+        "tags": [
+          "PDF"
+        ],
+        "summary": "Rasterize, split, or create a PDF",
+        "description": "Operation selected by `op` (default `rasterize`). `rasterize` and `split` consume a PDF body (max 100 MB) and paid-plan-gated; `create` consumes one or more images and emits a PDF.",
+        "parameters": [
+          {
+            "name": "op",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "rasterize",
+                "split",
+                "create"
+              ],
+              "default": "rasterize"
+            }
+          },
+          {
+            "name": "type",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "png",
+                "jpg",
+                "jpeg",
+                "webp",
+                "avif",
+                "jxl"
+              ],
+              "default": "png"
+            },
+            "description": "rasterize only: output image format for each rendered page."
+          },
+          {
+            "name": "dpi",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 36,
+              "maximum": 300,
+              "default": 150
+            },
+            "description": "rasterize only. (create uses its own dpi range, 36–600, default 96.)"
+          },
+          {
+            "name": "quality",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 82
+            },
+            "description": "rasterize/create: output quality."
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "fit",
+                "a4",
+                "letter"
+              ],
+              "default": "fit"
+            },
+            "description": "create only: output page size."
+          },
+          {
+            "name": "maxWidth",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 16384,
+              "default": 0
+            },
+            "description": "create only: cap each page's rendered width; 0 = unconstrained."
+          },
+          {
+            "name": "combine",
+            "in": "query",
+            "schema": {
+              "type": "boolean",
+              "default": true
+            },
+            "description": "create only: true (default) combines all input images into one multi-page PDF; false returns one single-page PDF per image, zipped."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/pdf": {
+              "schema": {
+                "type": "string",
+                "format": "binary",
+                "description": "op=rasterize or op=split."
+              }
+            },
+            "application/octet-stream": {
+              "schema": {
+                "type": "string",
+                "format": "binary",
+                "description": "op=create with a single raw image body."
+              }
+            },
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "description": "op=create with several images, each appended as `images`; one PDF page per image in upload order.",
+                "properties": {
+                  "images": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "format": "binary"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "rasterize/split: a ZIP of images or single-page PDFs. create: a single application/pdf, or a ZIP if combine=false.",
+            "headers": {
+              "X-Latency-Ms": {
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "X-Mochify-Pages": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "split only: number of pages produced."
+              }
+            },
+            "content": {
+              "application/zip": {},
+              "application/pdf": {}
+            }
+          },
+          "400": {
+            "description": "Empty body, unsupported op/type/page value, or invalid quality/dpi/maxWidth.",
+            "content": {
+              "text/plain": {}
+            }
+          },
+          "413": {
+            "description": "Input over 100 MB, or output over the 300 MB in-RAM ZIP ceiling.",
+            "content": {
+              "text/plain": {}
+            }
+          },
+          "503": {
+            "description": "Worker pool at capacity.",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            },
+            "content": {
+              "text/plain": {}
+            }
+          }
+        }
+      }
+    },
+    "/v1/generate": {
+      "post": {
+        "operationId": "generateImage",
+        "tags": [
+          "Generate"
+        ],
+        "summary": "Generate an image from a text prompt (paid plans only)",
+        "description": "No uploaded image — creates one from scratch via a configured image model (Cloudflare AI Gateway). Requires Seller, Pro, Growth, or Day Pass; costs 10 credits, charged only on success. Returns a ZIP containing the untouched model output plus one file per requested format × size.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "prompt"
+                ],
+                "properties": {
+                  "prompt": {
+                    "type": "string",
+                    "maxLength": 2000
+                  },
+                  "aspect": {
+                    "type": "string",
+                    "enum": [
+                      "1:1",
+                      "3:4",
+                      "4:3",
+                      "9:16",
+                      "16:9"
+                    ],
+                    "default": "1:1"
+                  },
+                  "formats": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "jpg",
+                        "png",
+                        "webp",
+                        "avif",
+                        "jxl"
+                      ]
+                    },
+                    "maxItems": 5,
+                    "description": "Empty/omitted returns the model's native format only."
+                  },
+                  "sizes": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "width": {
+                          "type": "integer"
+                        }
+                      }
+                    },
+                    "maxItems": 6,
+                    "description": "Empty/omitted returns full resolution only."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "ZIP containing original.<ext> plus one <width>w.<ext> per format × size.",
+            "headers": {
+              "X-Latency-Ms": {
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            },
+            "content": {
+              "application/zip": {}
+            }
+          },
+          "400": {
+            "description": "Missing/oversized prompt.",
+            "content": {
+              "text/plain": {}
+            }
+          },
+          "403": {
+            "description": "Caller's plan does not include generation.",
+            "content": {
+              "text/plain": {}
+            }
+          },
+          "429": {
+            "description": "Fewer than 10 credits remaining.",
+            "content": {
+              "text/plain": {}
+            }
+          },
+          "502": {
+            "description": "Upstream image model unreachable, errored, or returned no usable image.",
+            "content": {
+              "text/plain": {}
+            }
+          },
+          "503": {
+            "description": "Generation not configured server-side, or worker pool at capacity.",
+            "content": {
+              "text/plain": {}
+            }
+          }
+        }
+      }
+    },
+    "/v1/upload/init": {
+      "post": {
+        "operationId": "initUpload",
+        "tags": [
+          "Upload"
+        ],
+        "summary": "Start a chunked upload session",
+        "description": "For large files over unreliable connections. The reassembled bytes feed the same pipeline as POST /v1/squish once complete.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "totalBytes"
+                ],
+                "properties": {
+                  "totalBytes": {
+                    "type": "integer",
+                    "description": "Declared final size; enforced against the plan's size ceiling and a 75 MB hard cap."
+                  },
+                  "type": {
+                    "type": "string"
+                  },
+                  "width": {
+                    "type": "string"
+                  },
+                  "height": {
+                    "type": "string"
+                  },
+                  "quality": {
+                    "type": "string"
+                  },
+                  "smartCompress": {
+                    "type": "boolean"
+                  },
+                  "smartCrop": {
+                    "type": "string"
+                  },
+                  "crop": {
+                    "type": "string"
+                  },
+                  "removeBackground": {
+                    "type": "boolean"
+                  },
+                  "stripExif": {
+                    "type": "boolean"
+                  },
+                  "generate": {
+                    "type": "string"
+                  },
+                  "background": {
+                    "type": "string"
+                  },
+                  "optimizeForWeb": {
+                    "type": "boolean"
+                  },
+                  "hdr": {
+                    "type": "boolean"
+                  },
+                  "clarity": {
+                    "type": "boolean"
+                  },
+                  "lossless": {
+                    "type": "boolean"
+                  },
+                  "targetBytes": {
+                    "type": "string",
+                    "description": "Byte ceiling for the output, as a decimal string. Same semantics and same validation as /v1/squish's targetBytes query parameter."
+                  },
+                  "targetLever": {
+                    "type": "string",
+                    "enum": [
+                      "quality",
+                      "dimensions",
+                      "both"
+                    ],
+                    "description": "Which knob targetBytes may turn. Same semantics as /v1/squish's targetLever."
+                  }
+                },
+                "description": "Same processing parameters as /v1/squish's query string, accepted here as JSON fields; applied when the session completes."
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Session created.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "sessionId": {
+                      "type": "string"
+                    },
+                    "chunkSize": {
+                      "type": "integer",
+                      "description": "Advisory chunk size in bytes (5 MB)."
+                    },
+                    "expiresInSeconds": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Missing or invalid totalBytes.",
+            "content": {
+              "application/json": {}
+            }
+          },
+          "413": {
+            "description": "Declared size exceeds the plan's ceiling or the 75 MB session cap.",
+            "content": {
+              "application/json": {}
+            }
+          },
+          "429": {
+            "description": "Quota exhausted.",
+            "content": {
+              "application/json": {}
+            }
+          },
+          "503": {
+            "description": "Too many concurrent upload sessions.",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            },
+            "content": {
+              "application/json": {}
+            }
+          }
+        }
+      }
+    },
+    "/v1/upload/chunk": {
+      "post": {
+        "operationId": "uploadChunk",
+        "tags": [
+          "Upload"
+        ],
+        "summary": "Append a chunk to an upload session",
+        "parameters": [
+          {
+            "name": "session",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "index",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "description": "Chunks must arrive in order starting at 0."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Chunk accepted.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "received": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Missing session/index, or empty chunk.",
+            "content": {
+              "application/json": {}
+            }
+          },
+          "403": {
+            "description": "Session belongs to a different caller.",
+            "content": {
+              "application/json": {}
+            }
+          },
+          "404": {
+            "description": "Session not found or expired.",
+            "content": {
+              "application/json": {}
+            }
+          },
+          "409": {
+            "description": "Chunk received out of order.",
+            "content": {
+              "application/json": {}
+            }
+          },
+          "413": {
+            "description": "Upload exceeds its declared totalBytes.",
+            "content": {
+              "application/json": {}
+            }
+          },
+          "415": {
+            "description": "Chunk 0 failed the magic-byte format check.",
+            "content": {
+              "application/json": {}
+            }
+          }
+        }
+      }
+    },
+    "/v1/upload/complete": {
+      "post": {
+        "operationId": "completeUpload",
+        "tags": [
+          "Upload"
+        ],
+        "summary": "Finish a chunked upload and receive the processed image",
+        "description": "Runs the reassembled bytes through the same pipeline as POST /v1/squish, using the parameters supplied at init. Response shape matches /v1/squish's 200 response.",
+        "parameters": [
+          {
+            "name": "session",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Same as POST /v1/squish's 200 response.",
+            "content": {
+              "image/jpeg": {},
+              "image/png": {},
+              "image/webp": {},
+              "image/avif": {},
+              "image/jxl": {},
+              "application/zip": {}
+            }
+          },
+          "400": {
+            "description": "Missing session parameter.",
+            "content": {
+              "text/plain": {}
+            }
+          }
+        }
+      }
+    },
+    "/health": {
+      "get": {
+        "operationId": "healthCheck",
+        "tags": [
+          "Meta"
+        ],
+        "summary": "Liveness probe",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Process is up and models are loaded.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "ok"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "Dashboard-issued API key sent as `Authorization: Bearer <key>`. This is the header documented on /docs and in the dashboard, and the one to prefer. A signed-in session token is accepted here too. Note: a bearer token that cannot be resolved does not fail the request, it falls through to anonymous IP-based free-tier limits, so a wrong key behaves exactly like sending no key at all. Send the key as x-api-key instead if you want an unusable key reported back to you."
+      },
+      "apiKeyAuth": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "x-api-key",
+        "description": "The same dashboard-issued API key, sent in the x-api-key header. Used by /v1/squish, /v1/pdf, /v1/generate, /v1/checkTokens, /v1/upload/*. Unlike the bearer header, a key that cannot be resolved is reported as invalid rather than silently downgraded. If no credential is sent at all, these endpoints fall back to anonymous IP-based rate limiting on the free tier rather than rejecting the request."
+      }
+    }
+  },
+  "security": [
+    {
+      "bearerAuth": []
+    },
+    {
+      "apiKeyAuth": []
+    },
+    {}
+  ],
+  "tags": [
+    {
+      "name": "Image",
+      "description": "Compress, convert, resize, crop, and transform a single image"
+    },
+    {
+      "name": "PDF",
+      "description": "Rasterize a PDF to images, split it into single-page PDFs, or combine images into a PDF"
+    },
+    {
+      "name": "Generate",
+      "description": "Text-to-image generation (paid plans)"
+    },
+    {
+      "name": "Upload",
+      "description": "Chunked upload for large images on unreliable connections; feeds the same pipeline as /v1/squish"
+    },
+    {
+      "name": "Account",
+      "description": "API key and usage management (requires a signed-in session, not an API key)"
+    },
+    {
+      "name": "Meta",
+      "description": "Service health"
+    }
+  ]
+}
