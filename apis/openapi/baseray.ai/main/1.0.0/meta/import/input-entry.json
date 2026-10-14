@@ -1,0 +1,4900 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "baseray API",
+    "version": "1.0.0",
+    "description": "The baseray API gives programmatic read access to baseray's building catalogue for Romania and Czechia: each building's footprint, height, volume, floor area, floors, category, address and postcode, flood zone and seismic risk, what its record states (such as its construction year), rooftop solar potential, whether solar panels are already on the roof, and the businesses whose registered office is at its address.\n\n## Authentication\nEvery endpoint except this document and the public building pages needs a workspace API key, sent as a bearer token:\n\n    Authorization: Bearer br_live_…\n\nCreate keys in the baseray app under **Settings → API keys**. A key is shown once, when it is created; store it as a secret. A key stops working when it is revoked, when it expires, or when the person who created it leaves the workspace. Cookies, sessions and other tokens are not accepted.\n\n## Rate limits and quotas\nEach key may make 60 requests a minute, and all of a workspace's keys together 5,000 requests a UTC day. Every authenticated response carries `RateLimit-Limit`, `RateLimit-Remaining` and `RateLimit-Reset` (seconds until the minute window resets) for the key, and `X-Daily-Quota-Limit` and `X-Daily-Quota-Remaining` for the workspace. Past a limit the API answers `429` with `rate_limited` or `quota_exceeded` and a `Retry-After` header in seconds.\n\n## Public building pages\nThe endpoints under `/public` serve the facts behind baseray's public pages and need no key. They answer the same to everyone and may be cached as their `Cache-Control` says. Each client address may make 120 requests a minute; past that they answer `429` with a `Retry-After` header. Their field names are camelCase, every fact is its value or `null` (unknown) with `estimate` saying whether it is modelled, and their errors are `{\"error\": \"not_found\"}`, `{\"error\": \"invalid_parameter\", \"message\": \"...\"}`, `{\"error\": \"rate_limited\"}` or `{\"error\": \"unavailable\"}`.\n\n## Errors\nEvery non-2xx response outside `/public` has the same body: `{\"error\": {\"code\": \"...\", \"message\": \"...\", \"parameter\": \"...\"}}`. `code` is stable and machine-readable; `message` is for people; `parameter` names the query or path parameter at fault for `invalid_parameter`. Unknown query parameters are refused rather than ignored.\n\n## Pagination\n`GET /buildings` returns one ranked page: `meta.total` counts every match (up to 10,000; `meta.total_is_capped` is true when counting stopped there), and `links.next` is the URL of the next page, or null on the last one. `offset + limit` may not exceed 10,000; to reach further, narrow the area.\n\n## Values\nField names are snake_case (camelCase under `/public`), lengths in metres, areas in m², volumes in m³, dates `YYYY-MM-DD`, timestamps ISO 8601 UTC. A value baseray has no record of is `null`, meaning unknown, never zero. An address is given only as a record states it, and `address_evidence` says whether that is an address record of the building or a listing of a business at it: the road nearest a building no address names is `nearest_road`, never `address`. A figure's `basis` says what it rests on: `measured` (the building itself was measured), `stated` (a record states it for the building) or `estimated` (modelled, not measured). A business registered at an address is never evidence that it owns or occupies the building.\n\n**Credits.** Every building an answer returns costs the workspace 1 credit, once: a building it opened (in the app, the API or an assistant) in the last 365 days is free. A page of results is charged all or nothing; when the workspace has too few credits left this month the request answers `402 insufficient_credits` and returns nothing. `X-Credits-Charged` and `X-Credits-Remaining` say what a request cost and what is left.",
+    "contact": {
+      "name": "baseray",
+      "url": "https://baseray.ai"
+    },
+    "x-jentic-source-url": "https://api.baseray.ai/v1/openapi.json"
+  },
+  "servers": [
+    {
+      "url": "https://api.baseray.ai/v1"
+    }
+  ],
+  "paths": {
+    "/buildings": {
+      "get": {
+        "tags": [
+          "Buildings"
+        ],
+        "operationId": "listBuildings",
+        "summary": "Buildings in an area, ranked",
+        "description": "One ranked page of the buildings inside `bbox` that pass every filter given. Filters of different names combine with AND; the values of one list filter combine with OR.",
+        "parameters": [
+          {
+            "name": "bbox",
+            "in": "query",
+            "required": true,
+            "description": "The area to search: `minLon,minLat,maxLon,maxLat` in WGS84 degrees. Each side may span at most 3 degrees; search a county, city or district.",
+            "schema": {
+              "type": "string",
+              "pattern": "^-?\\d+(\\.\\d+)?,-?\\d+(\\.\\d+)?,-?\\d+(\\.\\d+)?,-?\\d+(\\.\\d+)?$"
+            },
+            "x-group": "Area and paging",
+            "example": "25.55,45.60,25.68,45.70"
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "description": "Ranking, largest first: `volume` (m³), `area` (footprint, m²), `height` (m), `registered_business_turnover` (the largest latest turnover of a business registered at the address, in `registered_business_turnover_currency`, which it requires) or `registered_business_employees` (the largest stated size; a band ranks where it starts, so 10–19 ranks as 10).",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "volume",
+                "area",
+                "height",
+                "registered_business_turnover",
+                "registered_business_employees"
+              ],
+              "default": "volume"
+            },
+            "x-group": "Area and paging"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Buildings per page, 1 to 100.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 25
+            },
+            "x-group": "Area and paging"
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "description": "Buildings to skip, for the next page. `offset + limit` must be at most 10,000; past that, narrow `bbox`.",
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 10000,
+              "default": 0
+            },
+            "x-group": "Area and paging"
+          },
+          {
+            "name": "category",
+            "in": "query",
+            "required": false,
+            "description": "Keep buildings of any of these categories. Repeat the parameter or give a comma list: `category=commercial,industrial`. `ancillary` is an annex or outbuilding.",
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "residential_house",
+                  "apartment_block",
+                  "commercial",
+                  "industrial",
+                  "public",
+                  "agricultural",
+                  "ancillary",
+                  "unknown"
+                ]
+              },
+              "uniqueItems": true
+            },
+            "x-group": "Building",
+            "style": "form",
+            "explode": true
+          },
+          {
+            "name": "building_type",
+            "in": "query",
+            "required": false,
+            "description": "Keep buildings of any of these granular types, combined with `category` by OR: e.g. `office`, `warehouse`, `school`, `apartments`, `garage`. Repeatable or a comma list.",
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "pattern": "^[a-z0-9_]{1,64}$"
+              },
+              "uniqueItems": true
+            },
+            "x-group": "Building",
+            "style": "form",
+            "explode": true
+          },
+          {
+            "name": "roof_shape",
+            "in": "query",
+            "required": false,
+            "description": "Keep buildings with any of these roof shapes. Repeatable or a comma list.",
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "gabled",
+                  "hipped",
+                  "flat",
+                  "pyramidal",
+                  "skillion",
+                  "round",
+                  "mansard",
+                  "half_hipped",
+                  "gambrel",
+                  "dome"
+                ]
+              },
+              "uniqueItems": true
+            },
+            "x-group": "Building",
+            "style": "form",
+            "explode": true
+          },
+          {
+            "name": "min_floors",
+            "in": "query",
+            "required": false,
+            "description": "At least this many floors above ground. Buildings where this value is unknown are left out.",
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 500
+            },
+            "x-group": "Building"
+          },
+          {
+            "name": "max_floors",
+            "in": "query",
+            "required": false,
+            "description": "At most this many floors above ground. Buildings where this value is unknown are left out.",
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 500
+            },
+            "x-group": "Building"
+          },
+          {
+            "name": "min_dwellings",
+            "in": "query",
+            "required": false,
+            "description": "At least this many dwellings, where known. Buildings where this value is unknown are left out.",
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 1000000
+            },
+            "x-group": "Building"
+          },
+          {
+            "name": "max_dwellings",
+            "in": "query",
+            "required": false,
+            "description": "At most this many dwellings, where known. Buildings where this value is unknown are left out.",
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 1000000
+            },
+            "x-group": "Building"
+          },
+          {
+            "name": "min_entrances",
+            "in": "query",
+            "required": false,
+            "description": "At least this many entrances (each listed address of the building counts as one). Buildings where this value is unknown are left out.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1000000
+            },
+            "x-group": "Building"
+          },
+          {
+            "name": "max_entrances",
+            "in": "query",
+            "required": false,
+            "description": "At most this many entrances. Buildings where this value is unknown are left out.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1000000
+            },
+            "x-group": "Building"
+          },
+          {
+            "name": "address_corroboration",
+            "in": "query",
+            "required": false,
+            "description": "Keep buildings whose shown address is graded any of: `corroborated` (an independent record gives the same house number), `single_source` (only one record), `conflicting` (another record gives another number). Buildings shown without a house number match none.",
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "corroborated",
+                  "single_source",
+                  "conflicting"
+                ]
+              },
+              "uniqueItems": true
+            },
+            "x-group": "Building",
+            "style": "form",
+            "explode": true
+          },
+          {
+            "name": "min_area_m2",
+            "in": "query",
+            "required": false,
+            "description": "Minimum ground footprint, in square metres.",
+            "schema": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1000000000.0
+            },
+            "x-group": "Size"
+          },
+          {
+            "name": "max_area_m2",
+            "in": "query",
+            "required": false,
+            "description": "Maximum ground footprint, in square metres.",
+            "schema": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1000000000.0
+            },
+            "x-group": "Size"
+          },
+          {
+            "name": "min_height_m",
+            "in": "query",
+            "required": false,
+            "description": "Minimum height, in metres. Buildings where this value is unknown are left out.",
+            "schema": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1000
+            },
+            "x-group": "Size"
+          },
+          {
+            "name": "max_height_m",
+            "in": "query",
+            "required": false,
+            "description": "Maximum height, in metres. Buildings where this value is unknown are left out.",
+            "schema": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1000
+            },
+            "x-group": "Size"
+          },
+          {
+            "name": "min_volume_m3",
+            "in": "query",
+            "required": false,
+            "description": "Minimum volume, in cubic metres. Buildings where this value is unknown are left out.",
+            "schema": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1000000000.0
+            },
+            "x-group": "Size"
+          },
+          {
+            "name": "max_volume_m3",
+            "in": "query",
+            "required": false,
+            "description": "Maximum volume, in cubic metres. Buildings where this value is unknown are left out.",
+            "schema": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1000000000.0
+            },
+            "x-group": "Size"
+          },
+          {
+            "name": "measured_height_only",
+            "in": "query",
+            "required": false,
+            "description": "Keep only buildings whose volume comes from a measurement of the building itself: a survey, or a surface model measured over its roof. Despite its name this filter reads the volume, not the height, and a volume integrated under a measured roof still has `volume_basis` `estimated`, since its heights, not its solid, were measured.",
+            "schema": {
+              "type": "boolean",
+              "default": false
+            },
+            "x-group": "Size"
+          },
+          {
+            "name": "existing_solar_panels",
+            "in": "query",
+            "required": false,
+            "description": "Keep buildings whose roof photo was checked for solar panels with any of these results. Buildings never checked, or whose photo was too coarse to check, match none. Repeatable or a comma list.",
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "detected",
+                  "none_seen",
+                  "unclear"
+                ]
+              },
+              "uniqueItems": true
+            },
+            "x-group": "Roof and solar",
+            "style": "form",
+            "explode": true
+          },
+          {
+            "name": "has_solar_potential",
+            "in": "query",
+            "required": false,
+            "description": "Keep only buildings whose roof has a solar-potential estimate.",
+            "schema": {
+              "type": "boolean",
+              "default": false
+            },
+            "x-group": "Roof and solar"
+          },
+          {
+            "name": "min_panel_count",
+            "in": "query",
+            "required": false,
+            "description": "At least this many solar panels fit on the roof. Buildings where this value is unknown are left out.",
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 1000000
+            },
+            "x-group": "Roof and solar"
+          },
+          {
+            "name": "max_panel_count",
+            "in": "query",
+            "required": false,
+            "description": "At most this many solar panels fit on the roof. Buildings where this value is unknown are left out.",
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 1000000
+            },
+            "x-group": "Roof and solar"
+          },
+          {
+            "name": "min_capacity_kwp",
+            "in": "query",
+            "required": false,
+            "description": "Minimum rooftop solar capacity, in kWp. Buildings where this value is unknown are left out.",
+            "schema": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1000000000.0
+            },
+            "x-group": "Roof and solar"
+          },
+          {
+            "name": "max_capacity_kwp",
+            "in": "query",
+            "required": false,
+            "description": "Maximum rooftop solar capacity, in kWp. Buildings where this value is unknown are left out.",
+            "schema": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1000000000.0
+            },
+            "x-group": "Roof and solar"
+          },
+          {
+            "name": "min_yearly_energy_kwh",
+            "in": "query",
+            "required": false,
+            "description": "Minimum yearly rooftop solar energy, in kWh. Buildings where this value is unknown are left out.",
+            "schema": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1000000000.0
+            },
+            "x-group": "Roof and solar"
+          },
+          {
+            "name": "max_yearly_energy_kwh",
+            "in": "query",
+            "required": false,
+            "description": "Maximum yearly rooftop solar energy, in kWh. Buildings where this value is unknown are left out.",
+            "schema": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1000000000.0
+            },
+            "x-group": "Roof and solar"
+          },
+          {
+            "name": "min_co2_savings_kg_per_year",
+            "in": "query",
+            "required": false,
+            "description": "Minimum CO₂ a rooftop solar installation would save, in kg a year. Buildings where this value is unknown are left out.",
+            "schema": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1000000000.0
+            },
+            "x-group": "Roof and solar"
+          },
+          {
+            "name": "max_co2_savings_kg_per_year",
+            "in": "query",
+            "required": false,
+            "description": "Maximum CO₂ a rooftop solar installation would save, in kg a year. Buildings where this value is unknown are left out.",
+            "schema": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1000000000.0
+            },
+            "x-group": "Roof and solar"
+          },
+          {
+            "name": "has_3d_model",
+            "in": "query",
+            "required": false,
+            "description": "Keep only buildings with a reconstructed 3D model of their roof.",
+            "schema": {
+              "type": "boolean",
+              "default": false
+            },
+            "x-group": "Roof and solar"
+          },
+          {
+            "name": "has_registered_business",
+            "in": "query",
+            "required": false,
+            "description": "Keep only buildings with at least one active business whose registered office is the building's address. A registered office is never ownership or occupancy.",
+            "schema": {
+              "type": "boolean",
+              "default": false
+            },
+            "x-group": "Registered businesses"
+          },
+          {
+            "name": "registered_business_name",
+            "in": "query",
+            "required": false,
+            "description": "Keep buildings where the name of a business registered at the address contains this text.",
+            "schema": {
+              "type": "string",
+              "minLength": 2,
+              "maxLength": 120
+            },
+            "x-group": "Registered businesses"
+          },
+          {
+            "name": "min_registered_business_turnover",
+            "in": "query",
+            "required": false,
+            "description": "Minimum latest turnover of a business registered at the address, in whole units of `registered_business_turnover_currency` (required with it).",
+            "schema": {
+              "type": "integer"
+            },
+            "x-group": "Registered businesses"
+          },
+          {
+            "name": "max_registered_business_turnover",
+            "in": "query",
+            "required": false,
+            "description": "Maximum latest turnover of a business registered at the address, in whole units of `registered_business_turnover_currency` (required with it).",
+            "schema": {
+              "type": "integer"
+            },
+            "x-group": "Registered businesses"
+          },
+          {
+            "name": "registered_business_turnover_currency",
+            "in": "query",
+            "required": false,
+            "description": "ISO 4217 currency of the turnover bounds and of the turnover sort, e.g. `RON`, `CZK`, `EUR`. Required with a turnover bound or `sort=registered_business_turnover`.",
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Z]{3}$"
+            },
+            "x-group": "Registered businesses",
+            "example": "RON"
+          },
+          {
+            "name": "registered_business_financial_year",
+            "in": "query",
+            "required": false,
+            "description": "Keep buildings whose registered business's latest financial statement is for this year.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1990,
+              "maximum": 2100
+            },
+            "x-group": "Registered businesses"
+          },
+          {
+            "name": "min_registered_business_employees",
+            "in": "query",
+            "required": false,
+            "description": "At least this many employees in one business registered at the address, reading its whole stated size: a band counts only when all of it is at or above the value (10–19 matches 10, not 15). A business whose size is not stated never matches.",
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 1000000
+            },
+            "x-group": "Registered businesses"
+          },
+          {
+            "name": "max_registered_business_employees",
+            "in": "query",
+            "required": false,
+            "description": "At most this many employees in every business registered at the address whose size is stated; an open-ended top band never matches.",
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 1000000
+            },
+            "x-group": "Registered businesses"
+          },
+          {
+            "name": "has_annual_heating_estimate",
+            "in": "query",
+            "required": false,
+            "description": "Keep only buildings with an annual heating-demand estimate for the local climate.",
+            "schema": {
+              "type": "boolean",
+              "default": false
+            },
+            "x-group": "Energy and climate"
+          },
+          {
+            "name": "has_thermal_assessment",
+            "in": "query",
+            "required": false,
+            "description": "Keep only buildings with a building-specific thermal assessment (energy certificate, audit, as-built model or survey).",
+            "schema": {
+              "type": "boolean",
+              "default": false
+            },
+            "x-group": "Energy and climate"
+          },
+          {
+            "name": "has_peak_heat_load",
+            "in": "query",
+            "required": false,
+            "description": "Keep only buildings whose thermal assessment supplies the design temperatures a peak heat load needs.",
+            "schema": {
+              "type": "boolean",
+              "default": false
+            },
+            "x-group": "Energy and climate"
+          },
+          {
+            "name": "has_recent_climate_trend",
+            "in": "query",
+            "required": false,
+            "description": "Keep only buildings with a recent rolling climate average and trend at their location.",
+            "schema": {
+              "type": "boolean",
+              "default": false
+            },
+            "x-group": "Energy and climate"
+          },
+          {
+            "name": "has_recent_temperature_extremes",
+            "in": "query",
+            "required": false,
+            "description": "Keep only buildings with a complete recent temperature-extremes profile at their location.",
+            "schema": {
+              "type": "boolean",
+              "default": false
+            },
+            "x-group": "Energy and climate"
+          },
+          {
+            "name": "has_recent_precipitation",
+            "in": "query",
+            "required": false,
+            "description": "Keep only buildings with a complete recent precipitation profile at their location.",
+            "schema": {
+              "type": "boolean",
+              "default": false
+            },
+            "x-group": "Energy and climate"
+          },
+          {
+            "name": "min_recent_frost_days",
+            "in": "query",
+            "required": false,
+            "description": "At least this many frost days a year, averaged over recent complete years. Buildings where this value is unknown are left out.",
+            "schema": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 366
+            },
+            "x-group": "Energy and climate"
+          },
+          {
+            "name": "max_recent_minimum_daily_temperature_c",
+            "in": "query",
+            "required": false,
+            "description": "The coldest daily minimum of recent complete years is at most this, in °C. Buildings where this value is unknown are left out.",
+            "schema": {
+              "type": "number",
+              "minimum": -100,
+              "maximum": 100
+            },
+            "x-group": "Energy and climate"
+          },
+          {
+            "name": "min_recent_hot_days",
+            "in": "query",
+            "required": false,
+            "description": "At least this many hot days a year, averaged over recent complete years. Buildings where this value is unknown are left out.",
+            "schema": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 366
+            },
+            "x-group": "Energy and climate"
+          },
+          {
+            "name": "min_recent_max_one_day_precipitation_mm",
+            "in": "query",
+            "required": false,
+            "description": "The wettest single day of recent complete years brought at least this much precipitation, in mm. Buildings where this value is unknown are left out.",
+            "schema": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 5000
+            },
+            "x-group": "Energy and climate"
+          },
+          {
+            "name": "flood_zone",
+            "in": "query",
+            "required": false,
+            "description": "Keep buildings whose `flood_zone`, the most frequently flooded zone of an official flood hazard map they lie in, is any of these: zones are named by the return period of their flood, and `100_year_climate_change` is the 1-in-100-year flood under the climate the map projects. Flood maps are served only where their licence allows it, and cover only the areas they were drawn for: a building whose zone is unknown matches none, so an empty result is not evidence of low flood risk. Repeatable or a comma list.",
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "5_year",
+                  "10_year",
+                  "20_year",
+                  "100_year",
+                  "100_year_climate_change",
+                  "500_year",
+                  "1000_year"
+                ]
+              },
+              "uniqueItems": true
+            },
+            "x-group": "Natural hazards",
+            "style": "form",
+            "explode": true
+          },
+          {
+            "name": "seismic_risk_class",
+            "in": "query",
+            "required": false,
+            "description": "Keep buildings an official list of technically assessed buildings gives any of these seismic risk classes: `RsI` (the highest risk) to `RsIV`, the urgency classes `U1` (the most urgent) to `U3` older assessments set, or `consolidated` (strengthened since). Only buildings on such a list, such as Bucharest's, have a class: a building on no list matches none, which says nothing of its risk. Repeatable or a comma list.",
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "RsI",
+                  "RsII",
+                  "RsIII",
+                  "RsIV",
+                  "U1",
+                  "U2",
+                  "U3",
+                  "consolidated"
+                ]
+              },
+              "uniqueItems": true
+            },
+            "x-group": "Natural hazards",
+            "style": "form",
+            "explode": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "headers": {
+              "RateLimit-Limit": {
+                "$ref": "#/components/headers/RateLimit-Limit"
+              },
+              "RateLimit-Remaining": {
+                "$ref": "#/components/headers/RateLimit-Remaining"
+              },
+              "RateLimit-Reset": {
+                "$ref": "#/components/headers/RateLimit-Reset"
+              },
+              "X-Daily-Quota-Limit": {
+                "$ref": "#/components/headers/X-Daily-Quota-Limit"
+              },
+              "X-Daily-Quota-Remaining": {
+                "$ref": "#/components/headers/X-Daily-Quota-Remaining"
+              },
+              "X-Credits-Charged": {
+                "$ref": "#/components/headers/X-Credits-Charged"
+              },
+              "X-Credits-Remaining": {
+                "$ref": "#/components/headers/X-Credits-Remaining"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BuildingPage"
+                },
+                "examples": {
+                  "example": {
+                    "summary": "Bulevardul 15 Noiembrie 78, Brașov, as read from the live app on 25 Sep 2026. The fields added since that reading (`postal_code`, `address_evidence`, `address_corroboration`, `building_type`, `roof_shape`, `floor_area`, the registered-business fields, `solar_potential` and the natural-hazard fields) are shown for illustration only.",
+                    "value": {
+                      "data": [
+                        {
+                          "building_id": "c9eefd1b-8c8d-48fe-8b72-e015374d7720",
+                          "address": "Bulevardul 15 Noiembrie 78",
+                          "nearest_road": null,
+                          "address_evidence": "address_record",
+                          "address_corroboration": "single_source",
+                          "postal_code": null,
+                          "locality": "Brașov",
+                          "country": "RO",
+                          "latitude": 45.64988,
+                          "longitude": 25.61044,
+                          "category": "commercial",
+                          "building_type": "retail",
+                          "roof_shape": "flat",
+                          "footprint_area_m2": 31252.0,
+                          "height": {
+                            "metres": 18.0,
+                            "basis": "estimated"
+                          },
+                          "volume_m3": 562531.0,
+                          "volume_basis": "estimated",
+                          "floor_area": {
+                            "square_metres": 500032.0,
+                            "basis": "estimated",
+                            "scope": "gross_above_ground"
+                          },
+                          "floors": 16,
+                          "existing_solar_panels": {
+                            "status": "none_seen",
+                            "photo_date": "2022-09-08",
+                            "confidence": 0.988
+                          },
+                          "solar_potential": null,
+                          "registered_business_count": 0,
+                          "registered_business_employees": null,
+                          "registered_business_turnover": null,
+                          "flood_zone": null,
+                          "flood_zone_mapped": false,
+                          "seismic_design_acceleration_g": null,
+                          "seismic_risk_class": null,
+                          "seismic_risk_assessment_year": null,
+                          "app_url": "https://app.baseray.ai/?building=c9eefd1b-8c8d-48fe-8b72-e015374d7720"
+                        }
+                      ],
+                      "meta": {
+                        "total": 1,
+                        "total_is_capped": false,
+                        "limit": 25,
+                        "offset": 0,
+                        "sort": "volume"
+                      },
+                      "links": {
+                        "next": null
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidParameter"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthenticated"
+          },
+          "402": {
+            "$ref": "#/components/responses/PaymentRequired"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "503": {
+            "$ref": "#/components/responses/UpstreamUnavailable"
+          }
+        }
+      }
+    },
+    "/buildings/at": {
+      "get": {
+        "tags": [
+          "Buildings"
+        ],
+        "operationId": "findBuildingsAtPoint",
+        "summary": "Buildings at a point",
+        "description": "The buildings whose outline lies within `radius_m` of a point, nearest first.",
+        "parameters": [
+          {
+            "name": "lat",
+            "in": "query",
+            "required": true,
+            "description": "Latitude of the point, WGS84.",
+            "schema": {
+              "type": "number",
+              "minimum": -90,
+              "maximum": 90
+            },
+            "example": 45.64988
+          },
+          {
+            "name": "lon",
+            "in": "query",
+            "required": true,
+            "description": "Longitude of the point, WGS84.",
+            "schema": {
+              "type": "number",
+              "minimum": -180,
+              "maximum": 180
+            },
+            "example": 25.61044
+          },
+          {
+            "name": "radius_m",
+            "in": "query",
+            "required": false,
+            "description": "How far from the point to look, in metres.",
+            "schema": {
+              "type": "number",
+              "minimum": 1,
+              "maximum": 200,
+              "default": 25
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "How many buildings to return, nearest first.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 25,
+              "default": 10
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "headers": {
+              "RateLimit-Limit": {
+                "$ref": "#/components/headers/RateLimit-Limit"
+              },
+              "RateLimit-Remaining": {
+                "$ref": "#/components/headers/RateLimit-Remaining"
+              },
+              "RateLimit-Reset": {
+                "$ref": "#/components/headers/RateLimit-Reset"
+              },
+              "X-Daily-Quota-Limit": {
+                "$ref": "#/components/headers/X-Daily-Quota-Limit"
+              },
+              "X-Daily-Quota-Remaining": {
+                "$ref": "#/components/headers/X-Daily-Quota-Remaining"
+              },
+              "X-Credits-Charged": {
+                "$ref": "#/components/headers/X-Credits-Charged"
+              },
+              "X-Credits-Remaining": {
+                "$ref": "#/components/headers/X-Credits-Remaining"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BuildingList"
+                },
+                "examples": {
+                  "example": {
+                    "summary": "Bulevardul 15 Noiembrie 78, Brașov, as read from the live app on 25 Sep 2026. The fields added since that reading (`postal_code`, `address_evidence`, `address_corroboration`, `building_type`, `roof_shape`, `floor_area`, the registered-business fields, `solar_potential` and the natural-hazard fields) are shown for illustration only.",
+                    "value": {
+                      "data": [
+                        {
+                          "building_id": "c9eefd1b-8c8d-48fe-8b72-e015374d7720",
+                          "address": "Bulevardul 15 Noiembrie 78",
+                          "nearest_road": null,
+                          "address_evidence": "address_record",
+                          "address_corroboration": "single_source",
+                          "postal_code": null,
+                          "locality": "Brașov",
+                          "country": "RO",
+                          "latitude": 45.64988,
+                          "longitude": 25.61044,
+                          "category": "commercial",
+                          "building_type": "retail",
+                          "roof_shape": "flat",
+                          "footprint_area_m2": 31252.0,
+                          "height": {
+                            "metres": 18.0,
+                            "basis": "estimated"
+                          },
+                          "volume_m3": 562531.0,
+                          "volume_basis": "estimated",
+                          "floor_area": {
+                            "square_metres": 500032.0,
+                            "basis": "estimated",
+                            "scope": "gross_above_ground"
+                          },
+                          "floors": 16,
+                          "existing_solar_panels": {
+                            "status": "none_seen",
+                            "photo_date": "2022-09-08",
+                            "confidence": 0.988
+                          },
+                          "solar_potential": null,
+                          "registered_business_count": 0,
+                          "registered_business_employees": null,
+                          "registered_business_turnover": null,
+                          "flood_zone": null,
+                          "flood_zone_mapped": false,
+                          "seismic_design_acceleration_g": null,
+                          "seismic_risk_class": null,
+                          "seismic_risk_assessment_year": null,
+                          "app_url": "https://app.baseray.ai/?building=c9eefd1b-8c8d-48fe-8b72-e015374d7720"
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidParameter"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthenticated"
+          },
+          "402": {
+            "$ref": "#/components/responses/PaymentRequired"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "503": {
+            "$ref": "#/components/responses/UpstreamUnavailable"
+          }
+        }
+      }
+    },
+    "/buildings/{building_id}": {
+      "get": {
+        "tags": [
+          "Buildings"
+        ],
+        "operationId": "getBuilding",
+        "summary": "One building",
+        "description": "One building's record. A building the catalogue no longer holds is still returned with `is_current` false and, where one now stands on its ground, `replaced_by_building_id`.",
+        "parameters": [
+          {
+            "name": "building_id",
+            "in": "path",
+            "required": true,
+            "description": "The building's baseray id, a UUID returned by the other building endpoints.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "example": "c9eefd1b-8c8d-48fe-8b72-e015374d7720"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "headers": {
+              "RateLimit-Limit": {
+                "$ref": "#/components/headers/RateLimit-Limit"
+              },
+              "RateLimit-Remaining": {
+                "$ref": "#/components/headers/RateLimit-Remaining"
+              },
+              "RateLimit-Reset": {
+                "$ref": "#/components/headers/RateLimit-Reset"
+              },
+              "X-Daily-Quota-Limit": {
+                "$ref": "#/components/headers/X-Daily-Quota-Limit"
+              },
+              "X-Daily-Quota-Remaining": {
+                "$ref": "#/components/headers/X-Daily-Quota-Remaining"
+              },
+              "X-Credits-Charged": {
+                "$ref": "#/components/headers/X-Credits-Charged"
+              },
+              "X-Credits-Remaining": {
+                "$ref": "#/components/headers/X-Credits-Remaining"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BuildingDetailEnvelope"
+                },
+                "examples": {
+                  "example": {
+                    "summary": "Bulevardul 15 Noiembrie 78, Brașov, as read from the live app on 25 Sep 2026. The fields added since that reading (`postal_code`, `address_evidence`, `address_corroboration`, `building_type`, `roof_shape`, `floor_area`, the registered-business fields, `solar_potential` and the natural-hazard fields) are shown for illustration only. `dwellings` and `entrances` are shown as null, and `stated_facts` empty, for illustration.",
+                    "value": {
+                      "data": {
+                        "building_id": "c9eefd1b-8c8d-48fe-8b72-e015374d7720",
+                        "address": "Bulevardul 15 Noiembrie 78",
+                        "nearest_road": null,
+                        "address_evidence": "address_record",
+                        "address_corroboration": "single_source",
+                        "postal_code": null,
+                        "locality": "Brașov",
+                        "country": "RO",
+                        "latitude": 45.64988,
+                        "longitude": 25.61044,
+                        "category": "commercial",
+                        "building_type": "retail",
+                        "roof_shape": "flat",
+                        "footprint_area_m2": 31252.0,
+                        "height": {
+                          "metres": 18.0,
+                          "basis": "estimated"
+                        },
+                        "volume_m3": 562531.0,
+                        "volume_basis": "estimated",
+                        "floor_area": {
+                          "square_metres": 500032.0,
+                          "basis": "estimated",
+                          "scope": "gross_above_ground"
+                        },
+                        "floors": 16,
+                        "existing_solar_panels": {
+                          "status": "none_seen",
+                          "photo_date": "2022-09-08",
+                          "confidence": 0.988
+                        },
+                        "solar_potential": null,
+                        "registered_business_count": 0,
+                        "registered_business_employees": null,
+                        "registered_business_turnover": null,
+                        "flood_zone": null,
+                        "flood_zone_mapped": false,
+                        "seismic_design_acceleration_g": null,
+                        "seismic_risk_class": null,
+                        "seismic_risk_assessment_year": null,
+                        "app_url": "https://app.baseray.ai/?building=c9eefd1b-8c8d-48fe-8b72-e015374d7720",
+                        "dwellings": null,
+                        "entrances": null,
+                        "stated_facts": [],
+                        "is_current": true,
+                        "replaced_by_building_id": null
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidParameter"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthenticated"
+          },
+          "402": {
+            "$ref": "#/components/responses/PaymentRequired"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "503": {
+            "$ref": "#/components/responses/UpstreamUnavailable"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/buildings/{building_id}/registered-businesses": {
+      "get": {
+        "tags": [
+          "Registered businesses"
+        ],
+        "operationId": "listBuildingRegisteredBusinesses",
+        "summary": "Businesses registered at a building's address",
+        "description": "The active businesses whose registered office is the building's exact official address, largest first, at most 25; `meta.total` counts them all. A registered office is never ownership or occupancy.",
+        "parameters": [
+          {
+            "name": "building_id",
+            "in": "path",
+            "required": true,
+            "description": "The building's baseray id, a UUID returned by the other building endpoints.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "example": "c9eefd1b-8c8d-48fe-8b72-e015374d7720"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "headers": {
+              "RateLimit-Limit": {
+                "$ref": "#/components/headers/RateLimit-Limit"
+              },
+              "RateLimit-Remaining": {
+                "$ref": "#/components/headers/RateLimit-Remaining"
+              },
+              "RateLimit-Reset": {
+                "$ref": "#/components/headers/RateLimit-Reset"
+              },
+              "X-Daily-Quota-Limit": {
+                "$ref": "#/components/headers/X-Daily-Quota-Limit"
+              },
+              "X-Daily-Quota-Remaining": {
+                "$ref": "#/components/headers/X-Daily-Quota-Remaining"
+              },
+              "X-Credits-Charged": {
+                "$ref": "#/components/headers/X-Credits-Charged"
+              },
+              "X-Credits-Remaining": {
+                "$ref": "#/components/headers/X-Credits-Remaining"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegisteredBusinessList"
+                },
+                "examples": {
+                  "example": {
+                    "summary": "Illustrative placeholder, not a real business.",
+                    "value": {
+                      "data": [
+                        {
+                          "name": "Example Business SRL",
+                          "registration_number": "00000000",
+                          "country": "RO",
+                          "employees": "10–49",
+                          "employees_stated_for": "FY 2024"
+                        }
+                      ],
+                      "meta": {
+                        "total": 1
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidParameter"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthenticated"
+          },
+          "402": {
+            "$ref": "#/components/responses/PaymentRequired"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "503": {
+            "$ref": "#/components/responses/UpstreamUnavailable"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/openapi.json": {
+      "get": {
+        "tags": [
+          "Meta"
+        ],
+        "operationId": "getOpenApiDocument",
+        "summary": "This document",
+        "security": [],
+        "description": "The OpenAPI 3.1 document of this API. Public and cacheable (`Cache-Control: public, max-age=3600`, `ETag`).",
+        "responses": {
+          "200": {
+            "description": "The OpenAPI document.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "304": {
+            "description": "Not modified since the `ETag` given in `If-None-Match`."
+          }
+        }
+      }
+    },
+    "/public/buildings/{building_id}": {
+      "get": {
+        "tags": [
+          "Public building pages"
+        ],
+        "operationId": "getPublicBuilding",
+        "summary": "One building's public page",
+        "security": [],
+        "description": "The public facts of one building that has a public page: in Czechia an addressed building whose register gives its floors, completion date and use; in Romania an addressed building whose register gives at least two of floors, construction year and floor area. Any other building answers 404.",
+        "parameters": [
+          {
+            "name": "building_id",
+            "in": "path",
+            "required": true,
+            "description": "The building's baseray id.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "example": "c9eefd1b-8c8d-48fe-8b72-e015374d7720"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/Public-Cache-Control"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublicBuilding"
+                },
+                "examples": {
+                  "example": {
+                    "value": {
+                      "id": "c9eefd1b-8c8d-48fe-8b72-e015374d7720",
+                      "country": "cz",
+                      "slug": "praha-vinohradska-12",
+                      "address": {
+                        "street": "Vinohradská",
+                        "number": "12",
+                        "locality": "Praha",
+                        "district": "Praha 2",
+                        "county": "Hlavní město Praha",
+                        "postcode": "12000",
+                        "label": "Vinohradská 1200/12, 120 00 Praha 2"
+                      },
+                      "facts": {
+                        "use": {
+                          "value": "residential_multi",
+                          "label": "Bytový dům",
+                          "estimate": false
+                        },
+                        "floors": {
+                          "value": 6,
+                          "estimate": false,
+                          "includesUnderground": false
+                        },
+                        "built": {
+                          "year": null,
+                          "era": "1919–1945",
+                          "estimate": false
+                        },
+                        "footprintArea": {
+                          "value": 412.5,
+                          "unit": "m2",
+                          "estimate": false
+                        },
+                        "floorArea": {
+                          "value": null,
+                          "unit": "m2",
+                          "scope": null,
+                          "estimate": false
+                        },
+                        "height": {
+                          "value": 21.4,
+                          "unit": "m",
+                          "estimate": false
+                        },
+                        "volume": {
+                          "value": 8800,
+                          "unit": "m3",
+                          "estimate": true
+                        },
+                        "roofArea": {
+                          "value": 430,
+                          "unit": "m2",
+                          "estimate": true
+                        },
+                        "roofShape": {
+                          "value": "flat",
+                          "estimate": true
+                        },
+                        "dwellings": {
+                          "value": 24,
+                          "estimate": false
+                        },
+                        "floodZone": null,
+                        "seismicZone": null,
+                        "cadastralRef": {
+                          "value": "1200",
+                          "officialUrl": "https://nahlizenidokn.cuzk.cz/"
+                        }
+                      },
+                      "outline": {
+                        "type": "Polygon",
+                        "coordinates": [
+                          [
+                            [
+                              14.4301,
+                              50.0751
+                            ],
+                            [
+                              14.4305,
+                              50.0751
+                            ],
+                            [
+                              14.4305,
+                              50.0754
+                            ],
+                            [
+                              14.4301,
+                              50.0754
+                            ],
+                            [
+                              14.4301,
+                              50.0751
+                            ]
+                          ]
+                        ]
+                      },
+                      "centroid": [
+                        14.4303,
+                        50.07525
+                      ],
+                      "context": {
+                        "streetBuildings": 38,
+                        "olderThanShareOnStreet": 0.71,
+                        "tallerThanShareInLocality": 0.84
+                      },
+                      "place": {
+                        "country": "cz",
+                        "slug": "praha",
+                        "name": "Praha"
+                      },
+                      "gated": {
+                        "solarChecked": true,
+                        "registeredCompanies": 3
+                      },
+                      "updatedAt": "2026-10-01"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/PublicNotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/PublicRateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/PublicUnavailable"
+          }
+        }
+      }
+    },
+    "/public/buildings/{building_id}/preview.png": {
+      "get": {
+        "tags": [
+          "Public building pages"
+        ],
+        "operationId": "getPublicBuildingPreview",
+        "summary": "One building's preview image",
+        "security": [],
+        "description": "A 1200×630 PNG preview of one building that has a public page, for link previews and social cards. Any other building answers 404, as its page does.",
+        "parameters": [
+          {
+            "name": "building_id",
+            "in": "path",
+            "required": true,
+            "description": "The building's baseray id.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "example": "c9eefd1b-8c8d-48fe-8b72-e015374d7720"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The preview image.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/Public-Cache-Control"
+              }
+            },
+            "content": {
+              "image/png": {
+                "schema": {
+                  "type": "string",
+                  "contentMediaType": "image/png"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/PublicNotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/PublicRateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/PublicUnavailable"
+          }
+        }
+      }
+    },
+    "/public/buildings": {
+      "get": {
+        "tags": [
+          "Public building pages"
+        ],
+        "operationId": "listPublicBuildings",
+        "summary": "Buildings with a public page",
+        "security": [],
+        "description": "A country's buildings that have a public page, in a stable order, for sitemaps. Follow `nextCursor` until it is null.",
+        "parameters": [
+          {
+            "name": "country",
+            "in": "query",
+            "required": true,
+            "description": "`cz` (Czechia) or `ro` (Romania).",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "cz",
+                "ro"
+              ]
+            },
+            "example": "cz"
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "description": "The `nextCursor` of the previous page; omit for the first page.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Buildings per page, at most 50,000.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 50000
+            },
+            "example": 50000
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/Public-Cache-Control"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublicBuildingIndex"
+                },
+                "examples": {
+                  "example": {
+                    "value": {
+                      "items": [
+                        {
+                          "id": "c9eefd1b-8c8d-48fe-8b72-e015374d7720",
+                          "slug": "praha-vinohradska-12",
+                          "updatedAt": "2026-10-01"
+                        }
+                      ],
+                      "nextCursor": "eyJrIjoiYzllZSJ9",
+                      "total": 2210000
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/PublicInvalidParameter"
+          },
+          "429": {
+            "$ref": "#/components/responses/PublicRateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/PublicUnavailable"
+          }
+        }
+      }
+    },
+    "/public/address-search": {
+      "get": {
+        "tags": [
+          "Public building pages"
+        ],
+        "operationId": "searchPublicAddresses",
+        "summary": "Address check",
+        "security": [],
+        "description": "Up to ten addressed buildings matching a text, for the free address check. A building without a public page is returned with `indexable` false.",
+        "parameters": [
+          {
+            "name": "country",
+            "in": "query",
+            "required": true,
+            "description": "`cz` (Czechia) or `ro` (Romania).",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "cz",
+                "ro"
+              ]
+            },
+            "example": "cz"
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": true,
+            "description": "The address text, e.g. `Vinohradská 12`.",
+            "schema": {
+              "type": "string"
+            },
+            "example": "Vinohradská 12"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/Public-Cache-Control"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublicAddressSearchResult"
+                },
+                "examples": {
+                  "example": {
+                    "value": {
+                      "items": [
+                        {
+                          "id": "c9eefd1b-8c8d-48fe-8b72-e015374d7720",
+                          "slug": "praha-vinohradska-12",
+                          "label": "Vinohradská 1200/12, 120 00 Praha 2",
+                          "indexable": true
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/PublicInvalidParameter"
+          },
+          "429": {
+            "$ref": "#/components/responses/PublicRateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/PublicUnavailable"
+          }
+        }
+      }
+    },
+    "/public/places": {
+      "get": {
+        "tags": [
+          "Public building pages"
+        ],
+        "operationId": "listPublicPlaces",
+        "summary": "Places with a statistics page",
+        "security": [],
+        "description": "A country's towns with a statistics page.",
+        "parameters": [
+          {
+            "name": "country",
+            "in": "query",
+            "required": true,
+            "description": "`cz` (Czechia) or `ro` (Romania).",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "cz",
+                "ro"
+              ]
+            },
+            "example": "cz"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/Public-Cache-Control"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublicPlaceList"
+                },
+                "examples": {
+                  "example": {
+                    "value": {
+                      "items": [
+                        {
+                          "slug": "iasi",
+                          "name": "Iași",
+                          "county": "Iași",
+                          "buildings": 61234,
+                          "indexableBuildings": 18000
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/PublicInvalidParameter"
+          },
+          "429": {
+            "$ref": "#/components/responses/PublicRateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/PublicUnavailable"
+          }
+        }
+      }
+    },
+    "/public/places/{country}/{slug}/stats": {
+      "get": {
+        "tags": [
+          "Public building pages"
+        ],
+        "operationId": "getPublicPlaceStatistics",
+        "summary": "A place's building statistics",
+        "security": [],
+        "description": "How many buildings a place has, how old and how tall they are, its tallest buildings and rooftop solar counts.",
+        "parameters": [
+          {
+            "name": "country",
+            "in": "path",
+            "required": true,
+            "description": "`cz` (Czechia) or `ro` (Romania).",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "cz",
+                "ro"
+              ]
+            },
+            "example": "ro"
+          },
+          {
+            "name": "slug",
+            "in": "path",
+            "required": true,
+            "description": "The place's slug, from `/public/places`.",
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z0-9-]{1,120}$"
+            },
+            "example": "iasi"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/Public-Cache-Control"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublicPlaceStatistics"
+                },
+                "examples": {
+                  "example": {
+                    "value": {
+                      "name": "Iași",
+                      "county": "Iași",
+                      "buildings": 61234,
+                      "addressed": 40211,
+                      "built": {
+                        "known": 18000,
+                        "byEra": [
+                          {
+                            "era": "before 1945",
+                            "count": 1200
+                          }
+                        ],
+                        "before1978Share": 0.46
+                      },
+                      "floors": {
+                        "known": 30000,
+                        "histogram": [
+                          {
+                            "floors": "1",
+                            "count": 21000
+                          }
+                        ],
+                        "blocks4plus": 3100
+                      },
+                      "tallest": [
+                        {
+                          "id": "c9eefd1b-8c8d-48fe-8b72-e015374d7720",
+                          "slug": "iasi-palas",
+                          "height": 72.0,
+                          "label": "Strada Palat 1, Iași"
+                        }
+                      ],
+                      "solar": {
+                        "checkedRoofs": 9000,
+                        "withPanels": 1450,
+                        "imageryYears": [
+                          2023,
+                          2024
+                        ]
+                      },
+                      "roofAreaTotalM2": 5400000,
+                      "registeredCompanies": 15400,
+                      "updatedAt": "2026-10-01"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/PublicNotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/PublicRateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/PublicUnavailable"
+          }
+        }
+      }
+    },
+    "/public/directory/{country}/counties": {
+      "get": {
+        "tags": [
+          "Public building pages"
+        ],
+        "operationId": "listPublicDirectoryCounties",
+        "summary": "Counties of the company directory",
+        "security": [],
+        "description": "A country's counties, for the company directory's index pages.",
+        "parameters": [
+          {
+            "name": "country",
+            "in": "path",
+            "required": true,
+            "description": "`cz` (Czechia) or `ro` (Romania).",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "cz",
+                "ro"
+              ]
+            },
+            "example": "ro"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/Public-Cache-Control"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublicDirectoryCountyList"
+                },
+                "examples": {
+                  "example": {
+                    "value": {
+                      "items": [
+                        {
+                          "slug": "cluj",
+                          "name": "Cluj"
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/PublicNotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/PublicRateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/PublicUnavailable"
+          }
+        }
+      }
+    },
+    "/public/directory/{country}/{trade}/{county_slug}": {
+      "get": {
+        "tags": [
+          "Public building pages"
+        ],
+        "operationId": "listPublicDirectoryCompanies",
+        "summary": "Companies of a trade in a county",
+        "security": [],
+        "description": "Active legal entities of one trade with their registered office in a county, from the public company register. Sole traders are not listed. A registered office is not ownership of the building.",
+        "parameters": [
+          {
+            "name": "country",
+            "in": "path",
+            "required": true,
+            "description": "`cz` (Czechia) or `ro` (Romania).",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "cz",
+                "ro"
+              ]
+            },
+            "example": "ro"
+          },
+          {
+            "name": "trade",
+            "in": "path",
+            "required": true,
+            "description": "The trade.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "solar",
+                "roofing",
+                "heat-pumps",
+                "construction",
+                "electrical"
+              ]
+            },
+            "example": "solar"
+          },
+          {
+            "name": "county_slug",
+            "in": "path",
+            "required": true,
+            "description": "The county's slug, from `/public/directory/{country}/counties`.",
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z0-9-]{1,120}$"
+            },
+            "example": "cluj"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/Public-Cache-Control"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublicDirectoryCompanyList"
+                },
+                "examples": {
+                  "example": {
+                    "value": {
+                      "county": "Cluj",
+                      "trade": "solar",
+                      "items": [
+                        {
+                          "name": "Exemplu Solar SRL",
+                          "locality": "Cluj-Napoca",
+                          "founded": 2014,
+                          "employeesBand": "10-49",
+                          "turnoverBand": "1-5M RON",
+                          "panelsNearby": 132
+                        }
+                      ],
+                      "total": 211
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/PublicNotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/PublicRateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/PublicUnavailable"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "apiKey": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "br_live_…",
+        "description": "A workspace API key, created in the baseray app under Settings → API keys. Send it as `Authorization: Bearer br_live_…`."
+      }
+    },
+    "headers": {
+      "RateLimit-Limit": {
+        "description": "Requests this key may make per minute.",
+        "schema": {
+          "type": "integer"
+        },
+        "example": 60
+      },
+      "RateLimit-Remaining": {
+        "description": "Requests this key has left in the current minute.",
+        "schema": {
+          "type": "integer"
+        },
+        "example": 59
+      },
+      "RateLimit-Reset": {
+        "description": "Seconds until the current minute window resets.",
+        "schema": {
+          "type": "integer"
+        },
+        "example": 60
+      },
+      "X-Daily-Quota-Limit": {
+        "description": "Requests the workspace's keys may make per UTC day.",
+        "schema": {
+          "type": "integer"
+        },
+        "example": 5000
+      },
+      "X-Daily-Quota-Remaining": {
+        "description": "Requests the workspace has left today (UTC).",
+        "schema": {
+          "type": "integer"
+        },
+        "example": 4868
+      },
+      "Retry-After": {
+        "description": "Seconds to wait before retrying.",
+        "schema": {
+          "type": "integer"
+        },
+        "example": 30
+      },
+      "Public-Cache-Control": {
+        "description": "How long shared caches may keep the answer: a day (`public, max-age=86400, stale-while-revalidate=604800`); address search an hour (`public, max-age=3600, stale-while-revalidate=86400`); a building's preview image a week (`public, max-age=604800, stale-while-revalidate=604800`). Refusals: an hour for 400 and 404, `no-store` for 429 and 503.",
+        "schema": {
+          "type": "string"
+        }
+      },
+      "X-Credits-Charged": {
+        "description": "Credits this request used: one per building in the answer that the workspace had not opened in the last 365 days. 0 when every building was already open.",
+        "schema": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "X-Credits-Remaining": {
+        "description": "Credits the workspace has left in its current monthly period, after this request.",
+        "schema": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "responses": {
+      "InvalidParameter": {
+        "description": "A parameter is missing, malformed or out of range (`invalid_parameter`).",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            },
+            "examples": {
+              "bbox": {
+                "value": {
+                  "error": {
+                    "code": "invalid_parameter",
+                    "message": "bbox must be minLon,minLat,maxLon,maxLat.",
+                    "parameter": "bbox"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "Unauthenticated": {
+        "description": "No API key, or one that does not work: `missing_api_key`, `invalid_api_key`, `revoked_api_key` or `expired_api_key`.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            },
+            "examples": {
+              "missing": {
+                "value": {
+                  "error": {
+                    "code": "missing_api_key",
+                    "message": "Send a workspace API key in the Authorization header: Bearer br_live_…."
+                  }
+                }
+              },
+              "revoked": {
+                "value": {
+                  "error": {
+                    "code": "revoked_api_key",
+                    "message": "This API key was revoked. Create a new one under Settings → API keys."
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "Forbidden": {
+        "description": "The key may not do this: `insufficient_scope`, or `workspace_access_revoked` when the key's creator no longer belongs to its workspace.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            },
+            "examples": {
+              "workspace": {
+                "value": {
+                  "error": {
+                    "code": "workspace_access_revoked",
+                    "message": "The person who created this API key no longer belongs to its workspace."
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "NotFound": {
+        "description": "No building has this id (`not_found`).",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            },
+            "examples": {
+              "building": {
+                "value": {
+                  "error": {
+                    "code": "not_found",
+                    "message": "No building has this id."
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "TooManyRequests": {
+        "description": "`rate_limited` (the key's per-minute limit) or `quota_exceeded` (the workspace's daily quota).",
+        "headers": {
+          "Retry-After": {
+            "$ref": "#/components/headers/Retry-After"
+          },
+          "RateLimit-Limit": {
+            "$ref": "#/components/headers/RateLimit-Limit"
+          },
+          "RateLimit-Remaining": {
+            "$ref": "#/components/headers/RateLimit-Remaining"
+          },
+          "RateLimit-Reset": {
+            "$ref": "#/components/headers/RateLimit-Reset"
+          },
+          "X-Daily-Quota-Limit": {
+            "$ref": "#/components/headers/X-Daily-Quota-Limit"
+          },
+          "X-Daily-Quota-Remaining": {
+            "$ref": "#/components/headers/X-Daily-Quota-Remaining"
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            },
+            "examples": {
+              "rate": {
+                "value": {
+                  "error": {
+                    "code": "rate_limited",
+                    "message": "This API key made more than 60 requests in a minute; retry after 12 seconds."
+                  }
+                }
+              },
+              "quota": {
+                "value": {
+                  "error": {
+                    "code": "quota_exceeded",
+                    "message": "This workspace has used its daily quota of 5000 requests; it resets at 00:00 UTC."
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "UpstreamUnavailable": {
+        "description": "The building catalogue is unavailable right now (`upstream_unavailable`); retry after `Retry-After` seconds.",
+        "headers": {
+          "Retry-After": {
+            "$ref": "#/components/headers/Retry-After"
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            },
+            "examples": {
+              "upstream": {
+                "value": {
+                  "error": {
+                    "code": "upstream_unavailable",
+                    "message": "The building catalogue is unavailable right now. Retry shortly."
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "PublicInvalidParameter": {
+        "description": "A query parameter is missing or malformed (`invalid_parameter`).",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/PublicError"
+            },
+            "examples": {
+              "example": {
+                "value": {
+                  "error": "invalid_parameter",
+                  "message": "country must be cz or ro."
+                }
+              }
+            }
+          }
+        }
+      },
+      "PublicNotFound": {
+        "description": "No such page (`not_found`).",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/PublicError"
+            },
+            "examples": {
+              "example": {
+                "value": {
+                  "error": "not_found"
+                }
+              }
+            }
+          }
+        }
+      },
+      "PublicRateLimited": {
+        "description": "Too many requests from this address in a minute (`rate_limited`); retry after `Retry-After` seconds.",
+        "headers": {
+          "Retry-After": {
+            "$ref": "#/components/headers/Retry-After"
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/PublicError"
+            },
+            "examples": {
+              "example": {
+                "value": {
+                  "error": "rate_limited"
+                }
+              }
+            }
+          }
+        }
+      },
+      "PublicUnavailable": {
+        "description": "The building catalogue is unavailable right now (`unavailable`); retry after `Retry-After` seconds.",
+        "headers": {
+          "Retry-After": {
+            "$ref": "#/components/headers/Retry-After"
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/PublicError"
+            },
+            "examples": {
+              "example": {
+                "value": {
+                  "error": "unavailable"
+                }
+              }
+            }
+          }
+        }
+      },
+      "PaymentRequired": {
+        "description": "`insufficient_credits`: the answer's buildings need more credits than the workspace has left this month. Nothing was returned or charged.",
+        "headers": {
+          "X-Credits-Charged": {
+            "$ref": "#/components/headers/X-Credits-Charged"
+          },
+          "X-Credits-Remaining": {
+            "$ref": "#/components/headers/X-Credits-Remaining"
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            },
+            "example": {
+              "error": {
+                "code": "insufficient_credits",
+                "message": "This answer has 20 building(s) this workspace has not opened in the last 365 days, and it has 5 credit(s) left until 2026-11-01T00:00:00+00:00. Each building costs 1 credit once, then stays free for 365 days. Upgrade at https://app.baseray.ai/billing."
+              }
+            }
+          }
+        }
+      }
+    },
+    "schemas": {
+      "Height": {
+        "type": "object",
+        "required": [
+          "metres",
+          "basis"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "metres": {
+            "type": "number",
+            "description": "Height in metres.",
+            "example": 18.0
+          },
+          "basis": {
+            "type": "string",
+            "enum": [
+              "measured",
+              "stated",
+              "estimated"
+            ],
+            "description": "`measured` (the building itself was measured), `stated` (a record gives it: an official building catalogue, crowd mapping or the dataset of the building's outline) or `estimated` (modelled)."
+          }
+        }
+      },
+      "FloorArea": {
+        "type": "object",
+        "required": [
+          "square_metres",
+          "basis",
+          "scope"
+        ],
+        "additionalProperties": false,
+        "description": "The building's floor area as best known: the figure a record states for the building where one holds, otherwise an estimate.",
+        "properties": {
+          "square_metres": {
+            "type": "number",
+            "description": "Floor area, in m²."
+          },
+          "basis": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "measured",
+              "stated",
+              "estimated",
+              null
+            ],
+            "description": "`stated` (a record states it for the building) or `estimated` (modelled: the footprint, or a record's built area, times the floors); null when unknown."
+          },
+          "scope": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "gross_whole_building",
+              "net_whole_building",
+              "gross_above_ground",
+              null
+            ],
+            "description": "What the figure counts: `gross_whole_building` (every storey, walls included), `net_whole_building` (the usable area of every storey, walls excluded) or `gross_above_ground` (the footprint times the floors above ground, walls included); null when unknown."
+          }
+        },
+        "example": {
+          "square_metres": 500032.0,
+          "basis": "estimated",
+          "scope": "gross_above_ground"
+        }
+      },
+      "ExistingSolarPanels": {
+        "type": "object",
+        "required": [
+          "status",
+          "photo_date",
+          "confidence"
+        ],
+        "additionalProperties": false,
+        "description": "Whether solar panels are already on the roof, as a dated photo of the roof shows it.",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "detected",
+              "none_seen",
+              "unclear",
+              "not_checked"
+            ],
+            "description": "`detected`, `none_seen`, `unclear`, or `not_checked` (never checked, or the photo was too coarse to check)."
+          },
+          "photo_date": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date",
+            "description": "Date of the photo checked; null when undated or never checked."
+          },
+          "confidence": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 1,
+            "description": "The check's confidence in its result, 0 to 1; null when not checked."
+          }
+        },
+        "example": {
+          "status": "none_seen",
+          "photo_date": "2022-09-08",
+          "confidence": 0.988
+        }
+      },
+      "SolarPotential": {
+        "type": "object",
+        "required": [
+          "max_panel_count",
+          "max_capacity_kwp",
+          "yearly_energy_kwh",
+          "usable_roof_area_m2",
+          "co2_savings_kg_per_year",
+          "basis"
+        ],
+        "additionalProperties": false,
+        "description": "Rooftop solar potential, present only where the roof has been modelled.",
+        "properties": {
+          "max_panel_count": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "Solar panels that fit on the roof."
+          },
+          "max_capacity_kwp": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "description": "Capacity of those panels, in kWp."
+          },
+          "yearly_energy_kwh": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "description": "Energy they would produce in a year, in kWh."
+          },
+          "usable_roof_area_m2": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "description": "Roof area usable for panels, in m²."
+          },
+          "co2_savings_kg_per_year": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "description": "CO₂ the installation would save, in kg a year."
+          },
+          "basis": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "measured",
+              "estimated",
+              null
+            ],
+            "description": "`measured` where the figures come from a surface model measured over the roof itself, `estimated` where they are modelled from the footprint and sunshine; null when not said."
+          }
+        },
+        "example": {
+          "max_panel_count": 315,
+          "max_capacity_kwp": 126.0,
+          "yearly_energy_kwh": 158019.9,
+          "usable_roof_area_m2": 618.5,
+          "co2_savings_kg_per_year": 36976.7,
+          "basis": "measured"
+        }
+      },
+      "StatedFact": {
+        "type": "object",
+        "required": [
+          "fact",
+          "label",
+          "value",
+          "unit",
+          "note"
+        ],
+        "additionalProperties": false,
+        "description": "One thing the building's record states, as the record words it.",
+        "properties": {
+          "fact": {
+            "type": "string",
+            "description": "What the fact is, e.g. `use`, `construction_year`, `completed_by_year` (the year a building stood by, where it is dated only by a period ending then), `floors_above_ground`, `floors_below_ground`, `built_up_area`, `floor_area`, `enclosed_volume`, `dwelling_count`, `unit_count`, `heating` or `cadastral_number`. New kinds of fact may appear; treat an unknown one by its `label`.",
+            "example": "construction_year"
+          },
+          "label": {
+            "type": "string",
+            "description": "The fact's name, for people.",
+            "example": "Construction year"
+          },
+          "value": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            ],
+            "description": "A number (a count, a year, or a quantity in `unit`), the record's wording, or its wordings."
+          },
+          "unit": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The unit of a quantity: `m2` or `m3`; null for counts, years and wordings."
+          },
+          "note": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "How the record defines or qualifies the value; null when it adds nothing."
+          }
+        },
+        "example": {
+          "fact": "construction_year",
+          "label": "Construction year",
+          "value": 1974,
+          "unit": null,
+          "note": null
+        }
+      },
+      "Turnover": {
+        "type": "object",
+        "required": [
+          "amount",
+          "currency",
+          "financial_year"
+        ],
+        "additionalProperties": false,
+        "description": "A turnover from a business's latest financial statement on record.",
+        "properties": {
+          "amount": {
+            "type": "integer",
+            "description": "Turnover, in whole units of `currency`."
+          },
+          "currency": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Z]{3}$",
+            "description": "ISO 4217 currency of the statement."
+          },
+          "financial_year": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "The financial year of the statement."
+          }
+        },
+        "example": {
+          "amount": 1250000,
+          "currency": "RON",
+          "financial_year": 2024
+        }
+      },
+      "BuildingSummary": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "building_id",
+          "address",
+          "nearest_road",
+          "address_evidence",
+          "address_corroboration",
+          "postal_code",
+          "locality",
+          "country",
+          "latitude",
+          "longitude",
+          "category",
+          "building_type",
+          "roof_shape",
+          "footprint_area_m2",
+          "height",
+          "volume_m3",
+          "volume_basis",
+          "floor_area",
+          "floors",
+          "existing_solar_panels",
+          "solar_potential",
+          "registered_business_count",
+          "registered_business_employees",
+          "registered_business_turnover",
+          "flood_zone",
+          "flood_zone_mapped",
+          "seismic_design_acceleration_g",
+          "seismic_risk_class",
+          "seismic_risk_assessment_year",
+          "app_url"
+        ],
+        "properties": {
+          "building_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The building's baseray id."
+          },
+          "address": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The building's address as a record states it (`address_evidence` says which kind): street and house number, a Romanian village's `nr. 350` where the record names no street, or a Czech municipality and number (`Lhota 25`), with the block where one is given. Null when no address of the building is on record; the nearest named road is then `nearest_road`, never this."
+          },
+          "nearest_road": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The named road nearest the building, given only where no address of it is on record (`address` is then null). It helps find the building but is not its address: no house number is known.",
+            "example": "Strada Principală"
+          },
+          "address_evidence": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "address_record",
+              "business_listing",
+              null
+            ],
+            "description": "What kind of record `address` comes from: `address_record` (an address record of the building) or `business_listing` (a listing of a business at the building, not an address record of it). Null when `address` is null or the kind is unknown."
+          },
+          "address_corroboration": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "corroborated",
+              "single_source",
+              "conflicting",
+              null
+            ],
+            "description": "How other records back the house number of `address`, as the `address_corroboration` filter reads it: `corroborated` (an independent record gives the same number), `single_source` (only one record) or `conflicting` (another record gives another number). Null without a house number."
+          },
+          "postal_code": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The official postcode of the building's address; null when none is on record."
+          },
+          "locality": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Town, city or village."
+          },
+          "country": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Z]{2}$",
+            "description": "ISO 3166-1 alpha-2 country code."
+          },
+          "latitude": {
+            "type": "number",
+            "description": "Latitude of the building's centre, WGS84."
+          },
+          "longitude": {
+            "type": "number",
+            "description": "Longitude of the building's centre, WGS84."
+          },
+          "category": {
+            "type": "string",
+            "enum": [
+              "residential_house",
+              "apartment_block",
+              "commercial",
+              "industrial",
+              "public",
+              "agricultural",
+              "ancillary",
+              "unknown"
+            ],
+            "description": "Building category; `ancillary` is an annex or outbuilding."
+          },
+          "building_type": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The building's granular type where a record states one, as the `building_type` filter reads it, e.g. `office`, `warehouse`, `school`, `apartments`; null when none is stated.",
+            "example": "office"
+          },
+          "roof_shape": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The roof's shape, as the `roof_shape` filter reads it, e.g. `gabled`, `hipped`, `flat`; null when unknown.",
+            "example": "flat"
+          },
+          "footprint_area_m2": {
+            "type": "number",
+            "description": "Ground footprint, in m²."
+          },
+          "height": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Height"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Height; null when unknown."
+          },
+          "volume_m3": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "description": "Volume, in m³; null when unknown."
+          },
+          "volume_basis": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "measured",
+              "estimated",
+              null
+            ],
+            "description": "Whether the volume is measured or estimated; null with the volume."
+          },
+          "floor_area": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/FloorArea"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Floor area, with what it rests on and what it counts; null when unknown."
+          },
+          "floors": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "Floors above ground; null when unknown."
+          },
+          "existing_solar_panels": {
+            "$ref": "#/components/schemas/ExistingSolarPanels"
+          },
+          "solar_potential": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/SolarPotential"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Rooftop solar potential; null where the roof has not been modelled."
+          },
+          "registered_business_count": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Active businesses whose registered office is the building's address. Never ownership or occupancy."
+          },
+          "registered_business_employees": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The largest stated size of a business registered at the address, as the `registered_business_employees` sort and filters read it: an exact count (`12`), a band (`10–49`) or an open top band (`1000 or more`); null when none is stated.",
+            "example": "10–49"
+          },
+          "registered_business_turnover": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Turnover"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The largest latest turnover of a business registered at the address, as the `registered_business_turnover` sort and filters read it; null when none is on record."
+          },
+          "flood_zone": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "5_year",
+              "10_year",
+              "20_year",
+              "100_year",
+              "100_year_climate_change",
+              "500_year",
+              "1000_year",
+              null
+            ],
+            "description": "The most frequently flooded zone of an official flood hazard map the building lies in, named by the return period of its flood; `100_year_climate_change` is the 1-in-100-year flood under the climate the map projects. Null means outside every zone only where `flood_zone_mapped` is true; elsewhere the zone is unknown.",
+            "example": "100_year"
+          },
+          "flood_zone_mapped": {
+            "type": "boolean",
+            "description": "True where a served flood hazard map covers the building. Flood maps are served only where their licence allows it; where none covers the building this is false and its flood zone is unknown, never \"no flood risk\"."
+          },
+          "seismic_design_acceleration_g": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "exclusiveMinimum": 0,
+            "description": "The design peak ground acceleration of the building's site, in g, as the national seismic design code maps it (P100-1/2013 in Romania); null when unknown.",
+            "example": 0.3
+          },
+          "seismic_risk_class": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "RsI",
+              "RsII",
+              "RsIII",
+              "RsIV",
+              "U1",
+              "U2",
+              "U3",
+              "consolidated",
+              null
+            ],
+            "description": "The seismic risk class an official list of technically assessed buildings gives the building: `RsI` (the highest risk) to `RsIV`, the urgency classes `U1` (the most urgent) to `U3` older assessments set, or `consolidated` (strengthened since). Null when the building is on no such list, which says nothing of its risk.",
+            "example": "RsI"
+          },
+          "seismic_risk_assessment_year": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "The year of the assessment that set `seismic_risk_class`; null when not stated.",
+            "example": 2016
+          },
+          "app_url": {
+            "type": "string",
+            "format": "uri",
+            "description": "The building in the baseray app."
+          }
+        },
+        "example": {
+          "building_id": "c9eefd1b-8c8d-48fe-8b72-e015374d7720",
+          "address": "Bulevardul 15 Noiembrie 78",
+          "nearest_road": null,
+          "address_evidence": "address_record",
+          "address_corroboration": "single_source",
+          "postal_code": null,
+          "locality": "Brașov",
+          "country": "RO",
+          "latitude": 45.64988,
+          "longitude": 25.61044,
+          "category": "commercial",
+          "building_type": "retail",
+          "roof_shape": "flat",
+          "footprint_area_m2": 31252.0,
+          "height": {
+            "metres": 18.0,
+            "basis": "estimated"
+          },
+          "volume_m3": 562531.0,
+          "volume_basis": "estimated",
+          "floor_area": {
+            "square_metres": 500032.0,
+            "basis": "estimated",
+            "scope": "gross_above_ground"
+          },
+          "floors": 16,
+          "existing_solar_panels": {
+            "status": "none_seen",
+            "photo_date": "2022-09-08",
+            "confidence": 0.988
+          },
+          "solar_potential": null,
+          "registered_business_count": 0,
+          "registered_business_employees": null,
+          "registered_business_turnover": null,
+          "flood_zone": null,
+          "flood_zone_mapped": false,
+          "seismic_design_acceleration_g": null,
+          "seismic_risk_class": null,
+          "seismic_risk_assessment_year": null,
+          "app_url": "https://app.baseray.ai/?building=c9eefd1b-8c8d-48fe-8b72-e015374d7720"
+        }
+      },
+      "BuildingDetail": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/BuildingSummary"
+          },
+          {
+            "type": "object",
+            "required": [
+              "dwellings",
+              "entrances",
+              "stated_facts",
+              "is_current",
+              "replaced_by_building_id"
+            ],
+            "properties": {
+              "dwellings": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "description": "Dwellings, where known; null when unknown."
+              },
+              "entrances": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "description": "Entrances: each listed address of the building counts as one; null when none are listed."
+              },
+              "stated_facts": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/StatedFact"
+                },
+                "description": "Everything the building's record states, as it words it; empty when no record is on file. A floor area here is the record's own figure; the building's floor area is `floor_area`."
+              },
+              "is_current": {
+                "type": "boolean",
+                "description": "False once the building is no longer in the catalogue's current release."
+              },
+              "replaced_by_building_id": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "uuid",
+                "description": "The building now standing on a retired building's ground, when there is one."
+              }
+            }
+          }
+        ],
+        "unevaluatedProperties": false,
+        "example": {
+          "building_id": "c9eefd1b-8c8d-48fe-8b72-e015374d7720",
+          "address": "Bulevardul 15 Noiembrie 78",
+          "nearest_road": null,
+          "address_evidence": "address_record",
+          "address_corroboration": "single_source",
+          "postal_code": null,
+          "locality": "Brașov",
+          "country": "RO",
+          "latitude": 45.64988,
+          "longitude": 25.61044,
+          "category": "commercial",
+          "building_type": "retail",
+          "roof_shape": "flat",
+          "footprint_area_m2": 31252.0,
+          "height": {
+            "metres": 18.0,
+            "basis": "estimated"
+          },
+          "volume_m3": 562531.0,
+          "volume_basis": "estimated",
+          "floor_area": {
+            "square_metres": 500032.0,
+            "basis": "estimated",
+            "scope": "gross_above_ground"
+          },
+          "floors": 16,
+          "existing_solar_panels": {
+            "status": "none_seen",
+            "photo_date": "2022-09-08",
+            "confidence": 0.988
+          },
+          "solar_potential": null,
+          "registered_business_count": 0,
+          "registered_business_employees": null,
+          "registered_business_turnover": null,
+          "flood_zone": null,
+          "flood_zone_mapped": false,
+          "seismic_design_acceleration_g": null,
+          "seismic_risk_class": null,
+          "seismic_risk_assessment_year": null,
+          "app_url": "https://app.baseray.ai/?building=c9eefd1b-8c8d-48fe-8b72-e015374d7720",
+          "dwellings": null,
+          "entrances": null,
+          "stated_facts": [],
+          "is_current": true,
+          "replaced_by_building_id": null
+        }
+      },
+      "RegisteredBusiness": {
+        "type": "object",
+        "required": [
+          "name",
+          "registration_number",
+          "country",
+          "employees",
+          "employees_stated_for"
+        ],
+        "additionalProperties": false,
+        "description": "Registered office at this address; never ownership or occupancy.",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "The business's registered name."
+          },
+          "registration_number": {
+            "type": "string",
+            "description": "Its company registration number (a CUI in Romania, an IČO in Czechia)."
+          },
+          "country": {
+            "type": "string",
+            "pattern": "^[A-Z]{2}$",
+            "description": "ISO 3166-1 alpha-2 country of the registration number."
+          },
+          "employees": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Employees as stated: an exact count (`12`), a band (`10–49`) or an open top band (`1000 or more`); null when not stated.",
+            "example": "10–49"
+          },
+          "employees_stated_for": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "When the size was stated: a date, or a financial year such as `FY 2024`.",
+            "example": "FY 2024"
+          }
+        }
+      },
+      "PaginationMeta": {
+        "type": "object",
+        "required": [
+          "total",
+          "total_is_capped",
+          "limit",
+          "offset",
+          "sort"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "total": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Buildings matching, counted up to 10,000."
+          },
+          "total_is_capped": {
+            "type": "boolean",
+            "description": "True when counting stopped at 10,000; narrow the box for an exact total."
+          },
+          "limit": {
+            "type": "integer",
+            "description": "The page size used."
+          },
+          "offset": {
+            "type": "integer",
+            "description": "The offset used."
+          },
+          "sort": {
+            "type": "string",
+            "enum": [
+              "volume",
+              "area",
+              "height",
+              "registered_business_turnover",
+              "registered_business_employees"
+            ],
+            "description": "The ranking used."
+          }
+        }
+      },
+      "Links": {
+        "type": "object",
+        "required": [
+          "next"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "next": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uri",
+            "description": "The next page's URL; null on the last page."
+          }
+        }
+      },
+      "BuildingPage": {
+        "type": "object",
+        "required": [
+          "data",
+          "meta",
+          "links"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BuildingSummary"
+            }
+          },
+          "meta": {
+            "$ref": "#/components/schemas/PaginationMeta"
+          },
+          "links": {
+            "$ref": "#/components/schemas/Links"
+          }
+        }
+      },
+      "BuildingList": {
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BuildingSummary"
+            },
+            "description": "Nearest first."
+          }
+        }
+      },
+      "BuildingDetailEnvelope": {
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/BuildingDetail"
+          }
+        }
+      },
+      "RegisteredBusinessList": {
+        "type": "object",
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RegisteredBusiness"
+            },
+            "maxItems": 25
+          },
+          "meta": {
+            "type": "object",
+            "required": [
+              "total"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "total": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "Every business registered at the address; can exceed the businesses listed."
+              }
+            }
+          }
+        }
+      },
+      "Error": {
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "error": {
+            "type": "object",
+            "required": [
+              "code",
+              "message"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "type": "string",
+                "enum": [
+                  "invalid_parameter",
+                  "missing_api_key",
+                  "invalid_api_key",
+                  "revoked_api_key",
+                  "expired_api_key",
+                  "insufficient_scope",
+                  "workspace_access_revoked",
+                  "not_found",
+                  "rate_limited",
+                  "quota_exceeded",
+                  "insufficient_credits",
+                  "upstream_unavailable"
+                ],
+                "description": "Stable machine-readable reason."
+              },
+              "message": {
+                "type": "string",
+                "description": "What went wrong, for people."
+              },
+              "parameter": {
+                "type": "string",
+                "description": "The parameter at fault, for `invalid_parameter`."
+              }
+            }
+          }
+        },
+        "example": {
+          "error": {
+            "code": "invalid_parameter",
+            "message": "bbox must be minLon,minLat,maxLon,maxLat.",
+            "parameter": "bbox"
+          }
+        }
+      },
+      "PublicError": {
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "error": {
+            "type": "string",
+            "enum": [
+              "not_found",
+              "invalid_parameter",
+              "rate_limited",
+              "unavailable"
+            ],
+            "description": "Stable machine-readable reason."
+          },
+          "message": {
+            "type": "string",
+            "description": "What is wrong with the parameter, for `invalid_parameter`."
+          }
+        },
+        "description": "The body of every non-2xx public building page response.",
+        "example": {
+          "error": "not_found"
+        }
+      },
+      "PublicBuildingAddress": {
+        "type": "object",
+        "required": [
+          "street",
+          "number",
+          "locality",
+          "district",
+          "county",
+          "postcode",
+          "label"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "street": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Street name; null for a village address without streets."
+          },
+          "number": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "House number as the address record writes it."
+          },
+          "locality": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Town or village."
+          },
+          "district": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "City district or sector, where the place has them."
+          },
+          "county": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "County (Romanian județ, Czech kraj)."
+          },
+          "postcode": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Postcode; null when none is on record."
+          },
+          "label": {
+            "type": "string",
+            "description": "The full address on one line, as it is written locally."
+          }
+        },
+        "description": "The building's address, from an address record."
+      },
+      "PublicUseFact": {
+        "type": "object",
+        "required": [
+          "value",
+          "label",
+          "estimate"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "value": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Use code, e.g. `residential_multi`; null when unknown."
+          },
+          "label": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The use in the country's own words, e.g. `Bytový dům`."
+          },
+          "estimate": {
+            "type": "boolean",
+            "description": "True when the value is modelled rather than taken from a record or a measurement."
+          }
+        }
+      },
+      "PublicFloorsFact": {
+        "type": "object",
+        "required": [
+          "value",
+          "estimate",
+          "includesUnderground"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "value": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "Floors; null when unknown."
+          },
+          "estimate": {
+            "type": "boolean",
+            "description": "True when the value is modelled rather than taken from a record or a measurement."
+          },
+          "includesUnderground": {
+            "type": "boolean",
+            "description": "True when the count includes floors below ground."
+          }
+        }
+      },
+      "PublicBuiltFact": {
+        "type": "object",
+        "required": [
+          "year",
+          "era",
+          "estimate"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "year": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "Year of completion; null when only the era is known or nothing is."
+          },
+          "era": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The period it was built in, e.g. `1919–1945`, where the record gives a period rather than a year."
+          },
+          "estimate": {
+            "type": "boolean",
+            "description": "True when the value is modelled rather than taken from a record or a measurement."
+          }
+        }
+      },
+      "PublicAreaFact": {
+        "type": "object",
+        "required": [
+          "value",
+          "unit",
+          "estimate"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "value": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "description": "Area in m²; null when unknown."
+          },
+          "unit": {
+            "type": "string",
+            "enum": [
+              "m2"
+            ]
+          },
+          "estimate": {
+            "type": "boolean",
+            "description": "True when the value is modelled rather than taken from a record or a measurement."
+          }
+        }
+      },
+      "PublicFloorAreaFact": {
+        "type": "object",
+        "required": [
+          "value",
+          "unit",
+          "scope",
+          "estimate"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "value": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "description": "Floor area in m²; null when unknown."
+          },
+          "unit": {
+            "type": "string",
+            "enum": [
+              "m2"
+            ]
+          },
+          "scope": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "usable",
+              "gross",
+              null
+            ],
+            "description": "`usable` (the usable floor area) or `gross` (the built floor area); null when unknown."
+          },
+          "estimate": {
+            "type": "boolean",
+            "description": "True when the value is modelled rather than taken from a record or a measurement."
+          }
+        }
+      },
+      "PublicHeightFact": {
+        "type": "object",
+        "required": [
+          "value",
+          "unit",
+          "estimate"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "value": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "description": "Height in metres; null when unknown."
+          },
+          "unit": {
+            "type": "string",
+            "enum": [
+              "m"
+            ]
+          },
+          "estimate": {
+            "type": "boolean",
+            "description": "True when the value is modelled rather than taken from a record or a measurement."
+          }
+        }
+      },
+      "PublicVolumeFact": {
+        "type": "object",
+        "required": [
+          "value",
+          "unit",
+          "estimate"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "value": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "description": "Volume in m³; null when unknown."
+          },
+          "unit": {
+            "type": "string",
+            "enum": [
+              "m3"
+            ]
+          },
+          "estimate": {
+            "type": "boolean",
+            "description": "True when the value is modelled rather than taken from a record or a measurement."
+          }
+        }
+      },
+      "PublicTextFact": {
+        "type": "object",
+        "required": [
+          "value",
+          "estimate"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "value": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The value; null when unknown."
+          },
+          "estimate": {
+            "type": "boolean",
+            "description": "True when the value is modelled rather than taken from a record or a measurement."
+          }
+        }
+      },
+      "PublicCountFact": {
+        "type": "object",
+        "required": [
+          "value",
+          "estimate"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "value": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "The count; null when unknown."
+          },
+          "estimate": {
+            "type": "boolean",
+            "description": "True when the value is modelled rather than taken from a record or a measurement."
+          }
+        }
+      },
+      "PublicFloodZone": {
+        "type": "object",
+        "required": [
+          "value",
+          "estimate"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "value": {
+            "type": "string",
+            "description": "The flood zone the building lies in."
+          },
+          "estimate": {
+            "type": "boolean",
+            "enum": [
+              false
+            ],
+            "description": "Always false: the value is taken from an official map."
+          }
+        }
+      },
+      "PublicSeismicZone": {
+        "type": "object",
+        "required": [
+          "designAccelerationG",
+          "estimate"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "designAccelerationG": {
+            "type": "number",
+            "description": "The design ground acceleration of the building's seismic zone, in g."
+          },
+          "estimate": {
+            "type": "boolean",
+            "enum": [
+              false
+            ],
+            "description": "Always false: the value is taken from an official map."
+          }
+        }
+      },
+      "PublicCadastralReference": {
+        "type": "object",
+        "required": [
+          "value",
+          "officialUrl"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "value": {
+            "type": "string",
+            "description": "The building's number in the national register."
+          },
+          "officialUrl": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The register's own public page for the building, where it has one."
+          }
+        }
+      },
+      "PublicBuildingFacts": {
+        "type": "object",
+        "required": [
+          "use",
+          "floors",
+          "built",
+          "footprintArea",
+          "floorArea",
+          "height",
+          "volume",
+          "roofArea",
+          "roofShape",
+          "dwellings",
+          "floodZone",
+          "seismicZone",
+          "cadastralRef"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "use": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PublicUseFact"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What the building is used for."
+          },
+          "floors": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PublicFloorsFact"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Floors."
+          },
+          "built": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PublicBuiltFact"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When it was built."
+          },
+          "footprintArea": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PublicAreaFact"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Area of the building's footprint."
+          },
+          "floorArea": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PublicFloorAreaFact"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Floor area."
+          },
+          "height": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PublicHeightFact"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Height."
+          },
+          "volume": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PublicVolumeFact"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Volume above ground."
+          },
+          "roofArea": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PublicAreaFact"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Roof area."
+          },
+          "roofShape": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PublicTextFact"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Roof shape, e.g. `flat` or `gabled`."
+          },
+          "dwellings": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PublicCountFact"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Dwellings."
+          },
+          "floodZone": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PublicFloodZone"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The flood zone; null when the building lies in none on record or it is unknown."
+          },
+          "seismicZone": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PublicSeismicZone"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The seismic zone; null where the country has no seismic zoning on record."
+          },
+          "cadastralRef": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PublicCadastralReference"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The building's number in the national register."
+          }
+        },
+        "description": "Each fact is its value or `null` (unknown, never zero), and says whether it is an estimate."
+      },
+      "PublicPolygon": {
+        "type": "object",
+        "required": [
+          "type",
+          "coordinates"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "Polygon"
+            ]
+          },
+          "coordinates": {
+            "type": "array",
+            "description": "GeoJSON rings of `[longitude, latitude]` positions in WGS84; the first ring is the outline, any further ones holes.",
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "array",
+                "items": {
+                  "type": "number"
+                }
+              }
+            }
+          }
+        },
+        "description": "The building's outline as a GeoJSON Polygon."
+      },
+      "PublicBuildingContext": {
+        "type": "object",
+        "required": [
+          "streetBuildings",
+          "olderThanShareOnStreet",
+          "tallerThanShareInLocality"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "streetBuildings": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "Buildings on the same street."
+          },
+          "olderThanShareOnStreet": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "description": "Share (0–1) of the street's buildings with a known age that this building is older than."
+          },
+          "tallerThanShareInLocality": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "description": "Share (0–1) of the locality's buildings with a known height that this building is taller than."
+          }
+        },
+        "description": "How the building compares with its street and locality; null where too little is known."
+      },
+      "PublicPlaceReference": {
+        "type": "object",
+        "required": [
+          "country",
+          "slug",
+          "name"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "country": {
+            "type": "string",
+            "enum": [
+              "cz",
+              "ro"
+            ]
+          },
+          "slug": {
+            "type": "string",
+            "description": "The place's slug, for `/public/places/{country}/{slug}/stats`."
+          },
+          "name": {
+            "type": "string",
+            "description": "The place's name."
+          }
+        }
+      },
+      "PublicGatedCounts": {
+        "type": "object",
+        "required": [
+          "solarChecked",
+          "registeredCompanies"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "solarChecked": {
+            "type": "boolean",
+            "description": "True when the roof has been checked for solar panels; the verdict is shown only after signing in."
+          },
+          "registeredCompanies": {
+            "type": "integer",
+            "description": "Companies with their registered office at the address; who they are is shown only after signing in. A registered office is not ownership."
+          }
+        },
+        "description": "What signing in shows, as counts only."
+      },
+      "PublicBuilding": {
+        "type": "object",
+        "required": [
+          "id",
+          "country",
+          "slug",
+          "address",
+          "facts",
+          "outline",
+          "centroid",
+          "context",
+          "place",
+          "gated",
+          "updatedAt"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The building's baseray id, the same as in the rest of this API."
+          },
+          "country": {
+            "type": "string",
+            "enum": [
+              "cz",
+              "ro"
+            ]
+          },
+          "slug": {
+            "type": "string",
+            "description": "A readable slug for the building's page URL, from its locality and address."
+          },
+          "address": {
+            "$ref": "#/components/schemas/PublicBuildingAddress"
+          },
+          "facts": {
+            "$ref": "#/components/schemas/PublicBuildingFacts"
+          },
+          "outline": {
+            "$ref": "#/components/schemas/PublicPolygon"
+          },
+          "centroid": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            },
+            "description": "`[longitude, latitude]` of the outline's centre, WGS84."
+          },
+          "context": {
+            "$ref": "#/components/schemas/PublicBuildingContext"
+          },
+          "place": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PublicPlaceReference"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The place whose statistics page the building belongs to; null when it belongs to none."
+          },
+          "gated": {
+            "$ref": "#/components/schemas/PublicGatedCounts"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date",
+            "description": "When the building's facts last changed."
+          },
+          "street": {
+            "type": "array",
+            "maxItems": 20,
+            "items": {
+              "$ref": "#/components/schemas/PublicNeighbourBuilding"
+            },
+            "description": "Other buildings with a public page on the same street of the same locality, closest house numbers first; empty without a street."
+          },
+          "nearby": {
+            "type": "array",
+            "maxItems": 20,
+            "items": {
+              "$ref": "#/components/schemas/PublicNeighbourBuilding"
+            },
+            "description": "The closest other buildings with a public page off that street (within about 600 m), nearest first, each with `distanceM`."
+          },
+          "surroundings": {
+            "type": "array",
+            "maxItems": 150,
+            "items": {
+              "$ref": "#/components/schemas/PublicSurroundingOutline"
+            },
+            "description": "Outlines of every building within about 65 m of this one, with or without a public page, nearest first."
+          }
+        },
+        "description": "One building's public facts.",
+        "example": {
+          "id": "c9eefd1b-8c8d-48fe-8b72-e015374d7720",
+          "country": "cz",
+          "slug": "praha-vinohradska-12",
+          "address": {
+            "street": "Vinohradská",
+            "number": "12",
+            "locality": "Praha",
+            "district": "Praha 2",
+            "county": "Hlavní město Praha",
+            "postcode": "12000",
+            "label": "Vinohradská 1200/12, 120 00 Praha 2"
+          },
+          "facts": {
+            "use": {
+              "value": "residential_multi",
+              "label": "Bytový dům",
+              "estimate": false
+            },
+            "floors": {
+              "value": 6,
+              "estimate": false,
+              "includesUnderground": false
+            },
+            "built": {
+              "year": null,
+              "era": "1919–1945",
+              "estimate": false
+            },
+            "footprintArea": {
+              "value": 412.5,
+              "unit": "m2",
+              "estimate": false
+            },
+            "floorArea": {
+              "value": null,
+              "unit": "m2",
+              "scope": null,
+              "estimate": false
+            },
+            "height": {
+              "value": 21.4,
+              "unit": "m",
+              "estimate": false
+            },
+            "volume": {
+              "value": 8800,
+              "unit": "m3",
+              "estimate": true
+            },
+            "roofArea": {
+              "value": 430,
+              "unit": "m2",
+              "estimate": true
+            },
+            "roofShape": {
+              "value": "flat",
+              "estimate": true
+            },
+            "dwellings": {
+              "value": 24,
+              "estimate": false
+            },
+            "floodZone": null,
+            "seismicZone": null,
+            "cadastralRef": {
+              "value": "1200",
+              "officialUrl": "https://nahlizenidokn.cuzk.cz/"
+            }
+          },
+          "outline": {
+            "type": "Polygon",
+            "coordinates": [
+              [
+                [
+                  14.4301,
+                  50.0751
+                ],
+                [
+                  14.4305,
+                  50.0751
+                ],
+                [
+                  14.4305,
+                  50.0754
+                ],
+                [
+                  14.4301,
+                  50.0754
+                ],
+                [
+                  14.4301,
+                  50.0751
+                ]
+              ]
+            ]
+          },
+          "centroid": [
+            14.4303,
+            50.07525
+          ],
+          "context": {
+            "streetBuildings": 38,
+            "olderThanShareOnStreet": 0.71,
+            "tallerThanShareInLocality": 0.84
+          },
+          "place": {
+            "country": "cz",
+            "slug": "praha",
+            "name": "Praha"
+          },
+          "gated": {
+            "solarChecked": true,
+            "registeredCompanies": 3
+          },
+          "updatedAt": "2026-10-01"
+        }
+      },
+      "PublicBuildingIndex": {
+        "type": "object",
+        "required": [
+          "items",
+          "nextCursor",
+          "total"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "id",
+                "slug",
+                "updatedAt"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "slug": {
+                  "type": "string"
+                },
+                "updatedAt": {
+                  "type": "string",
+                  "format": "date"
+                }
+              }
+            }
+          },
+          "nextCursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Pass as `cursor` for the next page; null on the last one."
+          },
+          "total": {
+            "type": "integer",
+            "description": "Buildings with a public page in the country."
+          }
+        },
+        "description": "One page of a country's buildings that have a public page, in a stable order.",
+        "example": {
+          "items": [
+            {
+              "id": "c9eefd1b-8c8d-48fe-8b72-e015374d7720",
+              "slug": "praha-vinohradska-12",
+              "updatedAt": "2026-10-01"
+            }
+          ],
+          "nextCursor": "eyJrIjoiYzllZSJ9",
+          "total": 2210000
+        }
+      },
+      "PublicAddressSearchResult": {
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 10,
+            "items": {
+              "type": "object",
+              "required": [
+                "id",
+                "slug",
+                "label",
+                "indexable"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "slug": {
+                  "type": "string",
+                  "description": "The building's slug; its page exists only when `indexable` is true."
+                },
+                "label": {
+                  "type": "string",
+                  "description": "The address on one line."
+                },
+                "indexable": {
+                  "type": "boolean",
+                  "description": "True when the building has a public page; otherwise its facts are shown only after signing in."
+                }
+              }
+            }
+          }
+        },
+        "description": "Up to ten addressed buildings matching the text.",
+        "example": {
+          "items": [
+            {
+              "id": "c9eefd1b-8c8d-48fe-8b72-e015374d7720",
+              "slug": "praha-vinohradska-12",
+              "label": "Vinohradská 1200/12, 120 00 Praha 2",
+              "indexable": true
+            }
+          ]
+        }
+      },
+      "PublicPlaceList": {
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "slug",
+                "name",
+                "county",
+                "buildings",
+                "indexableBuildings"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "slug": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "county": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "buildings": {
+                  "type": "integer",
+                  "description": "Buildings in the place."
+                },
+                "indexableBuildings": {
+                  "type": "integer",
+                  "description": "Of them, buildings with a public page."
+                }
+              }
+            }
+          }
+        },
+        "description": "Towns of at least 2,000 inhabitants or 500 buildings; in Romania municipalities, towns and Bucharest's sectors.",
+        "example": {
+          "items": [
+            {
+              "slug": "iasi",
+              "name": "Iași",
+              "county": "Iași",
+              "buildings": 61234,
+              "indexableBuildings": 18000
+            }
+          ]
+        }
+      },
+      "PublicPlaceStatistics": {
+        "type": "object",
+        "required": [
+          "name",
+          "county",
+          "buildings",
+          "addressed",
+          "built",
+          "floors",
+          "tallest",
+          "solar",
+          "roofAreaTotalM2",
+          "registeredCompanies",
+          "updatedAt"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "county": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "buildings": {
+            "type": "integer"
+          },
+          "addressed": {
+            "type": "integer",
+            "description": "Buildings with an address from an address record."
+          },
+          "built": {
+            "type": "object",
+            "required": [
+              "known",
+              "byEra",
+              "before1978Share"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "known": {
+                "type": "integer",
+                "description": "Buildings whose construction year or era is known."
+              },
+              "byEra": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "era",
+                    "count"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "era": {
+                      "type": "string"
+                    },
+                    "count": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              },
+              "before1978Share": {
+                "type": [
+                  "number",
+                  "null"
+                ],
+                "description": "Share (0–1) of buildings with a known year built before 1978."
+              }
+            }
+          },
+          "floors": {
+            "type": "object",
+            "required": [
+              "known",
+              "histogram",
+              "blocks4plus"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "known": {
+                "type": "integer",
+                "description": "Buildings whose floors are known."
+              },
+              "histogram": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "floors",
+                    "count"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "floors": {
+                      "type": "string",
+                      "description": "A floor count or a range, e.g. `1` or `10+`."
+                    },
+                    "count": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              },
+              "blocks4plus": {
+                "type": "integer",
+                "description": "Buildings of four or more floors."
+              }
+            }
+          },
+          "tallest": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "id",
+                "slug",
+                "height",
+                "label"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "slug": {
+                  "type": "string"
+                },
+                "height": {
+                  "type": [
+                    "number",
+                    "null"
+                  ],
+                  "description": "Height in metres; null where the building is ranked by its floors because no height is measured."
+                },
+                "label": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "solar": {
+            "oneOf": [
+              {
+                "type": "object",
+                "required": [
+                  "checkedRoofs",
+                  "withPanels",
+                  "imageryYears"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "checkedRoofs": {
+                    "type": "integer",
+                    "description": "Roofs checked for solar panels."
+                  },
+                  "withPanels": {
+                    "type": "integer",
+                    "description": "Of them, roofs with panels."
+                  },
+                  "imageryYears": {
+                    "type": "array",
+                    "items": {
+                      "type": "integer"
+                    },
+                    "description": "Years of the photos the roofs were checked on."
+                  }
+                }
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Rooftop solar counts; null where no roof in the place has been checked."
+          },
+          "roofAreaTotalM2": {
+            "type": "number",
+            "description": "Total roof area in m²."
+          },
+          "registeredCompanies": {
+            "type": "integer",
+            "description": "Companies with their registered office in the place."
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date"
+          }
+        },
+        "description": "One place's building statistics.",
+        "example": {
+          "name": "Iași",
+          "county": "Iași",
+          "buildings": 61234,
+          "addressed": 40211,
+          "built": {
+            "known": 18000,
+            "byEra": [
+              {
+                "era": "before 1945",
+                "count": 1200
+              }
+            ],
+            "before1978Share": 0.46
+          },
+          "floors": {
+            "known": 30000,
+            "histogram": [
+              {
+                "floors": "1",
+                "count": 21000
+              }
+            ],
+            "blocks4plus": 3100
+          },
+          "tallest": [
+            {
+              "id": "c9eefd1b-8c8d-48fe-8b72-e015374d7720",
+              "slug": "iasi-palas",
+              "height": 72.0,
+              "label": "Strada Palat 1, Iași"
+            }
+          ],
+          "solar": {
+            "checkedRoofs": 9000,
+            "withPanels": 1450,
+            "imageryYears": [
+              2023,
+              2024
+            ]
+          },
+          "roofAreaTotalM2": 5400000,
+          "registeredCompanies": 15400,
+          "updatedAt": "2026-10-01"
+        }
+      },
+      "PublicDirectoryCompanyList": {
+        "type": "object",
+        "required": [
+          "county",
+          "trade",
+          "items",
+          "total"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "county": {
+            "type": "string",
+            "description": "The county's name."
+          },
+          "trade": {
+            "type": "string",
+            "enum": [
+              "solar",
+              "roofing",
+              "heat-pumps",
+              "construction",
+              "electrical"
+            ]
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "name",
+                "locality",
+                "founded",
+                "employeesBand",
+                "turnoverBand",
+                "panelsNearby"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "locality": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "The locality of the registered office."
+                },
+                "founded": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "description": "Year the company was founded; null when the register does not give it."
+                },
+                "employeesBand": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "Employees, as a band."
+                },
+                "turnoverBand": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "Turnover, as a band."
+                },
+                "panelsNearby": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "description": "Roofs with solar panels detected within 10 km of the registered office; null when not counted."
+                }
+              }
+            }
+          },
+          "total": {
+            "type": "integer"
+          }
+        },
+        "description": "Active legal entities of one trade registered in a county; sole traders are not listed.",
+        "example": {
+          "county": "Cluj",
+          "trade": "solar",
+          "items": [
+            {
+              "name": "Exemplu Solar SRL",
+              "locality": "Cluj-Napoca",
+              "founded": 2014,
+              "employeesBand": "10-49",
+              "turnoverBand": "1-5M RON",
+              "panelsNearby": 132
+            }
+          ],
+          "total": 211
+        }
+      },
+      "PublicDirectoryCountyList": {
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "slug",
+                "name"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "slug": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "description": "A country's counties, for the company directory.",
+        "example": {
+          "items": [
+            {
+              "slug": "cluj",
+              "name": "Cluj"
+            }
+          ]
+        }
+      },
+      "PublicNeighbourBuilding": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "country",
+          "slug",
+          "label",
+          "number",
+          "use",
+          "floors",
+          "built"
+        ],
+        "description": "Another building with a public page, listed as a link: its own register facts as its page states them.",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "country": {
+            "type": "string",
+            "enum": [
+              "cz",
+              "ro"
+            ]
+          },
+          "slug": {
+            "type": "string",
+            "description": "Not unique: always put the `id` in URLs."
+          },
+          "label": {
+            "type": "string",
+            "description": "Its one-line address, as on its page."
+          },
+          "number": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "use": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The register's own wording of its use, in the local language; null where unknown."
+          },
+          "floors": {
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "value",
+                  "includesUnderground"
+                ],
+                "properties": {
+                  "value": {
+                    "type": "integer"
+                  },
+                  "includesUnderground": {
+                    "type": "boolean"
+                  }
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "built": {
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "year",
+                  "era"
+                ],
+                "properties": {
+                  "year": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  },
+                  "era": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "distanceM": {
+            "type": "number",
+            "description": "Metres between the two outlines; only in `nearby`."
+          }
+        }
+      },
+      "PublicSurroundingOutline": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "outline",
+          "id",
+          "slug",
+          "sameStreet"
+        ],
+        "description": "The outline of a building close by, for drawing where the building stands.",
+        "properties": {
+          "outline": {
+            "$ref": "#/components/schemas/PublicPolygon"
+          },
+          "id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Set only where that building has a public page."
+          },
+          "slug": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "sameStreet": {
+            "type": "boolean",
+            "description": "Its address names the same street in the same locality."
+          }
+        }
+      }
+    }
+  },
+  "security": [
+    {
+      "apiKey": []
+    }
+  ],
+  "tags": [
+    {
+      "name": "Buildings",
+      "description": "Search, look up and read buildings."
+    },
+    {
+      "name": "Registered businesses",
+      "description": "Businesses whose registered office is a building's address. A registered office is never ownership or occupancy."
+    },
+    {
+      "name": "Public building pages",
+      "description": "The facts behind baseray's public building, place and directory pages. No API key; limited per client address; cacheable."
+    },
+    {
+      "name": "Meta",
+      "description": "This document."
+    }
+  ]
+}
