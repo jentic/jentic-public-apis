@@ -1,6 +1,6 @@
 # APIs — D
 
-Browsing 186 APIs starting with **D**.
+Browsing 187 APIs starting with **D**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · **D** · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -58,6 +58,7 @@ Browsing 186 APIs starting with **D**.
 | [deepai.org](../../../../apis/openapi/deepai.org) | [main](../../../../apis/openapi/deepai.org/main) |
 | [deeparteffects.com](../../../../apis/openapi/deeparteffects.com) | [deeparteffects-api](../../../../apis/openapi/deeparteffects.com/deeparteffects-api) |
 | [deepgram.com](../../../../apis/openapi/deepgram.com) | [main](../../../../apis/openapi/deepgram.com/main) |
+| [deepsearch.app](../../../../apis/openapi/deepsearch.app) | [main](../../../../apis/openapi/deepsearch.app/main) |
 | [deepseek.com](../../../../apis/openapi/deepseek.com) | [main](../../../../apis/openapi/deepseek.com/main) |
 | [defastra.com](../../../../apis/openapi/defastra.com) | [main](../../../../apis/openapi/defastra.com/main) |
 | [defguard.net](../../../../apis/openapi/defguard.net) | [main](../../../../apis/openapi/defguard.net/main) |
