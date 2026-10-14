@@ -1,0 +1,4791 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "ACA API",
+    "version": "1.0.0",
+    "summary": "Create contacts, build lists, enroll leads and send messages.",
+    "description": "A small REST surface over the same engine the ACA app runs on.\n\nEvery endpoint is JSON in, JSON out, over HTTPS. The organization is resolved\nfrom your token, so you never pass an organization ID — and a token can only\never touch the organization it was issued for.\n\n## Pagination\n\nList endpoints are keyset-paginated. Each page returns `has_more` and a\n`next_cursor`; pass the cursor back to get the next page and stop when\n`has_more` is false.\n\n```bash\ncurl \"$BASE/v1/contacts?limit=100\" -H \"Authorization: Bearer aca_…\"\n# → { \"data\": [...], \"has_more\": true, \"next_cursor\": \"ZmRiYjYy…\" }\ncurl \"$BASE/v1/contacts?limit=100&cursor=ZmRiYjYy…\" -H \"Authorization: Bearer aca_…\"\n```\n\nThere is no `offset` and no total count, on purpose. These tables run to\nmillions of rows per organization, where a deep OFFSET is a guaranteed\ntimeout and an exact `COUNT(*)` is a full scan. Cursors also stay correct\nwhile rows are being written underneath you, which offsets do not.\n\n## Rate limits\n\n**120 requests per minute per API token**, counted in fixed one-minute\nwindows. With a page size of 100 that is 12,000 rows a minute, which is\ncomfortably more than any integration needs and comfortably less than it\ntakes to starve the connection pool your own dashboard is sharing.\n\nEvery response carries the current state:\n\n| Header | Meaning |\n| --- | --- |\n| `X-RateLimit-Limit` | Requests allowed per window |\n| `X-RateLimit-Remaining` | Requests left in this window |\n| `X-RateLimit-Reset` | ISO-8601 timestamp when the window resets |\n\nExceeding it returns **429** with a `Retry-After` in seconds. Sleep for that\nlong and continue — the counter is per token, so issuing a second token is\nnot a workaround so much as a second bucket you will also fill.\n\n## Custom fields and merge variables\n\nThree different things share the name \"custom fields\". They stack, and the\nnarrower one wins:\n\n| Layer | Where | What it is |\n| --- | --- | --- |\n| **Definitions** | `GET /v1/custom-fields` | Which keys exist, their types and allowed values. Read this first. |\n| **Contact values** | `crm_contacts.custom_fields` | Per-contact values. Set on create or `PATCH /v1/contacts/{id}`. Available as merge variables in every sequence that contact enters. |\n| **Enrollment overrides** | enrollment `custom_data` | Per-lead, per-sequence copy set at enrollment time via `customDataByContactId`. Beats the sequence's own copy, for that lead only. |\n\nContact values are the ordinary case: write `{\"custom_fields\": {\"account_tier\":\n\"pro\"}}` and `{{account_tier}}` resolves in the sequence.\n\nEnrollment overrides are how per-lead AI-written copy is delivered. Pass\n`customDataByContactId` on enrollment with keys `custom_email_N_subject` and\n`custom_email_N_body` (N is 1-indexed per step) to replace\n`{{email_subject_N}}` / `{{email_body_N}}` for that one lead. Read the result\nback on `GET /v1/enrollments` — `custom_data` is the only place to see what a\ngiven lead will actually receive.\n\nNote that `custom_fields` is replaced wholesale on `PATCH`, not merged: send\nthe full object, or you will drop keys.\n\n## Beyond REST\n\nThe full ACA toolbox — far more than the endpoints here — is exposed as a remote\n[Model Context Protocol](https://modelcontextprotocol.io) server at `/v1/mcp`, so\nClaude, Cursor or any MCP-native client can search leads, build lists and write\nsequences directly. See the [MCP setup guide](/mcp).\n\nThe `aca` CLI wraps this same API for scripting:\n\n```bash\nnpm install -g @seguelac/aca-cli\naca login --token aca_YOUR_TOKEN\n```\n\n## Webhooks\n\nACA posts to your endpoint when things happen. There are two ways to say\nwhere:\n\n- **[`/v1/webhooks`](#tag/webhooks/POST/v1/webhooks)** — register as many\n  subscriptions as you need, each with its own URL, event list and signing\n  secret. This is what integrations should use, and what the\n  [n8n node](https://www.npmjs.com/package/n8n-nodes-aca) uses. Up to 20 per\n  organization.\n- **[Settings → Webhooks](/settings?tab=webhooks)** — one URL for the whole\n  organization, managed by hand. Still supported; subscriptions are additive\n  to it, not a replacement.\n\nEvery event uses the same envelope — only `data` varies:\n\n```json\n{\n  \"event\": \"message_received\",\n  \"timestamp\": \"2026-08-08T12:10:00.000Z\",\n  \"data\": { \"...\": \"event-specific\" },\n  \"webhook_id\": \"6b1f0c2a-9d3e-4f58-a71b-2c8d4e5f6a7b\",\n  \"organization_id\": \"afb808d4-0000-0000-0000-000000000000\"\n}\n```\n\nEach delivery carries:\n\n| Header | Value |\n| --- | --- |\n| `Content-Type` | `application/json` |\n| `User-Agent` | `ACA-Webhook/1.0` |\n| `X-Webhook-Event` | The event type, e.g. `message_received` |\n| `X-Webhook-ID` | Delivery ID — deduplicate retries on this |\n| `X-Webhook-Signature` | `sha256=<hex>`, signed with the subscription's secret (or the organization secret for the Settings URL) |\n\nYou can also configure a custom auth header (name and value) if your endpoint\nexpects one — it is sent alongside the above.\n\n### Verifying the signature\n\nThe signature is an HMAC-SHA256 of the **raw request body** using your webhook\nsecret, hex-encoded and prefixed with `sha256=`. Verify against the raw bytes\nbefore parsing — re-serializing the JSON will change the digest and every\nrequest will look forged.\n\n```js\nimport { createHmac, timingSafeEqual } from 'node:crypto'\n\nfunction verify(rawBody, header, secret) {\n  const expected = 'sha256=' + createHmac('sha256', secret).update(rawBody).digest('hex')\n  const a = Buffer.from(header ?? '')\n  const b = Buffer.from(expected)\n  return a.length === b.length && timingSafeEqual(a, b)\n}\n```\n\n### Delivery semantics\n\nReturn any 2xx to acknowledge. Anything else is a failed delivery and is retried\nwith backoff up to your configured retry limit. Retries reuse the same\n`X-Webhook-ID`, so treat handlers as idempotent — **at-least-once, not\nexactly-once**.\n\nOne caution on volume: `contact_updated` fires on every row change, so a bulk\nedit or an enrichment run can produce a very large burst. If you only care about\nmeaningful transitions, subscribe to `stage_changed` and `score_changed` instead.\n\nTo act on an event, post back to\n[`/v1/hooks/n8n`](#tag/webhooks/POST/v1/hooks/n8n) with your normal API\ntoken. (An `x-webhook-secret` plus an explicit `organization_id` also works,\nfor setups already wired that way.)\n",
+    "contact": {
+      "name": "ACA Support",
+      "url": "https://www.automatedclientacquisition.com"
+    },
+    "x-jentic-source-url": "https://www.automatedclientacquisition.com/openapi.yaml"
+  },
+  "servers": [
+    {
+      "url": "https://api.automatedclientacquisition.com",
+      "description": "Production"
+    }
+  ],
+  "paths": {
+    "/v1/contacts": {
+      "get": {
+        "operationId": "listContacts",
+        "tags": [
+          "Contacts"
+        ],
+        "summary": "List contacts",
+        "description": "List contacts in your organization, newest-agnostic and keyset-paginated.\n\nFollow `next_cursor` until `has_more` is false to walk the whole set.\nPagination is stable under concurrent writes, which OFFSET is not.\n\n> **Ordering is by `id`, not by date.** `crm_contacts` is past five million\n> rows and the only organization-scoped index that can serve this is\n> `(organization_id, id)`. Sorting by `created_at` would fall back to a heap\n> scan and time out on large organizations. If you need \"everything changed\n> since X\", ask — that needs an index we haven't added yet.\n\nFilters are restricted to indexed columns for the same reason. Combining\nseveral is fine.\n",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Limit"
+          },
+          {
+            "$ref": "#/components/parameters/Cursor"
+          },
+          {
+            "name": "email",
+            "in": "query",
+            "description": "Exact email match, case-insensitive. The cheapest way to check whether a contact already exists.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "tag",
+            "in": "query",
+            "description": "Contacts carrying this tag.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "company",
+            "in": "query",
+            "description": "Substring match on company name.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "source",
+            "in": "query",
+            "description": "Attribution set at creation, e.g. `n8n`.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "stage_id",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "owner_user_id",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of contacts.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Contact"
+                      }
+                    },
+                    "has_more": {
+                      "type": "boolean",
+                      "description": "Whether another page exists."
+                    },
+                    "next_cursor": {
+                      "type": "string",
+                      "nullable": true,
+                      "description": "Pass as `cursor` to fetch the next page. Null on the last page."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "500": {
+            "$ref": "#/components/responses/ServerError"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteContacts",
+        "tags": [
+          "Contacts"
+        ],
+        "summary": "Delete contacts",
+        "description": "Delete up to 100 contacts by id. Permanent — there is no undo and no\nsoft-delete flag.\n\nThe cap is deliberately far below the create limit: deleting a contact\ncascades to its tag rows, and each of those queues a `tag_removed` webhook.\nA ten-thousand-row delete would queue a ten-thousand-event burst.\n",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "ids"
+                ],
+                "properties": {
+                  "ids": {
+                    "type": "array",
+                    "maxItems": 100,
+                    "items": {
+                      "type": "string",
+                      "format": "uuid"
+                    }
+                  }
+                }
+              },
+              "example": {
+                "ids": [
+                  "3f2a9c1e-7b40-4d8e-9a12-6c5b8e0d1f34"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Deletion processed. `deleted` may be lower than `requested` if some ids were already gone or belong to another organization.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "deleted": {
+                      "type": "integer"
+                    },
+                    "requested": {
+                      "type": "integer"
+                    }
+                  }
+                },
+                "example": {
+                  "success": true,
+                  "deleted": 1,
+                  "requested": 1
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "500": {
+            "$ref": "#/components/responses/ServerError"
+          }
+        }
+      },
+      "post": {
+        "operationId": "createContacts",
+        "tags": [
+          "Contacts"
+        ],
+        "summary": "Create contacts",
+        "description": "Creates CRM contacts in bulk, scoped to your organization. Deduplicates on\nemail by default — both against contacts already in your CRM and within the\nsubmitted batch.\n\nEvery field on a contact is optional, but a contact needs something to be\nnamed by. When `display_name` is omitted it is derived from first + last\nname, then company, then email. A contact with none of those returns `400`,\nand rejects the whole batch rather than writing part of it.\n\n> **Deduplicated contacts are not returned.** Skipped rows are counted in\n> `skipped` but their IDs are absent from `contact_ids`. If you chain straight\n> into list membership, existing contacts silently drop out of the flow — look\n> them up by email instead when re-syncing a source.\n\nContacts without an email are always inserted, dedupe or not. A source with\nblank emails will duplicate on every run.\n",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "contacts"
+                ],
+                "properties": {
+                  "contacts": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 1000,
+                    "description": "Contact objects. A request over 1000 is rejected outright, not truncated.",
+                    "items": {
+                      "$ref": "#/components/schemas/ContactInput"
+                    }
+                  },
+                  "dedupe_on_email": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Skip contacts whose email already exists in the organization."
+                  },
+                  "source": {
+                    "type": "string",
+                    "default": "api",
+                    "description": "Attribution applied to rows without their own `source`.",
+                    "example": "n8n"
+                  },
+                  "log_activity": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Write a `contact_created` activity row per contact."
+                  }
+                }
+              },
+              "examples": {
+                "single": {
+                  "summary": "One contact",
+                  "value": {
+                    "contacts": [
+                      {
+                        "display_name": "Jane Doe",
+                        "first_name": "Jane",
+                        "last_name": "Doe",
+                        "primary_email": "jane@acme.com",
+                        "company": "Acme",
+                        "job_title": "CTO"
+                      }
+                    ],
+                    "source": "my-app"
+                  }
+                },
+                "enriched": {
+                  "summary": "Full contact with tags and custom fields",
+                  "value": {
+                    "contacts": [
+                      {
+                        "first_name": "Jane",
+                        "last_name": "Doe",
+                        "primary_email": "jane@acme.com",
+                        "primary_linkedin_url": "https://linkedin.com/in/janedoe",
+                        "company": "Acme",
+                        "company_website": "acme.com",
+                        "job_title": "CTO",
+                        "city": "Paris",
+                        "country": "France",
+                        "tags": [
+                          "inbound",
+                          "demo-request"
+                        ],
+                        "custom_fields": {
+                          "form": "demo-request",
+                          "utm_source": "linkedin"
+                        }
+                      }
+                    ],
+                    "source": "website-form"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Contacts processed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "created": {
+                      "type": "integer",
+                      "description": "Contacts inserted.",
+                      "example": 1
+                    },
+                    "skipped": {
+                      "type": "integer",
+                      "description": "Contacts skipped as duplicates.",
+                      "example": 0
+                    },
+                    "total_submitted": {
+                      "type": "integer",
+                      "example": 1
+                    },
+                    "contact_ids": {
+                      "type": "array",
+                      "description": "IDs of created contacts only — skipped duplicates are absent.",
+                      "items": {
+                        "type": "string",
+                        "format": "uuid"
+                      }
+                    }
+                  }
+                },
+                "example": {
+                  "success": true,
+                  "created": 1,
+                  "skipped": 0,
+                  "total_submitted": 1,
+                  "contact_ids": [
+                    "3f2a9c1e-7b40-4d8e-9a12-6c5b8e0d1f34"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "500": {
+            "$ref": "#/components/responses/ServerError"
+          }
+        }
+      }
+    },
+    "/v1/contacts/{id}": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      ],
+      "get": {
+        "operationId": "getContact",
+        "tags": [
+          "Contacts"
+        ],
+        "summary": "Fetch a contact",
+        "description": "A contact belonging to another organization returns `404`, not `403` — existence is not disclosed across tenants.",
+        "responses": {
+          "200": {
+            "description": "The contact.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/Contact"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      },
+      "patch": {
+        "operationId": "updateContact",
+        "tags": [
+          "Contacts"
+        ],
+        "summary": "Update a contact",
+        "description": "Partial update — send only the fields you want to change. Fields outside the\nupdatable set (`organization_id`, `id`, timestamps) are ignored rather than\nrejected, so a passthrough of a previously-read object is safe.\n\nUpdatable: `display_name`, `first_name`, `last_name`, `primary_email`,\n`primary_phone`, `primary_linkedin_url`, `company`, `company_website`,\n`job_title`, `city`, `state`, `country`, `tags`, `status`, `source`,\n`lead_score`, `stage_id`, `pipeline_id`, `owner_user_id`, `custom_fields`.\n\n`tags` and `custom_fields` are replaced wholesale, not merged.\n",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "example": {
+                "job_title": "VP Engineering",
+                "tags": [
+                  "interested",
+                  "q3"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The updated contact.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/Contact"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteContact",
+        "tags": [
+          "Contacts"
+        ],
+        "summary": "Delete a contact",
+        "description": "Permanent. To remove several at once, use `DELETE /v1/contacts` with an `ids` array.",
+        "responses": {
+          "200": {
+            "description": "Deleted.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "deleted": {
+                      "type": "integer"
+                    },
+                    "requested": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/v1/lists": {
+      "get": {
+        "operationId": "listLeadLists",
+        "tags": [
+          "Lists"
+        ],
+        "summary": "List lead lists",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Limit"
+          },
+          {
+            "$ref": "#/components/parameters/Cursor"
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "active",
+                "archived"
+              ]
+            }
+          },
+          {
+            "name": "source_type",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of lead lists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/LeadList"
+                      }
+                    },
+                    "has_more": {
+                      "type": "boolean"
+                    },
+                    "next_cursor": {
+                      "type": "string",
+                      "nullable": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      },
+      "post": {
+        "operationId": "createLeadList",
+        "tags": [
+          "Lists"
+        ],
+        "summary": "Create a lead list",
+        "description": "Creates an empty lead list. This is the first step of the standard flow:\ncreate a list, add contacts to it, then enroll it into a sequence.\n",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "name"
+                ],
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "description": {
+                    "type": "string"
+                  },
+                  "source_type": {
+                    "type": "string",
+                    "default": "manual",
+                    "description": "How the list was assembled. Leave as `manual` for lists you populate yourself.",
+                    "enum": [
+                      "manual",
+                      "csv",
+                      "linkedin_search",
+                      "event",
+                      "post_reactors",
+                      "smart",
+                      "apify_leads_finder",
+                      "pool_export",
+                      "pool_search",
+                      "signal",
+                      "discovery_pack"
+                    ]
+                  }
+                }
+              },
+              "example": {
+                "name": "Inbound demo requests",
+                "description": "Created from the website form",
+                "source_type": "manual"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "List created.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/LeadList"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      }
+    },
+    "/v1/lists/{id}": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      ],
+      "get": {
+        "operationId": "getLeadList",
+        "tags": [
+          "Lists"
+        ],
+        "summary": "Fetch a lead list",
+        "responses": {
+          "200": {
+            "description": "The list.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/LeadList"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      },
+      "patch": {
+        "operationId": "updateLeadList",
+        "tags": [
+          "Lists"
+        ],
+        "summary": "Rename or archive a list",
+        "description": "Lists cannot be deleted over the API — archiving is the supported way to\nretire one, since deletion would silently drop membership history that\nsequences and reporting still reference. `DELETE /v1/lists/{id}` returns\n`405` and says so.\n",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "description": {
+                    "type": "string"
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "active",
+                      "archived"
+                    ]
+                  }
+                }
+              },
+              "example": {
+                "status": "archived"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The updated list.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/LeadList"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/v1/lists/members": {
+      "get": {
+        "operationId": "listLeadListMembers",
+        "tags": [
+          "Lists"
+        ],
+        "summary": "List a list's members",
+        "description": "Returns membership rows with a small projection of each contact, so you don't need a second call per member.",
+        "parameters": [
+          {
+            "name": "listId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/Limit"
+          },
+          {
+            "$ref": "#/components/parameters/Cursor"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of members.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/ListMember"
+                      }
+                    },
+                    "has_more": {
+                      "type": "boolean"
+                    },
+                    "next_cursor": {
+                      "type": "string",
+                      "nullable": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "removeListMembers",
+        "tags": [
+          "Lists"
+        ],
+        "summary": "Remove contacts from a list",
+        "description": "Removes membership only — the contacts themselves are untouched.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "listId",
+                  "contactIds"
+                ],
+                "properties": {
+                  "listId": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "contactIds": {
+                    "type": "array",
+                    "maxItems": 5000,
+                    "items": {
+                      "type": "string",
+                      "format": "uuid"
+                    }
+                  }
+                }
+              },
+              "example": {
+                "listId": "8c1d4e77-2a3b-4f56-9e01-77b2c9d4e5f6",
+                "contactIds": [
+                  "3f2a9c1e-7b40-4d8e-9a12-6c5b8e0d1f34"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Members removed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "removed": {
+                      "type": "integer"
+                    }
+                  }
+                },
+                "example": {
+                  "success": true,
+                  "removed": 2
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      },
+      "post": {
+        "operationId": "addListMembers",
+        "tags": [
+          "Lists"
+        ],
+        "summary": "Add contacts to a list",
+        "description": "Adds existing contacts to a lead list. Batched server-side, so passing several\nthousand IDs in one call is fine.\n\nPass either `contactIds`, or `sourceListId` together with `filters` to copy a\nfiltered subset of another list without moving IDs through your own code.\n",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "listId"
+                ],
+                "properties": {
+                  "listId": {
+                    "type": "string",
+                    "format": "uuid",
+                    "description": "Target lead list."
+                  },
+                  "contactIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "description": "Contacts to add."
+                  },
+                  "sourceListId": {
+                    "type": "string",
+                    "format": "uuid",
+                    "description": "Copy members from this list instead of passing IDs. Requires `filters`."
+                  },
+                  "filters": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "description": "Applied to `sourceListId` to resolve the subset server-side."
+                  }
+                }
+              },
+              "examples": {
+                "explicit": {
+                  "summary": "Explicit contact IDs",
+                  "value": {
+                    "listId": "8c1d4e77-2a3b-4f56-9e01-77b2c9d4e5f6",
+                    "contactIds": [
+                      "3f2a9c1e-7b40-4d8e-9a12-6c5b8e0d1f34"
+                    ]
+                  }
+                },
+                "fromList": {
+                  "summary": "Copy a filtered subset of another list",
+                  "value": {
+                    "listId": "8c1d4e77-2a3b-4f56-9e01-77b2c9d4e5f6",
+                    "sourceListId": "1b9e2d55-6c7a-4d21-8f30-44a1b8c7d2e9",
+                    "filters": {
+                      "has_email": true
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Members added.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "added": {
+                      "type": "integer",
+                      "example": 240
+                    }
+                  }
+                },
+                "example": {
+                  "success": true,
+                  "added": 240
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "description": "List not found.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "success": false,
+                  "error": "List not found"
+                }
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/components/responses/ServerError"
+          }
+        }
+      }
+    },
+    "/v1/custom-fields": {
+      "get": {
+        "operationId": "listCustomFieldDefinitions",
+        "tags": [
+          "Contacts"
+        ],
+        "summary": "List custom field definitions",
+        "description": "The schema behind `crm_contacts.custom_fields` — which keys are valid,\nwhat type each expects, and which values a `select` accepts. Read this\nbefore writing `custom_fields`, or you are guessing against an\nunversioned blob.\n\nUnpaginated: definitions number in the handful, and you always want them\nwhole. Read-only over the API — changing a definition reshapes every\ncontact already carrying the key, so it is a dashboard operation\n(Settings → Custom Fields).\n",
+        "responses": {
+          "200": {
+            "description": "Every custom field definition in your organization, in display order.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/CustomFieldDefinition"
+                      }
+                    }
+                  }
+                },
+                "example": {
+                  "success": true,
+                  "data": [
+                    {
+                      "id": "c1d2e3f4-5a6b-4c7d-8e9f-0a1b2c3d4e5f",
+                      "field_key": "account_tier",
+                      "display_name": "Account tier",
+                      "field_type": "select",
+                      "options": [
+                        "free",
+                        "pro",
+                        "enterprise"
+                      ],
+                      "is_required": false,
+                      "default_value": "free",
+                      "description": "Plan the account is on",
+                      "display_order": 1,
+                      "is_visible_in_list": true,
+                      "is_searchable": true
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      }
+    },
+    "/v1/sequences": {
+      "get": {
+        "operationId": "listSequences",
+        "tags": [
+          "Sequences"
+        ],
+        "summary": "List sequences",
+        "description": "Read-only. Authoring a sequence means writing a step graph the builder\nvalidates; an API that accepted a raw `steps` blob would let you create\nsequences the processor cannot run.\n",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Limit"
+          },
+          {
+            "$ref": "#/components/parameters/Cursor"
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "draft",
+                "active",
+                "paused"
+              ]
+            }
+          },
+          {
+            "name": "campaign_id",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of sequences. `steps` is omitted here — see the single-sequence read.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Sequence"
+                      }
+                    },
+                    "has_more": {
+                      "type": "boolean"
+                    },
+                    "next_cursor": {
+                      "type": "string",
+                      "nullable": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      }
+    },
+    "/v1/sequences/{id}": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      ],
+      "get": {
+        "operationId": "getSequence",
+        "tags": [
+          "Sequences"
+        ],
+        "summary": "Fetch a sequence",
+        "description": "Includes the full `steps` graph, unlike the list endpoint.",
+        "responses": {
+          "200": {
+            "description": "The sequence, including `steps`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/Sequence"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/v1/conversations": {
+      "get": {
+        "operationId": "listConversations",
+        "tags": [
+          "Conversations"
+        ],
+        "summary": "List conversations",
+        "description": "System threads (bounce notices and similar bookkeeping) are excluded\nunless you pass `include_system=true`.\n\nFor \"who replied?\", filter on `has_inbound_message=true` — it is an\nindexed boolean and far cheaper than scanning messages.\n",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Limit"
+          },
+          {
+            "$ref": "#/components/parameters/Cursor"
+          },
+          {
+            "name": "channel",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "linkedin",
+                "email",
+                "whatsapp",
+                "instagram",
+                "telegram",
+                "sms"
+              ]
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "contact_id",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "has_inbound_message",
+            "in": "query",
+            "description": "Conversations where the contact has replied.",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "include_system",
+            "in": "query",
+            "description": "Include bookkeeping threads. Defaults to false.",
+            "schema": {
+              "type": "boolean",
+              "default": false
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of conversations. `messages` is absent here.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Conversation"
+                      }
+                    },
+                    "has_more": {
+                      "type": "boolean"
+                    },
+                    "next_cursor": {
+                      "type": "string",
+                      "nullable": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      }
+    },
+    "/v1/conversations/{id}": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      ],
+      "get": {
+        "operationId": "getConversation",
+        "tags": [
+          "Conversations"
+        ],
+        "summary": "Fetch a conversation",
+        "description": "Returns the conversation with its 20 most recent messages inline, oldest first. Use the messages route for full history.",
+        "responses": {
+          "200": {
+            "description": "The conversation, with recent messages.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/Conversation"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/v1/conversations/{id}/messages": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      ],
+      "get": {
+        "operationId": "listConversationMessages",
+        "tags": [
+          "Conversations"
+        ],
+        "summary": "List a conversation's messages",
+        "description": "Full history, keyset-paginated in ascending id order.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Limit"
+          },
+          {
+            "$ref": "#/components/parameters/Cursor"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of messages.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Message"
+                      }
+                    },
+                    "has_more": {
+                      "type": "boolean"
+                    },
+                    "next_cursor": {
+                      "type": "string",
+                      "nullable": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/v1/enrollments/{id}": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      ],
+      "get": {
+        "operationId": "getEnrollment",
+        "tags": [
+          "Sequences"
+        ],
+        "summary": "Fetch an enrollment",
+        "responses": {
+          "200": {
+            "description": "The enrollment, with its lead.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/Enrollment"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/v1/enrollments": {
+      "get": {
+        "operationId": "listEnrollments",
+        "tags": [
+          "Sequences"
+        ],
+        "summary": "List enrollments",
+        "description": "The \"is this lead in a sequence, and where?\" endpoint. Each row carries\nits lead inline so you can identify the person without a second call.\n\nScoped to the sequences your organization owns. Pass `sequence_id` to\nnarrow to one.\n",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Limit"
+          },
+          {
+            "$ref": "#/components/parameters/Cursor"
+          },
+          {
+            "name": "sequence_id",
+            "in": "query",
+            "description": "Restrict to one sequence. `404` if it isn't yours.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "active",
+                "completed",
+                "paused",
+                "replied",
+                "bounced",
+                "unsubscribed",
+                "sender_disconnected"
+              ]
+            }
+          },
+          {
+            "name": "lead_id",
+            "in": "query",
+            "description": "All enrollments for one lead, across sequences.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of enrollments.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Enrollment"
+                      }
+                    },
+                    "has_more": {
+                      "type": "boolean"
+                    },
+                    "next_cursor": {
+                      "type": "string",
+                      "nullable": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      },
+      "post": {
+        "operationId": "enrollLeads",
+        "tags": [
+          "Sequences"
+        ],
+        "summary": "Enroll leads in a sequence",
+        "description": "Enrolls contacts into an email sequence. Contacts are resolved to lead records\nautomatically — you do not create leads directly. Send times are staggered\nacross the sequence's sending window rather than fired at once.\n\nProvide exactly one audience: `contactIds`, `listId`, or `listIds`.\n\n> **Leads already active in another sequence are skipped, not enrolled.** This\n> is deliberate — it stops the same person receiving two campaigns at once.\n> They are reported in `skippedActiveElsewhere`. Set `allowConcurrent: true`\n> only if you genuinely want overlapping campaigns.\n\nContacts without a valid email come back in `noEmail`; unsubscribed or\nsuppressed contacts in `suppressed`. Neither is an error.\n\n**Very large audiences:** enrolling tens of thousands of leads in one call can\nexceed the proxy timeout. Enroll by `listId` in batches, or split the audience\nacross calls.\n",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "sequenceId"
+                ],
+                "properties": {
+                  "sequenceId": {
+                    "type": "string",
+                    "format": "uuid",
+                    "description": "Sequence to enroll into."
+                  },
+                  "contactIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "description": "Enroll specific contacts."
+                  },
+                  "listId": {
+                    "type": "string",
+                    "format": "uuid",
+                    "description": "Enroll every member of one lead list."
+                  },
+                  "listIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "description": "Enroll the union of several lead lists."
+                  },
+                  "delayHours": {
+                    "type": "number",
+                    "description": "Hold the first email for this many hours.",
+                    "example": 24
+                  },
+                  "allowConcurrent": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "Opt out of one-active-sequence-per-lead."
+                  },
+                  "customDataByContactId": {
+                    "type": "object",
+                    "description": "Per-contact merge-variable overrides, keyed by **crm_contact\nid** (not lead id), written to the enrollment's `custom_data`.\n\nUse `custom_email_N_subject` / `custom_email_N_body` (N is\n1-indexed per step) to give each lead its own subject and body,\nresolving `{{email_subject_N}}` / `{{email_body_N}}`. This is\nhow per-lead AI-written sequences are delivered.\n\nRe-enrolling a contact that is already enrolled keeps the\nexisting `custom_data` rather than overwriting it.\n",
+                    "additionalProperties": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              },
+              "examples": {
+                "byList": {
+                  "summary": "Enroll a whole list",
+                  "value": {
+                    "sequenceId": "5d7c8b91-3e2f-4a06-b1c8-9f0d2e3a4b5c",
+                    "listId": "8c1d4e77-2a3b-4f56-9e01-77b2c9d4e5f6"
+                  }
+                },
+                "byContacts": {
+                  "summary": "Enroll specific contacts after a delay",
+                  "value": {
+                    "sequenceId": "5d7c8b91-3e2f-4a06-b1c8-9f0d2e3a4b5c",
+                    "contactIds": [
+                      "3f2a9c1e-7b40-4d8e-9a12-6c5b8e0d1f34"
+                    ],
+                    "delayHours": 24
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Enrollment processed. Skips are normal, not failures.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "enrolled": {
+                      "type": "integer",
+                      "description": "Leads enrolled.",
+                      "example": 240
+                    },
+                    "skipped": {
+                      "type": "integer",
+                      "description": "Already enrolled in this sequence.",
+                      "example": 12
+                    },
+                    "noEmail": {
+                      "type": "integer",
+                      "description": "No valid email address.",
+                      "example": 3
+                    },
+                    "suppressed": {
+                      "type": "integer",
+                      "description": "Unsubscribed, bounced or suppressed.",
+                      "example": 1
+                    },
+                    "skippedActiveElsewhere": {
+                      "type": "integer",
+                      "description": "Active in another sequence, so left alone.",
+                      "example": 8
+                    }
+                  }
+                },
+                "example": {
+                  "enrolled": 240,
+                  "skipped": 12,
+                  "noEmail": 3,
+                  "suppressed": 1,
+                  "skippedActiveElsewhere": 8
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/ServerError"
+          }
+        }
+      }
+    },
+    "/v1/messages": {
+      "post": {
+        "operationId": "sendMessage",
+        "tags": [
+          "Messages"
+        ],
+        "summary": "Send a message",
+        "description": "Sends a reply into an existing conversation. Channel, sender account and\nrecipient are derived from the conversation, so a reply always goes back out\nof the same inbox the thread lives in.\n\nTo *start* a conversation rather than continue one, enroll the contact in a\nsequence — that is what owns first contact, sending windows and per-mailbox\nlimits.\n",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "conversation_id"
+                ],
+                "properties": {
+                  "conversation_id": {
+                    "type": "string",
+                    "format": "uuid",
+                    "description": "Conversation to reply to."
+                  },
+                  "content": {
+                    "type": "string",
+                    "description": "Message body. When `content_type` is `html`, this is raw HTML —\ne.g. an `<a href=\"...\"><img src=\"...\"></a>` snippet to embed a\nlinked thumbnail image (a Loom video preview, for instance).\n"
+                  },
+                  "content_type": {
+                    "type": "string",
+                    "enum": [
+                      "text",
+                      "html"
+                    ],
+                    "default": "text",
+                    "description": "Defaults to `text`. Set to `html` to send `content` as raw HTML —\nonly meaningful on email conversations; other channels send it as\nliteral, unrendered text.\n"
+                  },
+                  "email_subject": {
+                    "type": "string",
+                    "description": "Email only. Defaults to the thread subject."
+                  },
+                  "email_cc": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "Email only."
+                  },
+                  "email_bcc": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "Email only."
+                  },
+                  "attachments": {
+                    "type": "array",
+                    "description": "Files to attach.",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string"
+                        },
+                        "url": {
+                          "type": "string"
+                        },
+                        "filename": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "example": {
+                "conversation_id": "9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d",
+                "content": "Sounds good — Tuesday works."
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Message queued for delivery.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "message_id": {
+                      "type": "string",
+                      "format": "uuid"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "500": {
+            "$ref": "#/components/responses/ServerError"
+          }
+        }
+      }
+    },
+    "/v1/pool/search": {
+      "post": {
+        "operationId": "searchLeadPool",
+        "tags": [
+          "Pool"
+        ],
+        "summary": "Preview pool matches",
+        "description": "Runs a filter against the shared lead pool and returns the **exact** match\ncount plus a small sample. Always run this before a build: the count it\nreturns is the same number the build gates on, so it tells you in advance\nwhether a build will be accepted and how many contacts it would create.\n\nThe filter is rejected outright if it is not selective enough to run\nquickly. The pool is over 100M rows, so an unbounded filter is not a slow\nquery — it is one that must not start. A filter qualifies when it carries\nat least one of: `v_category_in` (preferred — verified from the company's\nown website), `industry_exact`, `industry_pattern`, `p_bucket`,\n`sic_code_in`, a `keyword` of 2+ characters, or `state` together with\n`employees_min`.\n\n**Geography is US-state-level.** Use `state` (2-letter code) and `city`.\nThere is no `country` filter — the pool has no country column, so passing\none is rejected with a 400 rather than accepted and ignored.\n\nA few filters the pool cannot honour (`founded_year_min`,\n`founded_year_max`, `funding_stage_in`, `technology`) are dropped rather\nthan rejected. When that happens the response carries a `warnings` array\nnaming them, so a count is never mistaken for a narrower one than it is.\n",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "filter"
+                ],
+                "properties": {
+                  "filter": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "description": "Pool filter. Must be selective enough to bound the scan."
+                  },
+                  "limit": {
+                    "type": "integer",
+                    "default": 25,
+                    "description": "How many sample rows to return alongside the count."
+                  }
+                }
+              },
+              "example": {
+                "filter": {
+                  "keyword": "plumbing",
+                  "state": "TX",
+                  "employees_min": 10,
+                  "v_has_fresh_email": true
+                },
+                "limit": 25
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Exact count plus a preview sample.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "total": {
+                      "type": "integer",
+                      "description": "Exact number of matches, not an estimate.",
+                      "example": 4820
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": true
+                      }
+                    },
+                    "preview_limit": {
+                      "type": "integer",
+                      "example": 25
+                    },
+                    "warnings": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "description": "Present only when part of the filter was dropped. Names the\nfilters the pool could not apply — `total` and `data` are\nNOT restricted by them.\n"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/ServerError"
+          }
+        }
+      }
+    },
+    "/v1/pool/lists": {
+      "post": {
+        "operationId": "buildListFromPool",
+        "tags": [
+          "Pool"
+        ],
+        "summary": "Build a lead list from the pool",
+        "description": "Enqueues a build and returns a job handle immediately — no HTTP request\never spans this work, so there is nothing to time out. Poll\n`GET /v1/pool/jobs/{id}` for progress.\n\n`max_contacts` is required and is the point of the endpoint. The build is\nrefused if the filter's exact count exceeds it, so you cannot enqueue a\nfour-million-contact build by leaving a parameter out — you have to state\nthe number and mean it. The hard ceiling is 250,000 regardless.\n\nGive either `list_id` to append to an existing list, or `list_name` to\ncreate one. The destination is resolved before the size gate runs, so a\nrejected build never leaves an empty list behind.\n",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "filter",
+                  "max_contacts"
+                ],
+                "properties": {
+                  "filter": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "description": "Same shape as `/v1/pool/search`, byte for byte."
+                  },
+                  "max_contacts": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 250000,
+                    "description": "Ceiling on this build. Refused if the exact count is higher."
+                  },
+                  "list_id": {
+                    "type": "string",
+                    "format": "uuid",
+                    "description": "Append to this existing list."
+                  },
+                  "list_name": {
+                    "type": "string",
+                    "description": "Create a new list with this name instead."
+                  },
+                  "description": {
+                    "type": "string"
+                  }
+                }
+              },
+              "example": {
+                "filter": {
+                  "keyword": "plumbing",
+                  "state": "TX",
+                  "employees_min": 10,
+                  "v_has_fresh_email": true
+                },
+                "max_contacts": 5000,
+                "list_name": "Texas plumbing companies"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Build accepted. The work happens on the next worker tick.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/PoolBuildJob"
+                    },
+                    "list_id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "matched": {
+                      "type": "integer",
+                      "example": 4820
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Missing `max_contacts`, a filter matching more than `max_contacts`, or\na filter too broad to run.\n",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "success": false,
+                  "error": "This filter matches 812,004 contacts, above your max_contacts of 5,000. Narrow the filter, or raise max_contacts if you genuinely intend to create that many."
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "description": "The destination list was not found, or the filter matched nothing.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/ServerError"
+          }
+        }
+      }
+    },
+    "/v1/pool/jobs/{id}": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      ],
+      "get": {
+        "operationId": "getPoolBuildJob",
+        "tags": [
+          "Pool"
+        ],
+        "summary": "Poll a pool build",
+        "description": "Progress for one build. `processed` climbs toward `total`; the build is\nfinished when `status` is `completed` or `failed`.\n",
+        "responses": {
+          "200": {
+            "description": "The job.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/PoolBuildJob"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "description": "Job not found.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/ServerError"
+          }
+        }
+      }
+    },
+    "/v1/webhooks": {
+      "get": {
+        "operationId": "listWebhookSubscriptions",
+        "tags": [
+          "Webhooks"
+        ],
+        "summary": "List webhook subscriptions",
+        "description": "Every delivery target this organization has registered, including each\none's signing `secret` — you will need it to verify `X-Webhook-Signature`,\nand re-reading it here is how an integration recovers after losing its\nlocal copy.\n",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Limit"
+          },
+          {
+            "$ref": "#/components/parameters/Cursor"
+          },
+          {
+            "name": "target_url",
+            "in": "query",
+            "description": "Return only the subscription pointing at this exact URL.",
+            "schema": {
+              "type": "string",
+              "format": "uri"
+            }
+          },
+          {
+            "name": "event",
+            "in": "query",
+            "description": "Return only subscriptions listening for this event.",
+            "schema": {
+              "$ref": "#/components/schemas/WebhookEvent"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of subscriptions.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/WebhookSubscription"
+                      }
+                    },
+                    "has_more": {
+                      "type": "boolean"
+                    },
+                    "next_cursor": {
+                      "type": "string",
+                      "nullable": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/ServerError"
+          }
+        }
+      },
+      "post": {
+        "operationId": "createWebhookSubscription",
+        "tags": [
+          "Webhooks"
+        ],
+        "summary": "Register a webhook subscription",
+        "description": "Registers a delivery target and returns the secret ACA will sign its\ndeliveries with. Keep it — it is not regenerated on read, but it is\nreturned on read.\n\nPosting the same `target_url` twice updates the existing subscription's\nevents and re-activates it rather than failing, so an integration that\nre-registers on every start is safe. Twenty subscriptions per\norganization; `target_url` must be `https` and publicly reachable.\n",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "target_url",
+                  "events"
+                ],
+                "properties": {
+                  "target_url": {
+                    "type": "string",
+                    "format": "uri",
+                    "description": "Where deliveries are POSTed. Must be https."
+                  },
+                  "events": {
+                    "type": "array",
+                    "minItems": 1,
+                    "items": {
+                      "$ref": "#/components/schemas/WebhookEvent"
+                    }
+                  },
+                  "source": {
+                    "type": "string",
+                    "default": "api",
+                    "description": "Free-form label for what registered this, e.g. `n8n`."
+                  }
+                }
+              },
+              "example": {
+                "target_url": "https://n8n.example.com/webhook/aca-events",
+                "events": [
+                  "message_received",
+                  "lead_replied"
+                ],
+                "source": "n8n"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "An existing subscription for this URL was updated.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/WebhookSubscription"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "Subscription created.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/WebhookSubscription"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "409": {
+            "description": "This organization already has 20 subscriptions.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/ServerError"
+          }
+        }
+      }
+    },
+    "/v1/webhooks/{id}": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      ],
+      "get": {
+        "operationId": "getWebhookSubscription",
+        "tags": [
+          "Webhooks"
+        ],
+        "summary": "Fetch a webhook subscription",
+        "responses": {
+          "200": {
+            "description": "The subscription.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/WebhookSubscription"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "description": "Subscription not found.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/ServerError"
+          }
+        }
+      },
+      "patch": {
+        "operationId": "updateWebhookSubscription",
+        "tags": [
+          "Webhooks"
+        ],
+        "summary": "Update a webhook subscription",
+        "description": "Change the events, move the URL, or pause it with `is_active: false`.\nA paused subscription stops receiving deliveries but keeps its secret,\nso resuming does not require re-verifying anything.\n",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "target_url": {
+                    "type": "string",
+                    "format": "uri"
+                  },
+                  "events": {
+                    "type": "array",
+                    "minItems": 1,
+                    "items": {
+                      "$ref": "#/components/schemas/WebhookEvent"
+                    }
+                  },
+                  "is_active": {
+                    "type": "boolean"
+                  }
+                }
+              },
+              "example": {
+                "events": [
+                  "message_received",
+                  "message_sent",
+                  "lead_replied"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The updated subscription.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/WebhookSubscription"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "description": "Subscription not found.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/ServerError"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteWebhookSubscription",
+        "tags": [
+          "Webhooks"
+        ],
+        "summary": "Delete a webhook subscription",
+        "description": "Removes the subscription and anything still queued for it — a destination\nthat no longer exists should not keep receiving deliveries.\n\nIdempotent: deleting a subscription that is already gone returns 200 with\n`deleted: 0`, so teardown never fails on a repeat.\n",
+        "responses": {
+          "200": {
+            "description": "Deleted.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "deleted": {
+                      "type": "integer",
+                      "example": 1
+                    }
+                  }
+                },
+                "example": {
+                  "success": true,
+                  "deleted": 1
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/ServerError"
+          }
+        }
+      }
+    },
+    "/v1/hooks/n8n": {
+      "post": {
+        "operationId": "webhookAction",
+        "tags": [
+          "Webhooks"
+        ],
+        "summary": "Act on an event",
+        "description": "Post back into ACA to act on an event.\n\nAuthenticate with your normal `Authorization: Bearer aca_…` token, in\nwhich case the organization comes from the token and `organization_id`\nin the body is optional (and must match the token if you send it).\n\nA webhook secret from [Settings → Webhooks](/settings?tab=webhooks) sent\nas `x-webhook-secret`, together with an explicit `organization_id`, also\nworks. One of the two is required — an organization with no secret\nconfigured is not an organization that accepts unauthenticated writes.\n\nTarget the contact by `contact_id`, `conversation_id`, `contact_email` or\n`contact_phone` — at least one is required. `contact_email` and\n`contact_phone` are resolved against your organization only.\n\n### The `data` payload per action\n\n`data` is action-specific. Pick your action from the examples dropdown to see\nthe exact shape.\n\n| Action | `data` fields |\n| --- | --- |\n| `send_message` | `content` (required), `channel` |\n| `add_tag` | `tag_name` **or** `tag_id` |\n| `remove_tag` | `tag_name` **or** `tag_id` |\n| `change_stage` | `stage_name` **or** `stage_id` |\n| `update_score` | `score_delta` (relative) **or** `score` (absolute) |\n| `add_note` | `content` |\n| `enroll_in_sequence` | `sequence_id`; optional `delay_hours`, `allow_concurrent` |\n| `remove_from_sequence` | `sequence_id` **or** `enrollment_id`; optional `status` (`completed`, `paused`, `unsubscribed` — default `completed`) |\n| `set_ai_handling` | `ai_handling` (boolean) |\n| `assign_to_user` | `user_id`, or `null` to unassign |\n\nEvery failed action — an unknown name, a missing field, a contact that\ncould not be resolved, an enrollment that matched nothing — returns\n**400** with `{ \"success\": false, \"message\": \"…\" }`. Only a completed\naction returns 200. Every call is logged either way.\n",
+        "security": [
+          {
+            "apiToken": []
+          },
+          {
+            "webhookSecret": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "action",
+                  "data"
+                ],
+                "properties": {
+                  "organization_id": {
+                    "type": "string",
+                    "format": "uuid",
+                    "description": "Required when authenticating with `x-webhook-secret`. Optional\nwith an API token — it comes from the token, and a value that\ndisagrees with the token is rejected.\n"
+                  },
+                  "action": {
+                    "type": "string",
+                    "description": "Which action to run. Determines the shape of `data`.",
+                    "enum": [
+                      "send_message",
+                      "add_tag",
+                      "remove_tag",
+                      "change_stage",
+                      "update_score",
+                      "add_note",
+                      "enroll_in_sequence",
+                      "remove_from_sequence",
+                      "set_ai_handling",
+                      "assign_to_user"
+                    ]
+                  },
+                  "contact_id": {
+                    "type": "string",
+                    "format": "uuid",
+                    "description": "Target directly by contact."
+                  },
+                  "conversation_id": {
+                    "type": "string",
+                    "format": "uuid",
+                    "description": "Target by conversation — the contact is resolved from it."
+                  },
+                  "contact_email": {
+                    "type": "string",
+                    "description": "Target by email, resolved within your organization."
+                  },
+                  "contact_phone": {
+                    "type": "string",
+                    "description": "Target by phone, resolved within your organization."
+                  },
+                  "data": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "description": "Action-specific payload — see the table above."
+                  },
+                  "source_event_id": {
+                    "type": "string",
+                    "description": "Your own reference to the event that triggered this. Logged for tracing."
+                  }
+                }
+              },
+              "examples": {
+                "addTag": {
+                  "summary": "add_tag — by name, authenticated by API token",
+                  "value": {
+                    "action": "add_tag",
+                    "contact_email": "jane@acme.com",
+                    "data": {
+                      "tag_name": "interested"
+                    }
+                  }
+                },
+                "sendMessage": {
+                  "summary": "send_message — reply in a conversation",
+                  "value": {
+                    "organization_id": "afb808d4-0000-0000-0000-000000000000",
+                    "action": "send_message",
+                    "conversation_id": "9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d",
+                    "data": {
+                      "content": "Sounds good — Tuesday works."
+                    }
+                  }
+                },
+                "changeStage": {
+                  "summary": "change_stage — move down the pipeline",
+                  "value": {
+                    "organization_id": "afb808d4-0000-0000-0000-000000000000",
+                    "action": "change_stage",
+                    "contact_id": "3f2a9c1e-7b40-4d8e-9a12-6c5b8e0d1f34",
+                    "data": {
+                      "stage_name": "Qualified"
+                    }
+                  }
+                },
+                "updateScore": {
+                  "summary": "update_score — relative bump",
+                  "value": {
+                    "organization_id": "afb808d4-0000-0000-0000-000000000000",
+                    "action": "update_score",
+                    "contact_id": "3f2a9c1e-7b40-4d8e-9a12-6c5b8e0d1f34",
+                    "data": {
+                      "score_delta": 10
+                    }
+                  }
+                },
+                "enroll": {
+                  "summary": "enroll_in_sequence",
+                  "value": {
+                    "organization_id": "afb808d4-0000-0000-0000-000000000000",
+                    "action": "enroll_in_sequence",
+                    "contact_email": "jane@acme.com",
+                    "data": {
+                      "sequence_id": "5d7c8b91-3e2f-4a06-b1c8-9f0d2e3a4b5c"
+                    }
+                  }
+                },
+                "addNote": {
+                  "summary": "add_note",
+                  "value": {
+                    "organization_id": "afb808d4-0000-0000-0000-000000000000",
+                    "action": "add_note",
+                    "contact_id": "3f2a9c1e-7b40-4d8e-9a12-6c5b8e0d1f34",
+                    "data": {
+                      "content": "Asked about pricing on the call."
+                    }
+                  }
+                },
+                "setAiHandling": {
+                  "summary": "set_ai_handling — hand back to a human",
+                  "value": {
+                    "organization_id": "afb808d4-0000-0000-0000-000000000000",
+                    "action": "set_ai_handling",
+                    "conversation_id": "9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d",
+                    "data": {
+                      "ai_handling": false
+                    }
+                  }
+                },
+                "assign": {
+                  "summary": "assign_to_user — null unassigns",
+                  "value": {
+                    "organization_id": "afb808d4-0000-0000-0000-000000000000",
+                    "action": "assign_to_user",
+                    "contact_id": "3f2a9c1e-7b40-4d8e-9a12-6c5b8e0d1f34",
+                    "data": {
+                      "user_id": "7e6d5c4b-3a29-4180-9f7e-6d5c4b3a2918"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Action executed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "example": {
+                  "success": true,
+                  "message": "Tag added"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid webhook secret.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "Invalid webhook secret"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "webhooks": {
+    "contact_created": {
+      "post": {
+        "summary": "contact_created",
+        "tags": [
+          "Webhooks"
+        ],
+        "description": "A contact was created in your CRM.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/WebhookEnvelope"
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "data": {
+                        "type": "object",
+                        "properties": {
+                          "contact_id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "display_name": {
+                            "type": "string"
+                          },
+                          "email": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "phone": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "source": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "source_campaign_id": {
+                            "type": "string",
+                            "format": "uuid",
+                            "nullable": true
+                          },
+                          "stage_id": {
+                            "type": "string",
+                            "format": "uuid",
+                            "nullable": true
+                          },
+                          "lead_score": {
+                            "type": "number",
+                            "nullable": true
+                          },
+                          "custom_fields": {
+                            "type": "object",
+                            "additionalProperties": true,
+                            "nullable": true
+                          },
+                          "created_at": {
+                            "type": "string",
+                            "format": "date-time"
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              "example": {
+                "event": "contact_created",
+                "timestamp": "2026-08-08T12:00:00.000Z",
+                "webhook_id": "6b1f0c2a-9d3e-4f58-a71b-2c8d4e5f6a7b",
+                "organization_id": "afb808d4-0000-0000-0000-000000000000",
+                "data": {
+                  "contact_id": "3f2a9c1e-7b40-4d8e-9a12-6c5b8e0d1f34",
+                  "display_name": "Jane Doe",
+                  "email": "jane@acme.com",
+                  "phone": null,
+                  "source": "n8n",
+                  "source_campaign_id": null,
+                  "stage_id": null,
+                  "lead_score": 0,
+                  "custom_fields": {
+                    "form": "demo-request"
+                  },
+                  "created_at": "2026-08-08T12:00:00.000Z"
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/WebhookAck"
+          }
+        }
+      }
+    },
+    "contact_updated": {
+      "post": {
+        "summary": "contact_updated",
+        "tags": [
+          "Webhooks"
+        ],
+        "description": "A contact row changed. Fires on **every** update — including bulk edits and\nenrichment, which can mean a very large number of events at once. Make your\nhandler idempotent and cheap, or subscribe to the narrower `stage_changed`\nand `score_changed` events instead.\n",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/WebhookEnvelope"
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "data": {
+                        "type": "object",
+                        "properties": {
+                          "contact_id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "display_name": {
+                            "type": "string"
+                          },
+                          "email": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "phone": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "stage_id": {
+                            "type": "string",
+                            "format": "uuid",
+                            "nullable": true
+                          },
+                          "lead_score": {
+                            "type": "number",
+                            "nullable": true
+                          },
+                          "updated_at": {
+                            "type": "string",
+                            "format": "date-time"
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              "example": {
+                "event": "contact_updated",
+                "timestamp": "2026-08-08T12:05:00.000Z",
+                "webhook_id": "6b1f0c2a-9d3e-4f58-a71b-2c8d4e5f6a7b",
+                "organization_id": "afb808d4-0000-0000-0000-000000000000",
+                "data": {
+                  "contact_id": "3f2a9c1e-7b40-4d8e-9a12-6c5b8e0d1f34",
+                  "display_name": "Jane Doe",
+                  "email": "jane@acme.com",
+                  "phone": null,
+                  "stage_id": "2c4e6a80-1b3d-4f57-8e9a-0b1c2d3e4f50",
+                  "lead_score": 42,
+                  "updated_at": "2026-08-08T12:05:00.000Z"
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/WebhookAck"
+          }
+        }
+      }
+    },
+    "stage_changed": {
+      "post": {
+        "summary": "stage_changed",
+        "tags": [
+          "Webhooks"
+        ],
+        "description": "A contact moved between pipeline stages. Emitted alongside `contact_updated`.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/WebhookEnvelope"
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "data": {
+                        "type": "object",
+                        "properties": {
+                          "contact_id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "display_name": {
+                            "type": "string"
+                          },
+                          "from_stage_id": {
+                            "type": "string",
+                            "format": "uuid",
+                            "nullable": true
+                          },
+                          "to_stage_id": {
+                            "type": "string",
+                            "format": "uuid",
+                            "nullable": true
+                          },
+                          "changed_at": {
+                            "type": "string",
+                            "format": "date-time"
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              "example": {
+                "event": "stage_changed",
+                "timestamp": "2026-08-08T12:05:00.000Z",
+                "webhook_id": "6b1f0c2a-9d3e-4f58-a71b-2c8d4e5f6a7b",
+                "organization_id": "afb808d4-0000-0000-0000-000000000000",
+                "data": {
+                  "contact_id": "3f2a9c1e-7b40-4d8e-9a12-6c5b8e0d1f34",
+                  "display_name": "Jane Doe",
+                  "from_stage_id": "1a2b3c4d-5e6f-4708-9a1b-2c3d4e5f6071",
+                  "to_stage_id": "2c4e6a80-1b3d-4f57-8e9a-0b1c2d3e4f50",
+                  "changed_at": "2026-08-08T12:05:00.000Z"
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/WebhookAck"
+          }
+        }
+      }
+    },
+    "score_changed": {
+      "post": {
+        "summary": "score_changed",
+        "tags": [
+          "Webhooks"
+        ],
+        "description": "A contact's lead score changed. Emitted alongside `contact_updated`.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/WebhookEnvelope"
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "data": {
+                        "type": "object",
+                        "properties": {
+                          "contact_id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "display_name": {
+                            "type": "string"
+                          },
+                          "old_score": {
+                            "type": "number",
+                            "nullable": true
+                          },
+                          "new_score": {
+                            "type": "number",
+                            "nullable": true
+                          },
+                          "changed_at": {
+                            "type": "string",
+                            "format": "date-time"
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              "example": {
+                "event": "score_changed",
+                "timestamp": "2026-08-08T12:05:00.000Z",
+                "webhook_id": "6b1f0c2a-9d3e-4f58-a71b-2c8d4e5f6a7b",
+                "organization_id": "afb808d4-0000-0000-0000-000000000000",
+                "data": {
+                  "contact_id": "3f2a9c1e-7b40-4d8e-9a12-6c5b8e0d1f34",
+                  "display_name": "Jane Doe",
+                  "old_score": 30,
+                  "new_score": 42,
+                  "changed_at": "2026-08-08T12:05:00.000Z"
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/WebhookAck"
+          }
+        }
+      }
+    },
+    "message_received": {
+      "post": {
+        "summary": "message_received",
+        "tags": [
+          "Webhooks"
+        ],
+        "description": "An inbound message arrived on any channel. This is the event most automations\nwant — it is what \"a lead replied\" looks like.\n",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/WebhookEnvelope"
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "data": {
+                        "$ref": "#/components/schemas/MessageEventData"
+                      }
+                    }
+                  }
+                ]
+              },
+              "example": {
+                "event": "message_received",
+                "timestamp": "2026-08-08T12:10:00.000Z",
+                "webhook_id": "6b1f0c2a-9d3e-4f58-a71b-2c8d4e5f6a7b",
+                "organization_id": "afb808d4-0000-0000-0000-000000000000",
+                "data": {
+                  "message_id": "4d5e6f70-8a9b-4c1d-9e2f-3a4b5c6d7e8f",
+                  "conversation_id": "9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d",
+                  "contact_id": "3f2a9c1e-7b40-4d8e-9a12-6c5b8e0d1f34",
+                  "contact_name": "Jane Doe",
+                  "channel": "email",
+                  "direction": "inbound",
+                  "sender_type": "contact",
+                  "content": "Interested — can you send pricing?",
+                  "content_type": "text",
+                  "metadata": {},
+                  "created_at": "2026-08-08T12:10:00.000Z"
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/WebhookAck"
+          }
+        }
+      }
+    },
+    "message_sent": {
+      "post": {
+        "summary": "message_sent",
+        "tags": [
+          "Webhooks"
+        ],
+        "description": "An outbound message was recorded — sequence step, agent reply or manual send.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/WebhookEnvelope"
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "data": {
+                        "$ref": "#/components/schemas/MessageEventData"
+                      }
+                    }
+                  }
+                ]
+              },
+              "example": {
+                "event": "message_sent",
+                "timestamp": "2026-08-08T09:00:00.000Z",
+                "webhook_id": "6b1f0c2a-9d3e-4f58-a71b-2c8d4e5f6a7b",
+                "organization_id": "afb808d4-0000-0000-0000-000000000000",
+                "data": {
+                  "message_id": "5e6f7081-9a0b-4c2d-8e3f-4a5b6c7d8e9f",
+                  "conversation_id": "9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d",
+                  "contact_id": "3f2a9c1e-7b40-4d8e-9a12-6c5b8e0d1f34",
+                  "contact_name": "Jane Doe",
+                  "channel": "email",
+                  "direction": "outbound",
+                  "sender_type": "sequence",
+                  "content": "Hi Jane — quick question about Acme's outbound.",
+                  "content_type": "text",
+                  "metadata": {},
+                  "created_at": "2026-08-08T09:00:00.000Z"
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/WebhookAck"
+          }
+        }
+      }
+    },
+    "tag_added": {
+      "post": {
+        "summary": "tag_added",
+        "tags": [
+          "Webhooks"
+        ],
+        "description": "A tag was applied to a contact.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/WebhookEnvelope"
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "data": {
+                        "type": "object",
+                        "properties": {
+                          "contact_id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "contact_name": {
+                            "type": "string"
+                          },
+                          "tag_id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "tag_name": {
+                            "type": "string"
+                          },
+                          "tag_color": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "added_at": {
+                            "type": "string",
+                            "format": "date-time"
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              "example": {
+                "event": "tag_added",
+                "timestamp": "2026-08-08T12:12:00.000Z",
+                "webhook_id": "6b1f0c2a-9d3e-4f58-a71b-2c8d4e5f6a7b",
+                "organization_id": "afb808d4-0000-0000-0000-000000000000",
+                "data": {
+                  "contact_id": "3f2a9c1e-7b40-4d8e-9a12-6c5b8e0d1f34",
+                  "contact_name": "Jane Doe",
+                  "tag_id": "8f9a0b1c-2d3e-4f50-a617-8293a4b5c6d7",
+                  "tag_name": "interested",
+                  "tag_color": "#D4361A",
+                  "added_at": "2026-08-08T12:12:00.000Z"
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/WebhookAck"
+          }
+        }
+      }
+    },
+    "tag_removed": {
+      "post": {
+        "summary": "tag_removed",
+        "tags": [
+          "Webhooks"
+        ],
+        "description": "A tag was removed from a contact. Note there is no `tag_color` on removal.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/WebhookEnvelope"
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "data": {
+                        "type": "object",
+                        "properties": {
+                          "contact_id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "contact_name": {
+                            "type": "string"
+                          },
+                          "tag_id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "tag_name": {
+                            "type": "string"
+                          },
+                          "removed_at": {
+                            "type": "string",
+                            "format": "date-time"
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              "example": {
+                "event": "tag_removed",
+                "timestamp": "2026-08-08T12:20:00.000Z",
+                "webhook_id": "6b1f0c2a-9d3e-4f58-a71b-2c8d4e5f6a7b",
+                "organization_id": "afb808d4-0000-0000-0000-000000000000",
+                "data": {
+                  "contact_id": "3f2a9c1e-7b40-4d8e-9a12-6c5b8e0d1f34",
+                  "contact_name": "Jane Doe",
+                  "tag_id": "8f9a0b1c-2d3e-4f50-a617-8293a4b5c6d7",
+                  "tag_name": "interested",
+                  "removed_at": "2026-08-08T12:20:00.000Z"
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/WebhookAck"
+          }
+        }
+      }
+    },
+    "sequence_completed": {
+      "post": {
+        "summary": "sequence_completed",
+        "tags": [
+          "Webhooks"
+        ],
+        "description": "A lead reached the end of an email sequence. Fires on the enrollment's\ntransition to `completed`, so it is one event per enrollment, not per step.\n\n`contact_id` is the CRM contact behind the lead, when the lead was mirrored\nfrom one — join on whichever id your workflow already holds.\n",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/WebhookEnvelope"
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "data": {
+                        "type": "object",
+                        "properties": {
+                          "enrollment_id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "sequence_id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "sequence_name": {
+                            "type": "string"
+                          },
+                          "lead_id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "contact_id": {
+                            "type": "string",
+                            "format": "uuid",
+                            "nullable": true
+                          },
+                          "lead_email": {
+                            "type": "string"
+                          },
+                          "current_step": {
+                            "type": "integer"
+                          },
+                          "status": {
+                            "type": "string",
+                            "example": "completed"
+                          },
+                          "changed_at": {
+                            "type": "string",
+                            "format": "date-time"
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              "example": {
+                "event": "sequence_completed",
+                "timestamp": "2026-08-11T12:56:42.801Z",
+                "webhook_id": "6b1f0c2a-9d3e-4f58-a71b-2c8d4e5f6a7b",
+                "organization_id": "afb808d4-0000-0000-0000-000000000000",
+                "data": {
+                  "enrollment_id": "c13379de-ce20-4d08-b062-cd1a113b07d4",
+                  "sequence_id": "44616863-c68b-4ed2-b646-ee498d2c404b",
+                  "sequence_name": "Private jets",
+                  "lead_id": "ac2fed0d-1b9d-4176-9e14-a2664070512a",
+                  "contact_id": "0d41f2b7-577d-4c34-aca9-7b2e0958383e",
+                  "lead_email": "amy@breakturn.com",
+                  "current_step": 4,
+                  "status": "completed",
+                  "changed_at": "2026-08-11T12:56:42.801Z"
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/WebhookAck"
+          }
+        }
+      }
+    },
+    "lead_replied": {
+      "post": {
+        "summary": "lead_replied",
+        "tags": [
+          "Webhooks"
+        ],
+        "description": "An enrolled lead replied to a sequence email, and the enrollment was\nstopped as a result.\n\nNarrower than `message_received`, and worth preferring for reply\nhandling: auto-replies and out-of-office bounces pause the enrollment\ninstead and do **not** fire this. Same payload shape as\n`sequence_completed`, with `status: replied`.\n",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/WebhookEnvelope"
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "data": {
+                        "type": "object",
+                        "properties": {
+                          "enrollment_id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "sequence_id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "sequence_name": {
+                            "type": "string"
+                          },
+                          "lead_id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "contact_id": {
+                            "type": "string",
+                            "format": "uuid",
+                            "nullable": true
+                          },
+                          "lead_email": {
+                            "type": "string"
+                          },
+                          "current_step": {
+                            "type": "integer"
+                          },
+                          "status": {
+                            "type": "string",
+                            "example": "replied"
+                          },
+                          "changed_at": {
+                            "type": "string",
+                            "format": "date-time"
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              "example": {
+                "event": "lead_replied",
+                "timestamp": "2026-08-11T12:56:42.801Z",
+                "webhook_id": "6b1f0c2a-9d3e-4f58-a71b-2c8d4e5f6a7b",
+                "organization_id": "afb808d4-0000-0000-0000-000000000000",
+                "data": {
+                  "enrollment_id": "c13379de-ce20-4d08-b062-cd1a113b07d4",
+                  "sequence_id": "44616863-c68b-4ed2-b646-ee498d2c404b",
+                  "sequence_name": "Private jets",
+                  "lead_id": "ac2fed0d-1b9d-4176-9e14-a2664070512a",
+                  "contact_id": "0d41f2b7-577d-4c34-aca9-7b2e0958383e",
+                  "lead_email": "amy@breakturn.com",
+                  "current_step": 2,
+                  "status": "replied",
+                  "changed_at": "2026-08-11T12:56:42.801Z"
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/WebhookAck"
+          }
+        }
+      }
+    },
+    "handoff_requested": {
+      "post": {
+        "summary": "handoff_requested",
+        "tags": [
+          "Webhooks"
+        ],
+        "description": "A human took over a conversation from the AI — either a takeover was\nrecorded, or AI handling was switched off. `reason` is whatever was given\nat takeover, and is often null when the AI was simply toggled off.\n",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/WebhookEnvelope"
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "data": {
+                        "type": "object",
+                        "properties": {
+                          "conversation_id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "contact_id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "contact_name": {
+                            "type": "string"
+                          },
+                          "contact_email": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "channel": {
+                            "type": "string"
+                          },
+                          "reason": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "assigned_to_user_id": {
+                            "type": "string",
+                            "format": "uuid",
+                            "nullable": true
+                          },
+                          "requested_at": {
+                            "type": "string",
+                            "format": "date-time"
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              "example": {
+                "event": "handoff_requested",
+                "timestamp": "2026-08-11T12:56:42.801Z",
+                "webhook_id": "6b1f0c2a-9d3e-4f58-a71b-2c8d4e5f6a7b",
+                "organization_id": "afb808d4-0000-0000-0000-000000000000",
+                "data": {
+                  "conversation_id": "d4beab48-b31a-498f-883a-78e5ef34c646",
+                  "contact_id": "d94965cc-6e3b-4447-851c-fa7443b40b1d",
+                  "contact_name": "Jane Doe",
+                  "contact_email": "jane@acme.com",
+                  "channel": "linkedin",
+                  "reason": null,
+                  "assigned_to_user_id": null,
+                  "requested_at": "2026-08-11T12:56:42.801Z"
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/WebhookAck"
+          }
+        }
+      }
+    },
+    "list_member_added": {
+      "post": {
+        "summary": "list_member_added",
+        "tags": [
+          "Webhooks"
+        ],
+        "description": "A contact was added to a lead list.\n\nEmitted per contact, so a bulk add or a pool build fires one delivery per\nrow. It costs nothing when nobody is subscribed - the trigger returns\nbefore building a payload - but subscribe to it on an organisation that\nbuilds large lists and you will receive proportionally large bursts.\n",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/WebhookEnvelope"
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "data": {
+                        "type": "object",
+                        "properties": {
+                          "member_id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "list_id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "list_name": {
+                            "type": "string"
+                          },
+                          "contact_id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "contact_name": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "contact_email": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "company": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "job_title": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "added_at": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "changed_at": {
+                            "type": "string",
+                            "format": "date-time"
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              "example": {
+                "event": "list_member_added",
+                "timestamp": "2026-08-12T08:05:43.412Z",
+                "webhook_id": "6b1f0c2a-9d3e-4f58-a71b-2c8d4e5f6a7b",
+                "organization_id": "afb808d4-0000-0000-0000-000000000000",
+                "data": {
+                  "member_id": "56de4625-4766-4db6-baa7-af4fdff7a87b",
+                  "list_id": "19b83489-0c77-4d32-8fd1-d9afda324a9f",
+                  "list_name": "Commercial Real Estate - GMaps",
+                  "contact_id": "00000473-852a-44aa-b068-7cbeab247599",
+                  "contact_name": "Shelley Gould",
+                  "contact_email": "sgould@smartstops.net",
+                  "company": "Smartstops.Net",
+                  "job_title": "Director Of Business Development",
+                  "added_at": "2026-08-12T08:05:43.412Z",
+                  "changed_at": "2026-08-12T08:05:43.412Z"
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/WebhookAck"
+          }
+        }
+      }
+    },
+    "list_member_removed": {
+      "post": {
+        "summary": "list_member_removed",
+        "tags": [
+          "Webhooks"
+        ],
+        "description": "A contact was removed from a lead list. Same payload as\n`list_member_added`, and the same per-row volume caveat.\n",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/WebhookEnvelope"
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "data": {
+                        "type": "object",
+                        "properties": {
+                          "member_id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "list_id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "list_name": {
+                            "type": "string"
+                          },
+                          "contact_id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "contact_name": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "contact_email": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "changed_at": {
+                            "type": "string",
+                            "format": "date-time"
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/WebhookAck"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "apiToken": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "aca_",
+        "description": "Create a token under [Settings → CLI Tokens](/settings?tab=cli-tokens).\nTokens start with `aca_` and are sent as `Authorization: Bearer aca_…`.\n\n**Tokens are organization-scoped at issue time.** The organization is frozen\ninto the token when you create it — switching organizations in the app later\ndoes not change what an existing token can reach. If you automate several\norganizations, issue one token per organization.\n\nTokens are stored as a SHA-256 hash and shown only once, so a lost token must\nbe revoked and reissued.\n"
+      },
+      "webhookSecret": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "x-webhook-secret",
+        "description": "Your organization's webhook secret, from Settings → Webhooks."
+      }
+    },
+    "parameters": {
+      "Limit": {
+        "name": "limit",
+        "in": "query",
+        "description": "Rows per page. Values above 100 are clamped to 100.",
+        "schema": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100,
+          "default": 50
+        }
+      },
+      "Cursor": {
+        "name": "cursor",
+        "in": "query",
+        "description": "Opaque pagination cursor from the previous response's `next_cursor`.\nTreat it as a token — its encoding is not part of the contract.\n",
+        "schema": {
+          "type": "string"
+        }
+      }
+    },
+    "schemas": {
+      "Contact": {
+        "type": "object",
+        "description": "A CRM contact as returned by read endpoints.",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "display_name": {
+            "type": "string"
+          },
+          "first_name": {
+            "type": "string",
+            "nullable": true
+          },
+          "last_name": {
+            "type": "string",
+            "nullable": true
+          },
+          "primary_email": {
+            "type": "string",
+            "nullable": true
+          },
+          "primary_phone": {
+            "type": "string",
+            "nullable": true
+          },
+          "primary_linkedin_url": {
+            "type": "string",
+            "nullable": true
+          },
+          "company": {
+            "type": "string",
+            "nullable": true
+          },
+          "company_website": {
+            "type": "string",
+            "nullable": true
+          },
+          "job_title": {
+            "type": "string",
+            "nullable": true
+          },
+          "city": {
+            "type": "string",
+            "nullable": true
+          },
+          "state": {
+            "type": "string",
+            "nullable": true
+          },
+          "country": {
+            "type": "string",
+            "nullable": true
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "nullable": true
+          },
+          "status": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string",
+            "nullable": true
+          },
+          "lead_score": {
+            "type": "number",
+            "nullable": true
+          },
+          "stage_id": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "pipeline_id": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "owner_user_id": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "custom_fields": {
+            "type": "object",
+            "additionalProperties": true,
+            "nullable": true
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          }
+        }
+      },
+      "LeadList": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string",
+            "nullable": true
+          },
+          "source_type": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "archived"
+            ]
+          },
+          "lead_count": {
+            "type": "integer",
+            "description": "Cached member count, restated after every bulk membership change."
+          },
+          "is_smart": {
+            "type": "boolean",
+            "nullable": true
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          }
+        }
+      },
+      "ListMember": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Membership row id — this is what the cursor keys on."
+          },
+          "contact_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "added_at": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "contact": {
+            "type": "object",
+            "nullable": true,
+            "description": "A small projection of the contact, to save a second call.",
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "display_name": {
+                "type": "string"
+              },
+              "primary_email": {
+                "type": "string",
+                "nullable": true
+              },
+              "company": {
+                "type": "string",
+                "nullable": true
+              },
+              "job_title": {
+                "type": "string",
+                "nullable": true
+              }
+            }
+          }
+        }
+      },
+      "CustomFieldDefinition": {
+        "type": "object",
+        "description": "One organization-defined field available on every contact.",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "field_key": {
+            "type": "string",
+            "description": "The key inside `crm_contacts.custom_fields`, and the merge variable name in sequences."
+          },
+          "display_name": {
+            "type": "string",
+            "description": "Human label shown in the dashboard."
+          },
+          "field_type": {
+            "type": "string",
+            "description": "e.g. `text`, `number`, `date`, `select`, `boolean`. Values are stored as JSON, not coerced on write."
+          },
+          "options": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "nullable": true,
+            "description": "Allowed values when `field_type` is a select."
+          },
+          "is_required": {
+            "type": "boolean",
+            "nullable": true,
+            "description": "Enforced by the dashboard form, not by the API."
+          },
+          "validation_rules": {
+            "type": "object",
+            "additionalProperties": true,
+            "nullable": true
+          },
+          "default_value": {
+            "type": "string",
+            "nullable": true
+          },
+          "description": {
+            "type": "string",
+            "nullable": true
+          },
+          "display_order": {
+            "type": "integer",
+            "nullable": true
+          },
+          "is_visible_in_list": {
+            "type": "boolean",
+            "nullable": true
+          },
+          "is_searchable": {
+            "type": "boolean",
+            "nullable": true
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          }
+        }
+      },
+      "Sequence": {
+        "type": "object",
+        "description": "An email sequence. `steps` is returned only by the single-sequence read —\na step graph runs to tens of kilobytes, so a 100-row page would be\nmegabytes of JSON nobody asked for.\n",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "draft",
+              "active",
+              "paused"
+            ],
+            "description": "Only `active` sequences send. Enrolling into a draft is allowed and simply waits."
+          },
+          "source_type": {
+            "type": "string",
+            "nullable": true,
+            "description": "How the sequence was authored, e.g. `ai`, `manual`."
+          },
+          "campaign_id": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "lead_list_id": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true,
+            "description": "Legacy single-list link. Prefer `lead_list_ids`."
+          },
+          "lead_list_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Lead lists feeding this sequence. A sequence may draw from several."
+          },
+          "auto_enroll_new_members": {
+            "type": "boolean",
+            "description": "When true, contacts added to any linked list are enrolled automatically."
+          },
+          "settings": {
+            "type": "object",
+            "additionalProperties": true,
+            "nullable": true,
+            "description": "Send windows, daily caps, mailbox pool and tracking configuration."
+          },
+          "steps": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            },
+            "description": "The step graph. Single-sequence read only — absent from list responses."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          }
+        }
+      },
+      "Enrollment": {
+        "type": "object",
+        "description": "One lead's progress through one sequence.",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "sequence_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "lead_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Sequences run on `leads`, not `crm_contacts`. Enrolling a contact\ncreates or reuses its lead record, so this is not the contact id.\n"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "completed",
+              "paused",
+              "replied",
+              "bounced",
+              "unsubscribed",
+              "sender_disconnected"
+            ],
+            "description": "`replied` and `bounced` are terminal and stop further sends.\n`sender_disconnected` means the assigned mailbox lost its connection —\nthe enrollment is stalled, not finished, and resumes when a healthy\nmailbox is available.\n"
+          },
+          "current_step": {
+            "type": "integer",
+            "nullable": true,
+            "description": "Zero-based index into the sequence's steps."
+          },
+          "cycle_number": {
+            "type": "integer",
+            "description": "Increments if the lead is re-enrolled into the same sequence."
+          },
+          "next_send_at": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true,
+            "description": "When the next step is due. Null on a terminal status. An active\nenrollment with a null value is stranded and will not send.\n"
+          },
+          "mailbox_id": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true,
+            "description": "Mailbox pinned to this enrollment, so follow-ups keep the same thread and sender."
+          },
+          "condition_waiting_since": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true,
+            "description": "Set while the enrollment is parked on a wait-for-condition step."
+          },
+          "custom_data": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "nullable": true,
+            "description": "Per-enrollment merge-variable overrides, set at enrollment time via\n`customDataByContactId`. This is where per-lead AI-written copy lives:\nkeys `custom_email_1_subject` / `custom_email_1_body` (1-indexed per\nstep) resolve `{{email_subject_1}}` / `{{email_body_1}}` in the\nsequence. Anything here wins over the sequence's own copy for this\nlead only.\n"
+          },
+          "lead": {
+            "type": "object",
+            "nullable": true,
+            "description": "The lead behind the enrollment. Null if the lead was hard-deleted.",
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "email": {
+                "type": "string",
+                "nullable": true
+              },
+              "first_name": {
+                "type": "string",
+                "nullable": true
+              },
+              "last_name": {
+                "type": "string",
+                "nullable": true
+              },
+              "company": {
+                "type": "string",
+                "nullable": true
+              },
+              "job_title": {
+                "type": "string",
+                "nullable": true
+              }
+            }
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          }
+        }
+      },
+      "Conversation": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "contact_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "channel": {
+            "type": "string",
+            "enum": [
+              "linkedin",
+              "email",
+              "whatsapp",
+              "instagram",
+              "telegram",
+              "sms"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "nullable": true,
+            "description": "e.g. `open`, `closed`."
+          },
+          "mailbox_id": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true,
+            "description": "Email only — which mailbox owns the thread."
+          },
+          "assigned_to_user_id": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "ai_enabled": {
+            "type": "boolean",
+            "nullable": true,
+            "description": "Whether the autopilot agent may reply here."
+          },
+          "ai_paused_until": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "message_count": {
+            "type": "integer",
+            "nullable": true
+          },
+          "unread_count": {
+            "type": "integer",
+            "nullable": true
+          },
+          "has_inbound_message": {
+            "type": "boolean",
+            "description": "True once the contact has sent anything. The cheapest \"did they reply?\" signal."
+          },
+          "has_outbound_message": {
+            "type": "boolean"
+          },
+          "last_message_at": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "last_message_preview": {
+            "type": "string",
+            "nullable": true
+          },
+          "last_message_direction": {
+            "type": "string",
+            "nullable": true,
+            "enum": [
+              "inbound",
+              "outbound"
+            ]
+          },
+          "last_message_subject": {
+            "type": "string",
+            "nullable": true
+          },
+          "lead_intent": {
+            "type": "string",
+            "nullable": true,
+            "description": "Classified intent, when the agent has scored the thread."
+          },
+          "priority_score": {
+            "type": "integer",
+            "nullable": true
+          },
+          "is_system": {
+            "type": "boolean",
+            "description": "Bookkeeping threads such as bounce notices. Excluded from lists unless `include_system=true`."
+          },
+          "messages": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Message"
+            },
+            "description": "Single-conversation read only — the 20 most recent messages, oldest first."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          }
+        }
+      },
+      "Message": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "conversation_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "contact_id": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "direction": {
+            "type": "string",
+            "enum": [
+              "inbound",
+              "outbound"
+            ]
+          },
+          "sender_type": {
+            "type": "string",
+            "nullable": true,
+            "description": "What produced it — e.g. `contact`, `sequence`, `agent`, `user`."
+          },
+          "content": {
+            "type": "string",
+            "nullable": true
+          },
+          "content_type": {
+            "type": "string",
+            "nullable": true
+          },
+          "email_subject": {
+            "type": "string",
+            "nullable": true
+          },
+          "email_from": {
+            "type": "string",
+            "nullable": true
+          },
+          "email_to": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "nullable": true
+          },
+          "attachments": {
+            "type": "array",
+            "nullable": true,
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "status": {
+            "type": "string",
+            "nullable": true,
+            "description": "Delivery state, e.g. `sent`, `delivered`, `failed`."
+          },
+          "ai_generated": {
+            "type": "boolean",
+            "nullable": true
+          },
+          "delivered_at": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "read_at": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "clicked_at": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "WebhookEnvelope": {
+        "type": "object",
+        "description": "Every outbound event uses this envelope. `data` is the only part that varies\nby event type.\n",
+        "properties": {
+          "event": {
+            "type": "string",
+            "description": "Event type. Also sent in the `X-Webhook-Event` header.",
+            "example": "contact_created"
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the event was delivered — not necessarily when it occurred."
+          },
+          "data": {
+            "type": "object",
+            "description": "Event-specific payload."
+          },
+          "webhook_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Delivery ID. Also sent as `X-Webhook-ID`. Use it to deduplicate retries."
+          },
+          "organization_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "MessageEventData": {
+        "type": "object",
+        "properties": {
+          "message_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "conversation_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "contact_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "contact_name": {
+            "type": "string",
+            "nullable": true
+          },
+          "channel": {
+            "type": "string",
+            "description": "Channel the conversation lives on.",
+            "enum": [
+              "linkedin",
+              "email",
+              "whatsapp",
+              "instagram",
+              "telegram",
+              "sms"
+            ]
+          },
+          "direction": {
+            "type": "string",
+            "enum": [
+              "inbound",
+              "outbound"
+            ]
+          },
+          "sender_type": {
+            "type": "string",
+            "nullable": true,
+            "description": "What produced the message — e.g. contact, sequence, agent, user."
+          },
+          "content": {
+            "type": "string",
+            "nullable": true
+          },
+          "content_type": {
+            "type": "string",
+            "nullable": true
+          },
+          "metadata": {
+            "type": "object",
+            "additionalProperties": true,
+            "nullable": true
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "ContactInput": {
+        "type": "object",
+        "description": "All fields optional, but the contact must be nameable — `display_name` is\nderived from first + last name, then company, then email.\n",
+        "properties": {
+          "display_name": {
+            "type": "string",
+            "description": "Derived when omitted.",
+            "example": "Jane Doe"
+          },
+          "first_name": {
+            "type": "string",
+            "description": "Used for personalization tokens in sequences."
+          },
+          "last_name": {
+            "type": "string"
+          },
+          "primary_email": {
+            "type": "string",
+            "description": "The dedupe key. Contacts without one are always inserted.",
+            "example": "jane@acme.com"
+          },
+          "primary_phone": {
+            "type": "string",
+            "description": "E.164 recommended."
+          },
+          "primary_linkedin_url": {
+            "type": "string",
+            "description": "Full profile URL."
+          },
+          "company": {
+            "type": "string"
+          },
+          "company_website": {
+            "type": "string",
+            "description": "Domain or full URL."
+          },
+          "job_title": {
+            "type": "string",
+            "description": "Used by ICP scoring."
+          },
+          "city": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          },
+          "country": {
+            "type": "string",
+            "description": "Used by geography filters."
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Applied on create."
+          },
+          "custom_fields": {
+            "type": "object",
+            "additionalProperties": true,
+            "description": "Arbitrary JSON, available as merge variables in sequences."
+          },
+          "pipeline_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Place directly into a CRM pipeline."
+          },
+          "stage_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Place directly into a pipeline stage."
+          },
+          "owner_user_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Assign an owner."
+          },
+          "source": {
+            "type": "string",
+            "description": "Per-contact attribution, overriding the request default."
+          }
+        }
+      },
+      "Error": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "example": false
+          },
+          "error": {
+            "type": "string"
+          }
+        }
+      },
+      "PoolBuildJob": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "running",
+              "completed",
+              "failed"
+            ]
+          },
+          "total": {
+            "type": "integer",
+            "description": "Contacts this build will create."
+          },
+          "processed": {
+            "type": "integer",
+            "description": "Contacts created so far."
+          },
+          "errors": {
+            "type": "integer"
+          },
+          "error_message": {
+            "type": "string",
+            "nullable": true
+          },
+          "current_offset": {
+            "type": "integer"
+          },
+          "target_list_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "started_at": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "completed_at": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          }
+        }
+      },
+      "WebhookEvent": {
+        "type": "string",
+        "description": "Every value here is emitted by a live trigger. If an event is not in this\nlist, nothing produces it.\n",
+        "enum": [
+          "contact_created",
+          "contact_updated",
+          "stage_changed",
+          "score_changed",
+          "message_received",
+          "message_sent",
+          "tag_added",
+          "tag_removed",
+          "sequence_completed",
+          "lead_replied",
+          "handoff_requested",
+          "list_member_added",
+          "list_member_removed"
+        ]
+      },
+      "WebhookSubscription": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "target_url": {
+            "type": "string",
+            "format": "uri"
+          },
+          "events": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WebhookEvent"
+            }
+          },
+          "secret": {
+            "type": "string",
+            "description": "Signs this subscription's deliveries as `X-Webhook-Signature`.\nReturned on read so an integration can recover it.\n"
+          },
+          "is_active": {
+            "type": "boolean"
+          },
+          "source": {
+            "type": "string",
+            "description": "Free-form label for whatever registered this.",
+            "example": "n8n"
+          },
+          "max_attempts": {
+            "type": "integer",
+            "example": 3
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "example": {
+          "id": "5d2c1b90-3a4e-4f21-b8c7-9e0d1a2b3c4d",
+          "target_url": "https://n8n.example.com/webhook/aca-events",
+          "events": [
+            "message_received",
+            "lead_replied"
+          ],
+          "secret": "7f3a1c9e2b8d4056a1c3e5f7092b4d6e8a0c2e4f6183a5c7d9e1f3057b9d1c3e",
+          "is_active": true,
+          "source": "n8n",
+          "max_attempts": 3,
+          "created_at": "2026-08-11T12:00:00.000Z",
+          "updated_at": "2026-08-11T12:00:00.000Z"
+        }
+      }
+    },
+    "responses": {
+      "BadRequest": {
+        "description": "Malformed or invalid body. Do not retry — it will fail identically.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            },
+            "example": {
+              "success": false,
+              "error": "contacts[] is required and must be non-empty"
+            }
+          }
+        }
+      },
+      "Unauthorized": {
+        "description": "Missing, invalid or revoked token.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            },
+            "example": {
+              "success": false,
+              "error": "Invalid or revoked API token"
+            }
+          }
+        }
+      },
+      "NotFound": {
+        "description": "No such resource in your organization. Returned rather than `403` when the\nresource exists under a different tenant — cross-tenant existence is not\ndisclosed.\n",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            },
+            "example": {
+              "success": false,
+              "error": "Contact not found"
+            }
+          }
+        }
+      },
+      "Forbidden": {
+        "description": "The resource belongs to another organization.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            },
+            "example": {
+              "success": false,
+              "error": "Access denied"
+            }
+          }
+        }
+      },
+      "RateLimited": {
+        "description": "Over 120 requests in the current minute. `Retry-After` says how many\nseconds until the window resets; wait that long and continue.\n",
+        "headers": {
+          "Retry-After": {
+            "description": "Seconds until the current window resets.",
+            "schema": {
+              "type": "integer",
+              "example": 37
+            }
+          },
+          "X-RateLimit-Limit": {
+            "schema": {
+              "type": "integer",
+              "example": 120
+            }
+          },
+          "X-RateLimit-Remaining": {
+            "schema": {
+              "type": "integer",
+              "example": 0
+            }
+          },
+          "X-RateLimit-Reset": {
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            },
+            "example": {
+              "success": false,
+              "error": "Rate limit exceeded: 120 requests per minute. Retry in 37s."
+            }
+          }
+        }
+      },
+      "ServerError": {
+        "description": "Something broke on our side. Safe to retry with backoff.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "WebhookAck": {
+        "description": "Return any 2xx to acknowledge. A non-2xx or a timeout is treated as a failed\ndelivery and retried with backoff up to your configured `max_retries`.\n"
+      }
+    }
+  },
+  "security": [
+    {
+      "apiToken": []
+    }
+  ],
+  "tags": [
+    {
+      "name": "Contacts",
+      "description": "Create and import CRM contacts."
+    },
+    {
+      "name": "Lists",
+      "description": "Build and populate lead lists."
+    },
+    {
+      "name": "Sequences",
+      "description": "Sequences and the enrollments running through them."
+    },
+    {
+      "name": "Conversations",
+      "description": "Threads and their messages, across every channel."
+    },
+    {
+      "name": "Messages",
+      "description": "Reply into existing conversations."
+    },
+    {
+      "name": "Pool",
+      "description": "Search the shared lead pool and build lists from it."
+    },
+    {
+      "name": "Webhooks",
+      "description": "Subscribe to ACA events, and act on them from your own automation."
+    }
+  ]
+}
