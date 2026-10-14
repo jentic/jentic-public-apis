@@ -1,6 +1,6 @@
 # APIs — S
 
-Browsing 716 APIs starting with **S**.
+Browsing 717 APIs starting with **S**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · **S** · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -703,6 +703,7 @@ Browsing 716 APIs starting with **S**.
 | [swiftfoxcrm.com](../../../../apis/openapi/swiftfoxcrm.com) | [swiftfox-api](../../../../apis/openapi/swiftfoxcrm.com/swiftfox-api) |
 | [swiftlynx.ai](../../../../apis/openapi/swiftlynx.ai) | [main](../../../../apis/openapi/swiftlynx.ai/main) |
 | [swiftype.com](../../../../apis/openapi/swiftype.com) | [main](../../../../apis/openapi/swiftype.com/main) |
+| [swingfactor.ai](../../../../apis/openapi/swingfactor.ai) | [main](../../../../apis/openapi/swingfactor.ai/main) |
 | [swoogo.com](../../../../apis/openapi/swoogo.com) | [main](../../../../apis/openapi/swoogo.com/main) |
 | [sydnee.app](../../../../apis/openapi/sydnee.app) | [main](../../../../apis/openapi/sydnee.app/main) |
 | [syegps.com](../../../../apis/openapi/syegps.com) | [main](../../../../apis/openapi/syegps.com/main) |
