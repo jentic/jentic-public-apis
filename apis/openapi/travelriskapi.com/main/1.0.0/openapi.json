@@ -1,0 +1,1402 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Travel Risk API",
+    "description": "Real-time travel advisories, disaster alerts, conflict events and composite country risk scores, aggregated from government and multilateral sources.\n\n## Authentication\nSend your key in the `X-API-Key` header on every `/api/v1/*` request:\n\n```\ncurl -H \"X-API-Key: YOUR_KEY\" \\\n  https://api.travelriskapi.com/api/v1/alerts?limit=5\n```\n\nNo key yet? `POST /api/v1/register` with `{\"email\": \"you@example.com\"}` returns one immediately and emails you a copy. Lost it? `POST /api/v1/recover-key`.\n\n## Plans and limits\n| Plan | Price | Requests/day | Burst/min |\n|---|---|---|---|\n| Free | $0 | 100 | 60 |\n| Starter | $29/mo | 2,000 | 120 |\n| Pro | $99/mo | 10,000 | 600 |\n| Enterprise | $499/mo | unlimited | 3,000 |\n\nThe same key also opens the aviation API (`/api/v9`, `/adb`, `/ext/v1`): flight status, airports, airlines, airline safety, in-flight Wi-Fi and Starlink, airport security wait times. Reference: https://api.travelriskapi.com/ext/reference/\n\nCredits (from $10 for 10,000 requests, no subscription) are consumed only after the daily quota is exhausted, so they act as overflow. See `GET /api/v1/billing/plans`.\n\nThe daily counter resets at 00:00 UTC. Two independent limits apply — a per-minute burst limit and the daily quota — and each returns `429` with `Retry-After`.\n\n## Response headers\n| Header | Meaning |\n|---|---|\n| `X-Quota-Limit` / `X-Quota-Used` / `X-Quota-Remaining` | your daily allowance |\n| `X-Credits-Balance` | prepaid credits left |\n| `X-RateLimit-Limit` / `X-RateLimit-Remaining` | per-minute burst |\n| `X-Cache` | `HIT` or `MISS` — responses are cached server-side for 15 minutes |\n| `ETag`, `Age` | cache metadata (informational) |\n\n`Cache-Control: no-cache` is intentional: we cache on our side to answer faster, but you always reach us, so you never receive data your own HTTP library held back.\n\n## Risk scores\nAn `advisory_level` of **0** means no source publishes an advisory for that territory (small dependencies, some overseas territories) — treat it as no data, not as risk-free. Published levels are 1-4.\n\n`risk_score` is a composite on a 1-5 scale: the advisory level plus up to +2.0 from currently active alerts, with diminishing returns: impact = 2 * (1 - exp(-w / 4)), where w weighs each alert by severity (Critical 1.0, High 0.5, Medium 0.25, Low 0) and local zone-level warnings (US National Weather Service counties) at 1/20. Capped at 5.0. The same value is returned by `/countries` and `/risk-score/{iso}` — they share one implementation. `/countries` also exposes `base_risk_score` (the advisory level alone) and `active_alerts` so you can see how a score was reached.\n\n## Tracking changes\nList responses also carry `data_updated_at` (the newest record we hold) and `generated_at` (when this payload was assembled), so freshness is explicit. Conflict data is pulled every 15 minutes, alerts every 6 hours, government advisories daily.\n\nAlert ids are stable: when an upstream revises an alert (severity escalates, wording changes), we update the same record and bump `updated_at` rather than issuing a new id. To sync incrementally, poll with `updated_since`:\n\n```\nGET /api/v1/alerts?updated_since=2026-08-26T00:00:00&limit=1000\n```\n\nThat returns alerts created **or** revised since that moment. Keep the highest `updated_at` you have seen and pass it back next time. `created_at` never moves, so `updated_at > created_at` means the alert has been revised at least once.\n\n## Country codes\nEndpoints taking a country accept **ISO 3166-1 alpha-3** (`USA`, `GBR`, `FRA`). For convenience **alpha-2** (`US`, `GB`) is also accepted, as are the legacy 3-letter codes this API used before 2026-08-11. `GET /api/v1/countries/codes` returns every supported code in one response.\n\n## Changelog\nEvery API change is listed at https://travelriskapi.com/changelog — including new fields, which are the most likely thing to surprise a strict JSON parser. We add fields; we do not rename or remove them without notice, and **API keys do not expire**.\n\n## Pagination\nList endpoints take `skip` and `limit` (max **1000** per page) and report `total`, so a full export of ~19,000 alerts takes 20 requests and a few seconds. Responses are compressed (gzip/zstd) when your client advertises support.",
+    "contact": {
+      "name": "Travel Code",
+      "email": "api@travel-code.com",
+      "url": "https://travelriskapi.com"
+    },
+    "version": "1.0.0",
+    "summary": "Government travel advisories, disaster and conflict alerts and country risk scores.",
+    "x-logo": {
+      "url": "https://travelriskapi.com/assets/logo.png",
+      "backgroundColor": "#FFFFFF",
+      "altText": "Travel Risk API"
+    },
+    "x-jentic-source-url": "https://travelriskapi.com/openapi.json"
+  },
+  "servers": [
+    {
+      "url": "https://api.travelriskapi.com",
+      "description": "Production"
+    }
+  ],
+  "paths": {
+    "/api/v1/health": {
+      "get": {
+        "tags": [
+          "System"
+        ],
+        "summary": "Service health check",
+        "operationId": "health_check_api_v1_health_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "security": []
+      }
+    },
+    "/api/v1/countries/codes": {
+      "get": {
+        "tags": [
+          "Public Data"
+        ],
+        "summary": "Flat list of every valid ISO 3166-1 alpha-3 code we cover",
+        "description": "All supported country codes in one response, no pagination.\n\n/api/v1/countries is paginated (100 max per page), which makes \"give me the\nlist of valid codes\" a three-request job. This returns them all at once so\nclients can validate input locally.",
+        "operationId": "list_country_codes_api_v1_countries_codes_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/countries": {
+      "get": {
+        "tags": [
+          "Public Data"
+        ],
+        "summary": "List countries with advisory levels",
+        "operationId": "get_countries_api_v1_countries_get",
+        "parameters": [
+          {
+            "name": "skip",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Skip"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 1000,
+              "minimum": 1,
+              "default": 50,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/countries/{iso_code}": {
+      "get": {
+        "tags": [
+          "Public Data"
+        ],
+        "summary": "Get country detail by ISO-3 code",
+        "operationId": "get_country_api_v1_countries__iso_code__get",
+        "parameters": [
+          {
+            "name": "iso_code",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Iso Code"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/alerts": {
+      "get": {
+        "tags": [
+          "Public Data"
+        ],
+        "summary": "List active alerts with optional filters",
+        "operationId": "get_alerts_api_v1_alerts_get",
+        "parameters": [
+          {
+            "name": "severity",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Filter: Low | Medium | High | Critical",
+              "title": "Severity"
+            },
+            "description": "Filter: Low | Medium | High | Critical"
+          },
+          {
+            "name": "alert_type",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Filter: earthquake | flood | wildfire | cyclone | volcano | drought | severe_storm | humanitarian | armed_conflict | other",
+              "title": "Alert Type"
+            },
+            "description": "Filter: earthquake | flood | wildfire | cyclone | volcano | drought | severe_storm | humanitarian | armed_conflict | other"
+          },
+          {
+            "name": "country_iso",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Filter by country code. Accepts ISO 3166-1 alpha-3 (USA), alpha-2 (US), or legacy 3-letter codes we used before 2026-08-11.",
+              "title": "Country Iso"
+            },
+            "description": "Filter by country code. Accepts ISO 3166-1 alpha-3 (USA), alpha-2 (US), or legacy 3-letter codes we used before 2026-08-11."
+          },
+          {
+            "name": "days",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 365,
+              "minimum": 1,
+              "description": "Only events from the last N days (by event_date). Omit for all active alerts.",
+              "title": "Days"
+            },
+            "description": "Only events from the last N days (by event_date). Omit for all active alerts."
+          },
+          {
+            "name": "updated_since",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "ISO-8601 timestamp. Return only alerts created or revised since then — use it to poll for changes instead of re-reading everything. Example: 2026-08-26T00:00:00",
+              "title": "Updated Since"
+            },
+            "description": "ISO-8601 timestamp. Return only alerts created or revised since then — use it to poll for changes instead of re-reading everything. Example: 2026-08-26T00:00:00"
+          },
+          {
+            "name": "skip",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Skip"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 1000,
+              "minimum": 1,
+              "default": 50,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/alerts/{alert_id}": {
+      "get": {
+        "tags": [
+          "Public Data"
+        ],
+        "summary": "Get alert detail by ID",
+        "operationId": "get_alert_api_v1_alerts__alert_id__get",
+        "parameters": [
+          {
+            "name": "alert_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Alert Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/risk-score/{iso_code}": {
+      "get": {
+        "tags": [
+          "Public Data"
+        ],
+        "summary": "Composite risk score (advisory level + active-alert impact)",
+        "operationId": "get_risk_score_api_v1_risk_score__iso_code__get",
+        "parameters": [
+          {
+            "name": "iso_code",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Iso Code"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/trips/assess": {
+      "post": {
+        "tags": [
+          "Public Data"
+        ],
+        "summary": "Assess an itinerary: destination risk, nearby alerts and flight status per segment",
+        "description": "Send flights (flight number and/or airports) and stays (country). For each segment you get the destination\ncountry's risk score and government advisory levels, the active alerts within 300 km of the arrival airport\n(or in the country for a stay), and live status for flights departing within 48 hours. `flags` lists what\nneeds attention across the trip, most severe first. Counts as one request; live flight lookups also count\nas aviation calls on the same key.",
+        "operationId": "assess_trip_api_v1_trips_assess_post",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TripRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/trips": {
+      "post": {
+        "tags": [
+          "Public Data"
+        ],
+        "summary": "Watch a trip: re-assessed every 30 minutes, new risk pushed to email, Slack, Teams or your webhook",
+        "description": "Same itinerary shape as /trips/assess plus `external_id` (your trip id; sending it again updates the trip),\n`traveler` and `notify` (emails, slack_webhook, teams_webhook, webhook). Returns the first assessment and, on\ncreation, `webhook_secret` for verifying `X-TRK-Signature: sha256=HMAC(secret, body)`. Problems already present\nat creation are in the response; later ones are pushed once each. Watching ends a day after the last segment.",
+        "operationId": "watch_trip_api_v1_trips_post",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "examples": [
+                  {
+                    "external_id": "T-1001",
+                    "traveler": {
+                      "name": "Ana Silva",
+                      "email": "ana@example.com"
+                    },
+                    "notify": {
+                      "emails": [
+                        "travel@example.com"
+                      ],
+                      "webhook": "https://example.com/hooks/travel-risk"
+                    },
+                    "segments": [
+                      {
+                        "type": "flight",
+                        "flight": "UA1",
+                        "from_airport": "SFO",
+                        "to_airport": "SIN",
+                        "start": "2026-11-02T22:40:00Z"
+                      },
+                      {
+                        "type": "stay",
+                        "country": "SGP",
+                        "end": "2026-11-06T09:00:00Z"
+                      }
+                    ]
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "Public Data"
+        ],
+        "summary": "List watched trips",
+        "operationId": "list_trips_api_v1_trips_get",
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "active",
+              "title": "Status"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 100,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/trips/{trip_id}": {
+      "get": {
+        "tags": [
+          "Public Data"
+        ],
+        "summary": "Get a watched trip with its latest assessment",
+        "operationId": "get_trip_api_v1_trips__trip_id__get",
+        "parameters": [
+          {
+            "name": "trip_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Trip Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Public Data"
+        ],
+        "summary": "Stop watching a trip",
+        "operationId": "stop_trip_api_v1_trips__trip_id__delete",
+        "parameters": [
+          {
+            "name": "trip_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Trip Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/trips/{trip_id}/test-notification": {
+      "post": {
+        "tags": [
+          "Public Data"
+        ],
+        "summary": "Send a test notification to the trip's channels",
+        "operationId": "test_trip_notification_api_v1_trips__trip_id__test_notification_post",
+        "parameters": [
+          {
+            "name": "trip_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Trip Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/conflicts": {
+      "get": {
+        "tags": [
+          "Public Data"
+        ],
+        "summary": "Recent armed-conflict incidents (coerce, assault, fight, mass violence)",
+        "operationId": "get_conflicts_api_v1_conflicts_get",
+        "parameters": [
+          {
+            "name": "days",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 30,
+              "minimum": 1,
+              "description": "Lookback window in days (max 30)",
+              "default": 7,
+              "title": "Days"
+            },
+            "description": "Lookback window in days (max 30)"
+          },
+          {
+            "name": "country_iso",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Filter by country. Accepts ISO 3166-1 alpha-3 (DEU), alpha-2 (DE), or a legacy code this API issued before 2026-08-11.",
+              "title": "Country Iso"
+            },
+            "description": "Filter by country. Accepts ISO 3166-1 alpha-3 (DEU), alpha-2 (DE), or a legacy code this API issued before 2026-08-11."
+          },
+          {
+            "name": "country",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Legacy alias for country_iso. Still honoured; prefer country_iso.",
+              "title": "Country"
+            },
+            "description": "Legacy alias for country_iso. Still honoured; prefer country_iso.",
+            "deprecated": true
+          },
+          {
+            "name": "min_severity",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Low | Medium | High | Critical",
+              "title": "Min Severity"
+            },
+            "description": "Low | Medium | High | Critical"
+          },
+          {
+            "name": "skip",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Skip"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 1000,
+              "minimum": 1,
+              "default": 50,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/advisories": {
+      "get": {
+        "tags": [
+          "Public Data"
+        ],
+        "summary": "Country travel advisories aggregated from multiple authoritative agencies",
+        "operationId": "get_advisories_api_v1_advisories_get",
+        "parameters": [
+          {
+            "name": "country_iso",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Filter to one country. Accepts ISO 3166-1 alpha-3 (DEU), alpha-2 (DE), or a legacy code this API issued before 2026-08-11.",
+              "title": "Country Iso"
+            },
+            "description": "Filter to one country. Accepts ISO 3166-1 alpha-3 (DEU), alpha-2 (DE), or a legacy code this API issued before 2026-08-11."
+          },
+          {
+            "name": "country",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Legacy alias for country_iso. Still honoured; prefer country_iso.",
+              "title": "Country"
+            },
+            "description": "Legacy alias for country_iso. Still honoured; prefer country_iso.",
+            "deprecated": true
+          },
+          {
+            "name": "min_level",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 4,
+              "minimum": 1,
+              "description": "Return only countries where max_level ≥ min_level",
+              "title": "Min Level"
+            },
+            "description": "Return only countries where max_level ≥ min_level"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/billing/plans": {
+      "get": {
+        "tags": [
+          "Billing"
+        ],
+        "summary": "Available plans and credit packs",
+        "description": "Public pricing, so the dashboard and landing page never drift from Stripe.",
+        "operationId": "list_plans_api_v1_billing_plans_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "security": []
+      }
+    },
+    "/api/v1/billing/checkout": {
+      "post": {
+        "tags": [
+          "Billing"
+        ],
+        "summary": "Start a Stripe checkout to subscribe to starter/pro/enterprise",
+        "description": "Upgrade the calling key. Authenticated so a session can never be created\nfor someone else's key.",
+        "operationId": "create_checkout_api_v1_billing_checkout_post",
+        "parameters": [
+          {
+            "name": "tier",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^(starter|pro|enterprise)$",
+              "title": "Tier"
+            }
+          },
+          {
+            "name": "success_url",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "title": "Success Url"
+            }
+          },
+          {
+            "name": "cancel_url",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "title": "Cancel Url"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/billing/credits": {
+      "post": {
+        "tags": [
+          "Billing"
+        ],
+        "summary": "Start a Stripe checkout to buy prepaid credits",
+        "operationId": "buy_credits_api_v1_billing_credits_post",
+        "parameters": [
+          {
+            "name": "price_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "A price_id from /api/v1/billing/plans",
+              "title": "Price Id"
+            },
+            "description": "A price_id from /api/v1/billing/plans"
+          },
+          {
+            "name": "success_url",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "title": "Success Url"
+            }
+          },
+          {
+            "name": "cancel_url",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "title": "Cancel Url"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/billing/portal": {
+      "post": {
+        "tags": [
+          "Billing"
+        ],
+        "summary": "Open the Stripe customer portal (cancel, switch plan, update card)",
+        "operationId": "billing_portal_api_v1_billing_portal_post",
+        "parameters": [
+          {
+            "name": "return_url",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "title": "Return Url"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/usage": {
+      "get": {
+        "tags": [
+          "Usage"
+        ],
+        "summary": "Daily/monthly usage breakdown for your API key",
+        "operationId": "get_usage_api_v1_usage_get",
+        "parameters": [
+          {
+            "name": "days",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 90,
+              "minimum": 1,
+              "default": 7,
+              "title": "Days"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/register": {
+      "post": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Register a new free-tier API key",
+        "operationId": "register_api_key_api_v1_register_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegisterRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": []
+      }
+    },
+    "/api/v1/recover-key": {
+      "post": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Email the API key belonging to an address",
+        "description": "Resend an existing key.\n\nAlways answers the same way whether or not the address exists — otherwise this\nendpoint becomes a way to enumerate which emails are registered.",
+        "operationId": "recover_key_api_v1_recover_key_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecoverRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": []
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "RecoverRequest": {
+        "properties": {
+          "email": {
+            "type": "string",
+            "title": "Email"
+          }
+        },
+        "type": "object",
+        "required": [
+          "email"
+        ],
+        "title": "RecoverRequest"
+      },
+      "RegisterRequest": {
+        "properties": {
+          "email": {
+            "type": "string",
+            "title": "Email"
+          },
+          "company": {
+            "type": "string",
+            "title": "Company"
+          }
+        },
+        "type": "object",
+        "required": [
+          "email"
+        ],
+        "title": "RegisterRequest"
+      },
+      "Segment": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "flight",
+              "stay"
+            ],
+            "title": "Type",
+            "default": "flight"
+          },
+          "flight": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Flight",
+            "description": "IATA flight number, e.g. UA1",
+            "examples": [
+              "UA1"
+            ]
+          },
+          "from_airport": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "From Airport",
+            "description": "Departure airport IATA code",
+            "examples": [
+              "SFO"
+            ]
+          },
+          "to_airport": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "To Airport",
+            "description": "Arrival airport IATA code",
+            "examples": [
+              "NRT"
+            ]
+          },
+          "country": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Country",
+            "description": "Stay country: ISO 3166 alpha-3, alpha-2 or name",
+            "examples": [
+              "JPN"
+            ]
+          },
+          "city": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "City"
+          },
+          "lat": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lat"
+          },
+          "lon": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lon"
+          },
+          "start": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start",
+            "description": "Departure or check-in time (ISO 8601)"
+          },
+          "end": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "End",
+            "description": "Arrival or check-out time (ISO 8601)"
+          }
+        },
+        "type": "object",
+        "title": "Segment"
+      },
+      "TripRequest": {
+        "properties": {
+          "trip_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 200
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trip Id"
+          },
+          "segments": {
+            "items": {
+              "$ref": "#/components/schemas/Segment"
+            },
+            "type": "array",
+            "maxItems": 30,
+            "minItems": 1,
+            "title": "Segments"
+          },
+          "include_flight_status": {
+            "type": "boolean",
+            "title": "Include Flight Status",
+            "default": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "segments"
+        ],
+        "title": "TripRequest"
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      }
+    },
+    "securitySchemes": {
+      "ApiKeyHeader": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-API-Key",
+        "description": "Your key from https://travelriskapi.com — free plan, no card."
+      }
+    }
+  },
+  "security": [
+    {
+      "ApiKeyHeader": []
+    }
+  ],
+  "tags": [
+    {
+      "name": "Public Data",
+      "description": "Country advisories, alerts, and risk scores. All endpoints require X-API-Key."
+    },
+    {
+      "name": "Auth",
+      "description": "Self-serve API key registration."
+    },
+    {
+      "name": "Billing",
+      "description": "Stripe checkout + webhook receiver."
+    },
+    {
+      "name": "Usage",
+      "description": "Per-key usage metering and quota status."
+    },
+    {
+      "name": "System",
+      "description": "Health and service metadata. No auth."
+    }
+  ],
+  "externalDocs": {
+    "description": "Documentation",
+    "url": "https://travelriskapi.com/docs"
+  }
+}
