@@ -1,6 +1,6 @@
 # APIs — A
 
-Browsing 437 APIs starting with **A**.
+Browsing 438 APIs starting with **A**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · **A** · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -417,6 +417,7 @@ Browsing 437 APIs starting with **A**.
 | [autodata-group.com](../../../../apis/openapi/autodata-group.com) | [main](../../../../apis/openapi/autodata-group.com/main) |
 | [autodealerdata.com](../../../../apis/openapi/autodealerdata.com) | [main](../../../../apis/openapi/autodealerdata.com/main) |
 | [automationanywhere.com](../../../../apis/openapi/automationanywhere.com) | [main](../../../../apis/openapi/automationanywhere.com/main) |
+| [autoposting.ai](../../../../apis/openapi/autoposting.ai) | [main](../../../../apis/openapi/autoposting.ai/main) |
 | [autorfp.ai](../../../../apis/openapi/autorfp.ai) | [main](../../../../apis/openapi/autorfp.ai/main) |
 | [autoro.io](../../../../apis/openapi/autoro.io) | [main](../../../../apis/openapi/autoro.io/main) |
 | [autotask.net](../../../../apis/openapi/autotask.net) | [main](../../../../apis/openapi/autotask.net/main) |
