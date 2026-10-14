@@ -1,6 +1,6 @@
 # APIs — P
 
-Browsing 335 APIs starting with **P**.
+Browsing 336 APIs starting with **P**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · **P** · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -61,6 +61,7 @@ Browsing 335 APIs starting with **P**.
 | [paste.monster](../../../../apis/openapi/paste.monster) | [main](../../../../apis/openapi/paste.monster/main) |
 | [pastebin.com](../../../../apis/openapi/pastebin.com) | [pastebin-api](../../../../apis/openapi/pastebin.com/pastebin-api) |
 | [pastery.net](../../../../apis/openapi/pastery.net) | [main](../../../../apis/openapi/pastery.net/main) |
+| [patentdata.ai](../../../../apis/openapi/patentdata.ai) | [main](../../../../apis/openapi/patentdata.ai/main) |
 | [pathofexile.com](../../../../apis/openapi/pathofexile.com) | [main](../../../../apis/openapi/pathofexile.com/main) · [path-of-exile](../../../../apis/openapi/pathofexile.com/path-of-exile) |
 | [patientco.com](../../../../apis/openapi/patientco.com) | [main](../../../../apis/openapi/patientco.com/main) |
 | [patientview.org](../../../../apis/openapi/patientview.org) | [main](../../../../apis/openapi/patientview.org/main) · [patientview](../../../../apis/openapi/patientview.org/patientview) |
