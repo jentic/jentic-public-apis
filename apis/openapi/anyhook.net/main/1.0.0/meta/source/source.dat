@@ -1,0 +1,1237 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "AnyHook API",
+    "version": "1.0.0",
+    "description": "Webhook relay API with two surfaces:\n\n**Management API** (/api/v1/) , create apps, query events, trigger replays. Authenticate with: Authorization: Bearer ahk_live_xxx\n\n**Ingress** (https://in.anyhook.net/{user-slug}/{app-slug}) , receives webhooks from Stripe/GitHub/Shopify. No auth required; HMAC signature verified automatically.\n\n**Typical agent workflow:**\n1. Stripe or GitHub: POST /api/v1/connect with the provider key \u2192 the webhook is registered at the provider and verified from the first event (skip step 2)\n   Other providers: POST /api/v1/apps \u2192 get inbound_url\n2. Configure inbound_url in the provider's webhook settings\n3. GET /api/v1/events?app_slug=xxx to monitor delivery\n4. POST /api/v1/events/{id}/replay if delivery failed\n5. DELETE /api/v1/apps/{slug} when done"
+  },
+  "servers": [
+    {
+      "url": "https://anyhook.net",
+      "description": "Management API"
+    },
+    {
+      "url": "https://in.anyhook.net",
+      "description": "Ingress (webhook receiver)"
+    }
+  ],
+  "security": [
+    {
+      "ApiKeyAuth": []
+    }
+  ],
+  "components": {
+    "securitySchemes": {
+      "ApiKeyAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "ahk_live_xxx",
+        "description": "API key from Dashboard Settings > API Keys. Format: ahk_live_<32 alphanumeric chars>. Example header: Authorization: Bearer ahk_live_a1b2c3..."
+      }
+    },
+    "schemas": {
+      "App": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "stripe",
+              "github",
+              "shopify",
+              "generic"
+            ]
+          },
+          "inbound_url": {
+            "type": "string",
+            "format": "uri",
+            "description": "Paste this URL into your source platform's webhook settings (Stripe Dashboard, GitHub repo settings, etc)."
+          },
+          "destinations": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "url": {
+                  "type": "string",
+                  "format": "uri"
+                },
+                "enabled": {
+                  "type": "boolean"
+                },
+                "event_types": {
+                  "type": "array",
+                  "items": { "type": "string" },
+                  "description": "Pro+. Deliver only events whose type matches one of these globs (`*` matches any run of characters, e.g. `invoice.*`, `checkout.session.completed`). Absent = every event. Events whose type AnyHook cannot read are always delivered. Non-matching events are dropped at the edge: no row, no quota."
+                },
+                "rate_limit": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 1000,
+                  "description": "Pro+. Maximum deliveries per second to this destination, retries and replays included."
+                },
+                "delay_seconds": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 86400,
+                  "description": "Pro+. Hold the first delivery attempt this many seconds after receipt. Replays are not delayed."
+                }
+              }
+            }
+          },
+          "is_active": {
+            "type": "boolean"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "Event": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "app_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "source": {
+            "type": "string"
+          },
+          "event_type": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "queued",
+              "success",
+              "retrying",
+              "failed"
+            ]
+          },
+          "attempt": {
+            "type": "integer"
+          },
+          "max_attempts": {
+            "type": "integer"
+          },
+          "is_replay": {
+            "type": "boolean"
+          },
+          "outbound_url": {
+            "type": "string"
+          },
+          "latency_ms": {
+            "type": "integer"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "next_retry_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        }
+      },
+      "ApiKey": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "prefix": {
+            "type": "string"
+          },
+          "last_used_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "Error": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  },
+  "paths": {
+    "/api/v1/api-keys": {
+      "get": {
+        "operationId": "listApiKeys",
+        "summary": "List API keys",
+        "description": "Returns all API keys for the authenticated user. Keys are returned with prefix only , full key values are never retrievable after creation.",
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of API keys",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "api_keys": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/ApiKey"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded. Check Retry-After header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "createApiKey",
+        "summary": "Create a new API key",
+        "description": "Creates a new API key. The full key value is returned only once in the response , store it securely.",
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "name"
+                ],
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 50,
+                    "description": "Human-readable label for this API key."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "API key created. The key field is shown once only , store it securely.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "key": {
+                      "type": "string",
+                      "description": "Full API key value. Shown once only."
+                    },
+                    "id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "prefix": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error (name required, 1-50 chars)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "429": {
+            "description": "Rate limit exceeded. Check Retry-After header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/api-keys/{id}/revoke": {
+      "patch": {
+        "operationId": "revokeApiKey",
+        "summary": "Revoke an API key",
+        "description": "Permanently revokes an API key. The key will immediately stop working for authentication.",
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "API key revoked",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "404": {
+            "description": "API key not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded. Check Retry-After header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/apps": {
+      "get": {
+        "operationId": "listApps",
+        "summary": "List all apps",
+        "description": "Returns all webhook relay apps for the authenticated user.",
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of apps",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "apps": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/App"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "createApp",
+        "summary": "Create a new webhook relay app",
+        "description": "Creates a new webhook relay app and returns its inbound_url.\nPaste inbound_url into Stripe/GitHub/Shopify webhook settings.\nRequired fields: name (string), destination_url (your server endpoint).\nOptional: source ('stripe'|'github'|'shopify'|'generic', default: 'generic').",
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "name",
+                  "destination_url"
+                ],
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "description": "Human-readable name for this app."
+                  },
+                  "destination_url": {
+                    "type": "string",
+                    "format": "uri",
+                    "description": "Your server's endpoint URL that will receive forwarded webhooks."
+                  },
+                  "source": {
+                    "type": "string",
+                    "enum": [
+                      "stripe",
+                      "github",
+                      "shopify",
+                      "generic"
+                    ],
+                    "default": "generic"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "App created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "app": {
+                      "$ref": "#/components/schemas/App"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "429": {
+            "description": "Plan limit reached (app count or daily event cap)"
+          }
+        }
+      }
+    },
+    "/api/v1/apps/{slug}": {
+      "patch": {
+        "operationId": "updateApp",
+        "summary": "Update an app",
+        "description": "Updates destination URLs or toggles the app active state.",
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "slug",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "destinations": {
+                    "type": "array",
+                    "description": "Replaces the whole list. Each item: url (required), enabled, headers (object), event_types, rate_limit, delay_seconds. The three controls are Pro+ and answer 403 on Free unless unchanged from what is stored.",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "url": { "type": "string", "format": "uri" },
+                        "enabled": { "type": "boolean" },
+                        "headers": { "type": "object", "additionalProperties": { "type": "string" } },
+                        "event_types": { "type": "array", "items": { "type": "string" } },
+                        "rate_limit": { "type": "integer", "minimum": 1, "maximum": 1000 },
+                        "delay_seconds": { "type": "integer", "minimum": 1, "maximum": 86400 }
+                      },
+                      "required": ["url"]
+                    }
+                  },
+                  "is_active": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "App updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "app": {
+                      "$ref": "#/components/schemas/App"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "404": {
+            "description": "App not found"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteApp",
+        "summary": "Delete an app",
+        "description": "Permanently deletes a relay app and immediately stops accepting inbound webhooks.\nEvent history is preserved (app_id set to null on existing events).\nUse this to clean up temporary apps created for one-time tasks.",
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "slug",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "App deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "deleted": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "404": {
+            "description": "App not found"
+          }
+        }
+      }
+    },
+    "/api/v1/apps/{slug}/destinations/{index}/rotate-secret": {
+      "post": {
+        "operationId": "rotateDestinationSecret",
+        "summary": "Rotate destination signing secret",
+        "description": "Rotates the HMAC signing secret for a specific destination. If no secret is provided in the request body, a new random secret is generated. Returns the new signing secret.",
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "slug",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "index",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "Zero-based index of the destination in the app's destinations array."
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "secret": {
+                    "type": "string",
+                    "description": "Custom signing secret. If omitted, a random secret is generated."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Secret rotated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "destination_index": {
+                      "type": "integer"
+                    },
+                    "signing_secret": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request (e.g. index out of range)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "404": {
+            "description": "App not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded. Check Retry-After header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/apps/{slug}/events/undelivered": {
+      "get": {
+        "operationId": "listUndeliveredEvents",
+        "summary": "List undelivered events for an app",
+        "description": "Returns events with status 'retrying' or 'failed' for a specific app. Useful for monitoring delivery health and identifying events that need manual replay.",
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "slug",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "since",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date-time",
+              "description": "ISO-8601 datetime. Defaults to 24 hours ago."
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 100,
+              "maximum": 200
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Undelivered event list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "events": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Event"
+                      }
+                    },
+                    "count": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "429": {
+            "description": "Rate limit exceeded. Check Retry-After header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/apps/{slug}/replay-failed": {
+      "post": {
+        "operationId": "replayFailedEvents",
+        "summary": "Bulk replay failed events",
+        "description": "Re-delivers all failed events for an app within the specified time window. Does NOT consume event quota. Returns a list of original-to-new event ID mappings.",
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "slug",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "since": {
+                    "type": "string",
+                    "format": "date-time",
+                    "description": "ISO-8601 datetime. Only replay events created after this timestamp."
+                  },
+                  "limit": {
+                    "type": "integer",
+                    "default": 50,
+                    "maximum": 100,
+                    "description": "Maximum number of events to replay."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Bulk replay queued",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "replayed": {
+                      "type": "integer"
+                    },
+                    "events": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "original_id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "new_id": {
+                            "type": "string",
+                            "format": "uuid"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "404": {
+            "description": "App not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded. Check Retry-After header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/events": {
+      "get": {
+        "operationId": "listEvents",
+        "summary": "Query event delivery log",
+        "description": "Returns delivery log entries. Useful for monitoring and debugging.\nFilter by: app_slug (string), status ('queued'|'success'|'retrying'|'failed'), limit (int, default 50, max 200).",
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "app_slug",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "queued",
+                "success",
+                "retrying",
+                "failed"
+              ]
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 50,
+              "maximum": 200
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Event list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "events": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Event"
+                      }
+                    },
+                    "next_cursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      }
+    },
+    "/api/v1/events/{id}/replay": {
+      "post": {
+        "operationId": "replayEvent",
+        "summary": "Re-deliver a specific event",
+        "description": "Re-delivers a specific event to its original destination URL.\nDoes NOT consume event quota. Use after fixing a downstream error.\nReturns the new event record with is_replay=true.",
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Replay queued",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "event": {
+                      "$ref": "#/components/schemas/Event"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "404": {
+            "description": "Event not found"
+          }
+        }
+      }
+    },
+    "/{user-slug}/{app-slug}": {
+      "post": {
+        "servers": [
+          {
+            "url": "https://in.anyhook.net"
+          }
+        ],
+        "operationId": "receiveWebhook",
+        "summary": "Receive a webhook",
+        "description": "Receives an inbound webhook from any source platform. Always returns 200 within 50ms regardless of downstream processing , delivery is asynchronous. Signature is verified automatically based on source-specific headers (Stripe-Signature for Stripe, X-Hub-Signature-256 for GitHub, X-Shopify-Hmac-Sha256 for Shopify). No authentication required on this endpoint.",
+        "security": [],
+        "parameters": [
+          {
+            "name": "user-slug",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Your account slug, visible in Dashboard URL and app inbound_url."
+          },
+          {
+            "name": "app-slug",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "The app slug returned when creating an app via POST /api/v1/apps."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Event accepted and queued for async delivery."
+          },
+          "404": {
+            "description": "App slug not found or app is inactive/deleted."
+          },
+          "413": {
+            "description": "Payload exceeds plan limit: 512KB (Free), 2MB (Pro), 10MB (Scale)."
+          }
+        }
+      }
+    },
+    "/api/v1/connect": {
+      "post": {
+        "operationId": "connectProvider",
+        "summary": "Connect Stripe or GitHub with one key",
+        "description": "Registers an app's inbound URL as a webhook at Stripe or GitHub using the provider's own key, saves the signing secret the provider yields, and turns on signature verification at the edge. The provider is read from the key prefix (sk_/rk_ for Stripe, github_pat_/ghp_ for GitHub). The key is used for these calls only and is not stored. Without `app`, a new app is created for the provider (and removed again if the provider refuses the key). Re-running replaces the registration instead of duplicating it. Least privilege: a Stripe restricted key with Webhook Endpoints = Write, or a fine-grained GitHub token with Webhooks = Read and write.",
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "key"
+                ],
+                "properties": {
+                  "key": {
+                    "type": "string",
+                    "description": "Stripe secret or restricted key, or GitHub token. Not stored."
+                  },
+                  "app": {
+                    "type": "string",
+                    "description": "Slug of an existing app to connect. Omit to create a new app."
+                  },
+                  "target": {
+                    "type": "string",
+                    "description": "GitHub only: \"owner/repo\", or an organization name for an org-wide hook. Optional when the token administers exactly one repository."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Existing app connected"
+          },
+          "201": {
+            "description": "New app created and connected. Body: { connected, provider, inboundUrl, app, stripe: { endpointId, livemode, enabledEvents, replaced } | github: { target, hookId, updated }, note }"
+          },
+          "400": {
+            "description": "Key not recognised, publishable key, invalid target, or GitHub target required (body lists `candidates`)"
+          },
+          "401": {
+            "description": "Unauthorized, or the provider rejected the key (`error: invalid_key`)"
+          },
+          "403": {
+            "description": "Read-only AnyHook key, the provider key lacks the webhook permission (`error: missing_permission`), or the plan's app limit is reached (`error: app_limit_reached`)"
+          },
+          "404": {
+            "description": "App not found"
+          },
+          "502": {
+            "description": "The provider call failed"
+          }
+        }
+      }
+    },
+    "/api/v1/quickstart": {
+      "post": {
+        "summary": "Keyless quickstart , create an ephemeral relay endpoint + API key (no auth)",
+        "description": "The bootstrap for agents: no account or key needed. Returns a live inbound_url, an ahk_live_ API key for the full v1 API, and a claim_url to make the endpoint permanent. Expires in 7 days unless claimed. Rate-limited per IP.",
+        "security": [],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "destination_url": {
+                    "type": "string",
+                    "format": "uri",
+                    "description": "Optional forwarding destination"
+                  },
+                  "source": {
+                    "type": "string",
+                    "description": "Optional provider hint, e.g. stripe/github/shopify"
+                  },
+                  "name": {
+                    "type": "string",
+                    "maxLength": 64
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Ephemeral endpoint created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "inbound_url": {
+                      "type": "string"
+                    },
+                    "api_key": {
+                      "type": "string",
+                      "description": "ahk_live_ bearer key, full scope"
+                    },
+                    "claim_url": {
+                      "type": "string"
+                    },
+                    "expires_at": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "next_steps": {
+                      "type": "object"
+                    },
+                    "note": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited"
+          }
+        }
+      }
+    },
+    "/api/v1/claim": {
+      "post": {
+        "summary": "Claim an ephemeral quickstart account into the signed-in user's account",
+        "description": "Browser flow (Clerk session required). Re-parents the apps, API keys and event history of a quickstart account onto the signed-in user, making them permanent.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "token"
+                ],
+                "properties": {
+                  "token": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Claimed"
+          },
+          "404": {
+            "description": "Invalid or expired token"
+          }
+        }
+      }
+    }
+  }
+}
