@@ -1,6 +1,6 @@
 # APIs — C
 
-Browsing 450 APIs starting with **C**.
+Browsing 451 APIs starting with **C**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · **C** · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -161,6 +161,7 @@ Browsing 450 APIs starting with **C**.
 | [clearbounce.net](../../../../apis/openapi/clearbounce.net) | [main](../../../../apis/openapi/clearbounce.net/main) |
 | [clearout.io](../../../../apis/openapi/clearout.io) | [main](../../../../apis/openapi/clearout.io/main) |
 | [clearpay.com](../../../../apis/openapi/clearpay.com) | [main](../../../../apis/openapi/clearpay.com/main) |
+| [clearpolicy.app](../../../../apis/openapi/clearpolicy.app) | [main](../../../../apis/openapi/clearpolicy.app/main) |
 | [clearstream.io](../../../../apis/openapi/clearstream.io) | [clearstream](../../../../apis/openapi/clearstream.io/clearstream) · [clearstream-api](../../../../apis/openapi/clearstream.io/clearstream-api) |
 | [clerk.com](../../../../apis/openapi/clerk.com) | [clerk-backend](../../../../apis/openapi/clerk.com/clerk-backend) |
 | [clever-cloud.com](../../../../apis/openapi/clever-cloud.com) | [main](../../../../apis/openapi/clever-cloud.com/main) |
