@@ -1,6 +1,6 @@
 # APIs — S
 
-Browsing 721 APIs starting with **S**.
+Browsing 722 APIs starting with **S**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · **S** · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -240,6 +240,7 @@ Browsing 721 APIs starting with **S**.
 | [sinch.com](../../../../apis/openapi/sinch.com) | [main](../../../../apis/openapi/sinch.com/main) |
 | [singaporechatbots.sg](../../../../apis/openapi/singaporechatbots.sg) | [main](../../../../apis/openapi/singaporechatbots.sg/main) |
 | [singlestore.com](../../../../apis/openapi/singlestore.com) | [main](../../../../apis/openapi/singlestore.com/main) |
+| [sinthoma.com.br](../../../../apis/openapi/sinthoma.com.br) | [main](../../../../apis/openapi/sinthoma.com.br/main) |
 | [sipay.com.tr](../../../../apis/openapi/sipay.com.tr) | [main](../../../../apis/openapi/sipay.com.tr/main) |
 | [sirportly.com](../../../../apis/openapi/sirportly.com) | [main](../../../../apis/openapi/sirportly.com/main) |
 | [sirv.com](../../../../apis/openapi/sirv.com) | [main](../../../../apis/openapi/sirv.com/main) |
