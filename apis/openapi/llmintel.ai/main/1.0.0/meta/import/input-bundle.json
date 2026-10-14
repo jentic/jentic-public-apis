@@ -1,0 +1,1554 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "LLMIntel API",
+    "version": "1.0.0",
+    "description": "The LLMIntel REST API. Read a normalized, **machine-readable source of truth** for AI model lifecycle events across OpenAI, Anthropic, Azure, AWS Bedrock, and Google, then ingest **runtime telemetry** to get a live cost & usage view of the models your app actually calls. Every lifecycle record links to its primary provider source.\n\nMost teams send telemetry with the [`@llmintel/telemetry`](https://www.npmjs.com/package/@llmintel/telemetry) agent (one line: `instrument(new OpenAI())`), but every endpoint here is a plain REST call you can hit directly.\n\n## Authentication\n\n**The catalog is public.** `GET /v1/models`, `GET /v1/models/{id}`, `GET /v1/events`, and `GET /v1/status` need no API key at all, so an MCP server, a CI check, or a README badge can read lifecycle data with zero signup.\n\nEverything else (telemetry ingest, comparison) requires a key sent as a bearer token:\n\n```\nAuthorization: Bearer li_...\n```\n\nCreate an **account-scoped** key from your [dashboard](/dashboard). Telemetry ingestion requires one so usage is attributed to your account (any other key is rejected with `403`).\n\n## Rate limits\n\nResponses carry `X-RateLimit-*` headers. Exceeding the limit returns `429` with a `Retry-After` header. Anonymous callers share a stricter per-IP budget; sending a key raises it to that key's tier. Limits exist to stop abuse, not to meter you: pricing is based on tracked model spend, never request volume.",
+    "contact": {
+      "name": "LLMIntel",
+      "url": "https://llmintel.ai",
+      "email": "support@llmintel.ai"
+    },
+    "x-jentic-source-url": "https://llmintel.ai/v1/openapi.json"
+  },
+  "servers": [
+    {
+      "url": "https://llmintel.ai",
+      "description": "Production"
+    }
+  ],
+  "paths": {
+    "/v1/models": {
+      "get": {
+        "tags": [
+          "Models"
+        ],
+        "summary": "List models",
+        "description": "All tracked models with their current canonical lifecycle state. **No API key required.** Anonymous callers share a stricter per-IP rate-limit budget; sending a key raises it to that key's tier.",
+        "operationId": "listModels",
+        "security": [
+          {},
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "provider",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "openai",
+                "anthropic",
+                "azure",
+                "bedrock",
+                "google",
+                "mistral",
+                "cohere"
+              ]
+            },
+            "description": "Filter by provider."
+          },
+          {
+            "name": "state",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "announced",
+                "active",
+                "legacy",
+                "deprecated",
+                "retiring",
+                "retired"
+              ]
+            },
+            "description": "Filter by canonical lifecycle state."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 100
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of models.",
+            "headers": {
+              "X-RateLimit-Limit": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Requests allowed per window."
+              },
+              "X-RateLimit-Remaining": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Requests remaining in the current window."
+              },
+              "X-RateLimit-Reset": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Unix epoch seconds when the window resets."
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Model"
+                      }
+                    },
+                    "count": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid query parameter.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid, or revoked API key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded.",
+            "headers": {
+              "X-RateLimit-Limit": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Requests allowed per window."
+              },
+              "X-RateLimit-Remaining": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Requests remaining in the current window."
+              },
+              "X-RateLimit-Reset": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Unix epoch seconds when the window resets."
+              },
+              "Retry-After": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Seconds until the window resets."
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/models/{id}": {
+      "get": {
+        "tags": [
+          "Models"
+        ],
+        "summary": "Get a model",
+        "description": "Full record for a canonical model id, including lifecycle history and the migration payload. The id contains a slash (e.g. `anthropic/claude-opus-4-1`) and is matched as a path, so request `/v1/models/anthropic/claude-opus-4-1`. **No API key required.** Anonymous callers share a stricter per-IP rate-limit budget; sending a key raises it to that key's tier.",
+        "operationId": "getModel",
+        "security": [
+          {},
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "anthropic/claude-opus-4-1",
+            "description": "Canonical model id (may contain a slash)."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The model detail.",
+            "headers": {
+              "X-RateLimit-Limit": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Requests allowed per window."
+              },
+              "X-RateLimit-Remaining": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Requests remaining in the current window."
+              },
+              "X-RateLimit-Reset": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Unix epoch seconds when the window resets."
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/ModelDetail"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid, or revoked API key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No model with that id.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded.",
+            "headers": {
+              "X-RateLimit-Limit": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Requests allowed per window."
+              },
+              "X-RateLimit-Remaining": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Requests remaining in the current window."
+              },
+              "X-RateLimit-Reset": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Unix epoch seconds when the window resets."
+              },
+              "Retry-After": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Seconds until the window resets."
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/events": {
+      "get": {
+        "tags": [
+          "Events"
+        ],
+        "summary": "List lifecycle events",
+        "description": "Lifecycle change events, newest first. Use `since` for incremental polling. **No API key required.** Anonymous callers share a stricter per-IP rate-limit budget; sending a key raises it to that key's tier.",
+        "operationId": "listEvents",
+        "security": [
+          {},
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "provider",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "openai",
+                "anthropic",
+                "azure",
+                "bedrock",
+                "google",
+                "mistral",
+                "cohere"
+              ]
+            },
+            "description": "Filter by provider."
+          },
+          {
+            "name": "state",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "announced",
+                "active",
+                "legacy",
+                "deprecated",
+                "retiring",
+                "retired"
+              ]
+            },
+            "description": "Filter by target (to) state."
+          },
+          {
+            "name": "since",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "description": "Only events at or after this ISO timestamp."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 100
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of events.",
+            "headers": {
+              "X-RateLimit-Limit": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Requests allowed per window."
+              },
+              "X-RateLimit-Remaining": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Requests remaining in the current window."
+              },
+              "X-RateLimit-Reset": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Unix epoch seconds when the window resets."
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Event"
+                      }
+                    },
+                    "count": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid query parameter.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid, or revoked API key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded.",
+            "headers": {
+              "X-RateLimit-Limit": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Requests allowed per window."
+              },
+              "X-RateLimit-Remaining": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Requests remaining in the current window."
+              },
+              "X-RateLimit-Reset": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Unix epoch seconds when the window resets."
+              },
+              "Retry-After": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Seconds until the window resets."
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/status": {
+      "get": {
+        "tags": [
+          "Status"
+        ],
+        "summary": "Freshness / SLA status",
+        "description": "Public freshness report, no authentication. Returns per-provider freshness and the site-wide SLA window. Maps the worst status to the HTTP code (`200` fresh, `503` stale/failing/unknown) so uptime monitors can alert directly.",
+        "operationId": "getStatus",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "All sources fresh.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Status"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "At least one source is stale, failing, or unknown.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Status"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/compare": {
+      "get": {
+        "tags": [
+          "Compare"
+        ],
+        "summary": "Compare models side by side",
+        "description": "An N-model comparison matrix across lifecycle, cost, and performance. Lifecycle and cost fields are available to every key; performance fields (capability class, speed, latency) are benchmark-derived and included only for paid keys. Free keys receive `performanceUnlocked: false` and null performance fields. Each entry may be a canonical id, an alias, or the bare API model string; references that resolve to the same model collapse into one column, and unmatched references are omitted.",
+        "operationId": "compareModels",
+        "parameters": [
+          {
+            "name": "models",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "gpt-4o,anthropic/claude-opus-4-1",
+            "description": "Comma-separated model references (2–6): canonical ids, aliases, or bare model names."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The comparison matrix.",
+            "headers": {
+              "X-RateLimit-Limit": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Requests allowed per window."
+              },
+              "X-RateLimit-Remaining": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Requests remaining in the current window."
+              },
+              "X-RateLimit-Reset": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Unix epoch seconds when the window resets."
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/Comparison"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid query parameter.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid, or revoked API key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded.",
+            "headers": {
+              "X-RateLimit-Limit": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Requests allowed per window."
+              },
+              "X-RateLimit-Remaining": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Requests remaining in the current window."
+              },
+              "X-RateLimit-Reset": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Unix epoch seconds when the window resets."
+              },
+              "Retry-After": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Seconds until the window resets."
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/telemetry": {
+      "post": {
+        "tags": [
+          "Telemetry"
+        ],
+        "summary": "Ingest runtime usage",
+        "description": "Ingest a batch of **metadata-only** model-usage records (no prompt/response content). The server hour-truncates each `ts`, resolves the model, prices it at ingest (frozen so historic spend never shifts), and idempotently upserts into per-`(account, environment, model, hour)` rollup buckets. Sent by the [`@llmintel/telemetry`](https://www.npmjs.com/package/@llmintel/telemetry) agent, but any client may POST this shape.\n\n**Entitlement:** free while your rolling-30-day tracked spend is under $300/mo; above that a paid spend band (Starter $29/mo and up, scaling with your spend) is required, and the `402` response names the recommended band. There is no sampling; all records are ingested.",
+        "operationId": "ingestTelemetry",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TelemetryRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Records accepted.",
+            "headers": {
+              "X-RateLimit-Limit": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Requests allowed per window."
+              },
+              "X-RateLimit-Remaining": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Requests remaining in the current window."
+              },
+              "X-RateLimit-Reset": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Unix epoch seconds when the window resets."
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/TelemetryResult"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid query parameter.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid, or revoked API key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Tracked model spend exceeds the free allowance; a paid spend-band plan is required. The error message names the recommended band.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The API key is not account-scoped (required for telemetry).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded.",
+            "headers": {
+              "X-RateLimit-Limit": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Requests allowed per window."
+              },
+              "X-RateLimit-Remaining": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Requests remaining in the current window."
+              },
+              "X-RateLimit-Reset": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Unix epoch seconds when the window resets."
+              },
+              "Retry-After": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Seconds until the window resets."
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "API key as a bearer token. Create one from your dashboard."
+      }
+    },
+    "schemas": {
+      "Model": {
+        "type": "object",
+        "required": [
+          "id",
+          "provider",
+          "displayName",
+          "aliases",
+          "lifecycleState",
+          "sourceUrl",
+          "sourceTerm"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "example": "openai/gpt-4o-2024-05-13",
+            "description": "Canonical model id (provider/model)."
+          },
+          "provider": {
+            "type": "string",
+            "enum": [
+              "openai",
+              "anthropic",
+              "azure",
+              "bedrock",
+              "google",
+              "mistral",
+              "cohere"
+            ]
+          },
+          "displayName": {
+            "type": "string",
+            "example": "GPT-4o (2024-05-13)"
+          },
+          "aliases": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "example": [
+              "gpt-4o",
+              "gpt-4o-2024-05-13"
+            ]
+          },
+          "lifecycleState": {
+            "type": "string",
+            "enum": [
+              "announced",
+              "active",
+              "legacy",
+              "deprecated",
+              "retiring",
+              "retired"
+            ],
+            "description": "- `announced` — Model has been announced by the provider but is not yet generally available.\n- `active` — Generally available. API calls succeed; recommended for new workloads.\n- `legacy` — Still callable, but superseded and no longer recommended for new workloads.\n- `deprecated` — No new customers/usage onboarding; existing API calls still succeed.\n- `retiring` — A hard retirement date is scheduled and imminent; calls still succeed until then.\n- `retired` — Shut down. API calls fail."
+          },
+          "announcedDate": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date",
+            "example": "2024-05-13"
+          },
+          "deprecatedDate": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date",
+            "example": null
+          },
+          "retirementDate": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date",
+            "example": "2025-10-02"
+          },
+          "sourceUrl": {
+            "type": "string",
+            "format": "uri",
+            "description": "Primary provider source the record was verified against."
+          },
+          "sourceTerm": {
+            "type": "string",
+            "description": "Verbatim provider term that mapped to the canonical state."
+          },
+          "openWeights": {
+            "type": "boolean",
+            "description": "The model ships downloadable weights and can be self-hosted. Use this to tell a null `inputUsdPerMillion` that means \"no per-token rate exists\" apart from one that means \"not in our data yet\". Independent of pricing: a model may have public weights and a published per-token rate at the same time."
+          },
+          "lastVerifiedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        }
+      },
+      "ModelSpec": {
+        "type": [
+          "object",
+          "null"
+        ],
+        "properties": {
+          "inputUsdPerMillion": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "outputUsdPerMillion": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "contextWindowTokens": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "maxOutputTokens": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "source": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "updatedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "capabilityClass": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "flagship",
+              "balanced",
+              "lite",
+              null
+            ],
+            "description": "Benchmark-derived capability tier (paid keys only)."
+          },
+          "tokensPerSecond": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "description": "Median output tokens/sec (paid keys only)."
+          },
+          "timeToFirstTokenSeconds": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "description": "Median TTFT in seconds (paid keys only)."
+          },
+          "benchmarkSource": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Attribution for performance fields (paid keys only)."
+          }
+        }
+      },
+      "ModelDetail": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/Model"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "spec": {
+                "$ref": "#/components/schemas/ModelSpec"
+              },
+              "history": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/Event"
+                }
+              },
+              "migration": {
+                "type": [
+                  "object",
+                  "null"
+                ],
+                "properties": {
+                  "recommendedReplacementIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "resolvedReplacementIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "pricingDelta": {
+                    "type": [
+                      "object",
+                      "null"
+                    ]
+                  },
+                  "contextWindowDelta": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  },
+                  "breakingNotes": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "confidence": {
+                    "type": "string"
+                  },
+                  "replacementSpec": {
+                    "$ref": "#/components/schemas/ModelSpec"
+                  }
+                }
+              },
+              "optimization": {
+                "type": [
+                  "object",
+                  "null"
+                ],
+                "description": "Advisory 'you could switch to…' suggestions (paid keys only; null otherwise). Editorial, with checkable reasons; never asserts equivalence beyond capability class.",
+                "properties": {
+                  "confidence": {
+                    "type": "string",
+                    "example": "editorial"
+                  },
+                  "analysisSource": {
+                    "type": "string",
+                    "example": "Artificial Analysis"
+                  },
+                  "candidates": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "candidateId": {
+                          "type": "string"
+                        },
+                        "candidateDisplayName": {
+                          "type": "string"
+                        },
+                        "candidateProvider": {
+                          "type": "string",
+                          "example": "anthropic"
+                        },
+                        "capabilityClass": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "enum": [
+                            "flagship",
+                            "balanced",
+                            "lite",
+                            null
+                          ]
+                        },
+                        "reasons": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          },
+                          "example": [
+                            "input −80%",
+                            "context 2×",
+                            "switch to anthropic"
+                          ]
+                        },
+                        "pricingDeltaPct": {
+                          "type": "object"
+                        },
+                        "contextWindowDelta": {
+                          "type": [
+                            "integer",
+                            "null"
+                          ]
+                        },
+                        "speedDelta": {
+                          "type": [
+                            "number",
+                            "null"
+                          ]
+                        },
+                        "crossProvider": {
+                          "type": "boolean",
+                          "description": "True when adopting this candidate means switching provider (extra migration effort)."
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "Event": {
+        "type": "object",
+        "required": [
+          "id",
+          "modelId",
+          "toState"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "modelId": {
+            "type": "string",
+            "example": "anthropic/claude-3-opus-20240229"
+          },
+          "fromState": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "announced",
+              "active",
+              "legacy",
+              "deprecated",
+              "retiring",
+              "retired",
+              null
+            ]
+          },
+          "toState": {
+            "type": "string",
+            "enum": [
+              "announced",
+              "active",
+              "legacy",
+              "deprecated",
+              "retiring",
+              "retired"
+            ]
+          },
+          "detectedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "verifiedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        }
+      },
+      "Status": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "fresh",
+              "stale",
+              "failing",
+              "unknown"
+            ]
+          },
+          "slaHours": {
+            "type": "integer"
+          },
+          "checkedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "asOf": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "oldestCheckAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "providers": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "provider": {
+                  "type": "string",
+                  "enum": [
+                    "openai",
+                    "anthropic",
+                    "azure",
+                    "bedrock",
+                    "google",
+                    "mistral",
+                    "cohere"
+                  ]
+                },
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "fresh",
+                    "stale",
+                    "failing",
+                    "unknown"
+                  ]
+                },
+                "lastSuccessAt": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "format": "date-time"
+                },
+                "lastRunAt": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "format": "date-time"
+                },
+                "lastRunStatus": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "ageHours": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "consecutiveFailures": {
+                  "type": "integer"
+                },
+                "error": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "Error": {
+        "type": "object",
+        "required": [
+          "error",
+          "message"
+        ],
+        "properties": {
+          "error": {
+            "type": "string",
+            "example": "unauthorized"
+          },
+          "message": {
+            "type": "string",
+            "example": "Provide an API key as 'Authorization: Bearer <key>'."
+          }
+        }
+      },
+      "Comparison": {
+        "type": "object",
+        "description": "N-model comparison matrix. Performance fields are null unless the key is paid.",
+        "properties": {
+          "performanceUnlocked": {
+            "type": "boolean",
+            "description": "Whether performance fields are populated for this key."
+          },
+          "analysisSource": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "example": "Artificial Analysis"
+          },
+          "models": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "provider": {
+                  "type": "string",
+                  "enum": [
+                    "openai",
+                    "anthropic",
+                    "azure",
+                    "bedrock",
+                    "google",
+                    "mistral",
+                    "cohere"
+                  ]
+                },
+                "displayName": {
+                  "type": "string"
+                },
+                "lifecycleState": {
+                  "type": "string",
+                  "enum": [
+                    "announced",
+                    "active",
+                    "legacy",
+                    "deprecated",
+                    "retiring",
+                    "retired"
+                  ]
+                },
+                "announcedDate": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "format": "date"
+                },
+                "deprecatedDate": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "format": "date"
+                },
+                "retirementDate": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "format": "date"
+                },
+                "sourceUrl": {
+                  "type": "string",
+                  "format": "uri"
+                },
+                "openWeights": {
+                  "type": "boolean",
+                  "description": "The model ships downloadable weights. When true and the price fields are null, cost is infrastructure-derived rather than unknown."
+                },
+                "inputUsdPerMillion": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "outputUsdPerMillion": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "contextWindowTokens": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                },
+                "maxOutputTokens": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                },
+                "capabilityClass": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "enum": [
+                    "flagship",
+                    "balanced",
+                    "lite",
+                    null
+                  ]
+                },
+                "tokensPerSecond": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "timeToFirstTokenSeconds": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "performanceLocked": {
+                  "type": "boolean"
+                },
+                "benchmarkSource": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "TelemetryRequest": {
+        "type": "object",
+        "required": [
+          "records"
+        ],
+        "properties": {
+          "records": {
+            "type": "array",
+            "description": "Metadata-only usage records. Content fields, if present, are ignored.",
+            "items": {
+              "type": "object",
+              "required": [
+                "model"
+              ],
+              "properties": {
+                "model": {
+                  "type": "string",
+                  "example": "gpt-4o-2024-05-13",
+                  "description": "Raw model id the app invoked."
+                },
+                "inputTokens": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "example": 12000
+                },
+                "outputTokens": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "example": 3400
+                },
+                "requestCount": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "default": 1
+                },
+                "ts": {
+                  "type": "string",
+                  "format": "date-time",
+                  "description": "Call time; hour-truncated server-side. Defaults to now."
+                },
+                "environment": {
+                  "type": "string",
+                  "example": "prod",
+                  "description": "Optional env tag; defaults to \"default\"."
+                },
+                "app": {
+                  "type": "string",
+                  "example": "checkout-assistant",
+                  "description": "Optional application slug for cost attribution (overrides the API key's app mapping); unknown slugs fall back to the key mapping."
+                },
+                "tags": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "example": {
+                    "feature": "search",
+                    "tenant": "acme"
+                  },
+                  "description": "Optional custom cost dimensions (group-by/filter). Limits: ≤10 keys/record, key ≤64 chars, value ≤256; extra/oversized entries are dropped, not rejected."
+                },
+                "cachedInputTokens": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "description": "Cached-input tokens from provider usage metadata (captured, not yet priced distinctly)."
+                },
+                "batchInputTokens": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "batchOutputTokens": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            }
+          }
+        }
+      },
+      "TelemetryResult": {
+        "type": "object",
+        "properties": {
+          "accepted": {
+            "type": "integer",
+            "description": "Number of inbound records accepted."
+          },
+          "resolved": {
+            "type": "integer",
+            "description": "Distinct models that resolved to a tracked id (and were priced)."
+          },
+          "unresolved": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Raw models with no tracked match (stored unpriced; a coverage-gap signal)."
+          }
+        }
+      }
+    }
+  },
+  "security": [
+    {
+      "bearerAuth": []
+    }
+  ],
+  "tags": [
+    {
+      "name": "Models",
+      "description": "Tracked models and their current canonical lifecycle state."
+    },
+    {
+      "name": "Events",
+      "description": "Lifecycle change events for incremental polling."
+    },
+    {
+      "name": "Status",
+      "description": "Public freshness / SLA transparency signal."
+    },
+    {
+      "name": "Compare",
+      "description": "Side-by-side comparison of models across cost, performance, and lifecycle."
+    },
+    {
+      "name": "Telemetry",
+      "description": "Ingest runtime model usage for cost analysis and model discovery."
+    }
+  ]
+}
