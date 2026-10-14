@@ -1,6 +1,6 @@
 # APIs — I
 
-Browsing 109 APIs starting with **I**.
+Browsing 110 APIs starting with **I**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · **I** · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -57,6 +57,7 @@ Browsing 109 APIs starting with **I**.
 | [inquizitv.com](../../../../apis/openapi/inquizitv.com) | [main](../../../../apis/openapi/inquizitv.com/main) |
 | [insided.com](../../../../apis/openapi/insided.com) | [main](../../../../apis/openapi/insided.com/main) |
 | [insightly.com](../../../../apis/openapi/insightly.com) | [main](../../../../apis/openapi/insightly.com/main) |
+| [insightsocial.app](../../../../apis/openapi/insightsocial.app) | [main](../../../../apis/openapi/insightsocial.app/main) |
 | [instagram.com](../../../../apis/openapi/instagram.com) | [main](../../../../apis/openapi/instagram.com/main) |
 | [instamojo.com](../../../../apis/openapi/instamojo.com) | [main](../../../../apis/openapi/instamojo.com/main) |
 | [instantly.ai](../../../../apis/openapi/instantly.ai) | [main](../../../../apis/openapi/instantly.ai/main) |
