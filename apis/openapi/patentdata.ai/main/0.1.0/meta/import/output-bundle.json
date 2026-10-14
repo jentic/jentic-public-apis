@@ -1,0 +1,2288 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Patent Status API",
+    "description": "\nStatus of every US patent application and patent, served from our own copy of USPTO bulk data (public domain,\n17 U.S.C. §105). Built for AI agents: compact JSON, stable field names, no seats, no rate limits per key.\n\n**How to use**: send `X-API-KEY: <key>` (or `Authorization: Bearer <key>`) on every `/v1` request.\nNo key yet? `POST /agent/signup` with your owner's email returns one; the first data request answers\n`402 {\"error\": \"payment_required\", \"checkout\": \"POST /agent/checkout-link\", \"minimum_usd\": 20}` — call that endpoint,\nhave a human pay the Stripe link, and retry. Read `/agents.md` for the full flow.\n\n**Billing**: 1 unit per request; list endpoints 1 unit per 100 rows returned. Only successful (2xx) responses are\ncharged. `X-Credits-Charged` on every response says what it cost (`0` on an error); a charged one also carries\n`X-Credits-Remaining`, your balance after it.\n\n**Provenance**: every object carries `source` {product, file_date} naming the USPTO bulk file it came from,\n`as_of` (the date we last ingested that table) and `stale` (true when our copy is older than the product's cadence allows: 48 h, or a week and a day for the weekly maintenance-fee file — check\n`/health`). Application numbers are 8-digit strings; patent numbers are strings without commas; dates are ISO 8601.\n\n**Typical flows**: name → `/v1/entities/search` → `/v1/entities/{id}/applications?status=pending`;\napplication → `/v1/applications/{n}` then `/transactions?since=` to watch for office actions and allowances;\npatent → `/v1/patents/{n}/maintenance` (alive?) and `/v1/patents/{n}/ptab` (challenged?).\n",
+    "version": "0.1.0",
+    "x-jentic-source-url": "https://patentdata.ai/openapi.json"
+  },
+  "servers": [
+    {
+      "url": "https://api.patentdata.ai"
+    }
+  ],
+  "paths": {
+    "/health": {
+      "get": {
+        "tags": [
+          "meta"
+        ],
+        "summary": "Service and data freshness",
+        "operationId": "health_health_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/patents/{patent_number}": {
+      "get": {
+        "tags": [
+          "patent status"
+        ],
+        "summary": "Current status by patent number",
+        "description": "Answers: what is the state of the application behind this granted patent — same object as /v1/applications/{n}, looked up by patent number (the number printed on products and in Google Patents). 404 not_found if the patent is unknown.",
+        "operationId": "get_patent_v1_patents__patent_number__get",
+        "parameters": [
+          {
+            "name": "patent_number",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "US patent number without commas; design/plant/reissue prefixes allowed (D912345, PP12345, RE48123).",
+              "title": "Patent Number"
+            },
+            "description": "US patent number without commas; design/plant/reissue prefixes allowed (D912345, PP12345, RE48123)."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/patents/{patent_number}/claims": {
+      "get": {
+        "tags": [
+          "patent status"
+        ],
+        "summary": "Claims, abstract and CPC of a granted patent",
+        "description": "Answers: what does this granted patent actually claim, what is it about, and how is it classified. Returns `claims` [{number, text, dependent_on}] (dependent_on lists the claims a dependent claim refers to; empty for independent claims; `canceled: true` marks claims canceled by amendment, `number_raw` flags a claim USPTO mis-numbered), `independent_claims`, `claim_count`, `canceled_claims`, `abstract`, `cpc` (CPC symbols as classified at issue, main first), `title`, `kind`, `application_number`, `date`. Text comes from USPTO's weekly full-text XML; a number outside the weeks we hold is a 404 whose `detail` states the covered dates — the status endpoints cover every application regardless. Costs 1 request.",
+        "operationId": "get_patent_claims_v1_patents__patent_number__claims_get",
+        "parameters": [
+          {
+            "name": "patent_number",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "US patent number without commas; design/plant/reissue prefixes allowed (D912345, PP12345, RE48123).",
+              "title": "Patent Number"
+            },
+            "description": "US patent number without commas; design/plant/reissue prefixes allowed (D912345, PP12345, RE48123)."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/patents/{patent_number}/citations": {
+      "get": {
+        "tags": [
+          "patent status"
+        ],
+        "summary": "What a patent cites, and who cites it",
+        "description": "Answers: what prior art is on this patent's front page, and which later patents cite it. `backward` is the front-page list grouped by what was cited — `patents` (US, canonical numbers), `publications` (US pre-grant, US20130157853A1), `foreign` (country + number as printed), `npl` (non-patent literature text) — each with `category` (examiner | applicant | other, with `category_detail` for other) and the cited document's `date` at the precision USPTO prints (usually a month), plus `count` / `examiner_count` / `applicant_count`. `forward` is every loaded grant citing this patent number, newest number first: [{patent_number, grant_date, title, categories}] with `count` (distinct citing grants) and `next_cursor` (famous patents have thousands; page with `limit`/`cursor`). A reference USPTO printed unreadably is kept verbatim with a `defect` note. `direction` = both | backward | forward. Coverage is the weekly grant files loaded: a `forward.count` is complete for those weeks only, and `backward` is null with `detail` naming the covered dates when the patent's own grant file is not loaded. Citations of the patent's pre-grant publication are not folded in. Costs 1 request per 100 citation rows returned.",
+        "operationId": "get_patent_citations_v1_patents__patent_number__citations_get",
+        "parameters": [
+          {
+            "name": "patent_number",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "US patent number without commas; design/plant/reissue prefixes allowed (D912345, PP12345, RE48123).",
+              "title": "Patent Number"
+            },
+            "description": "US patent number without commas; design/plant/reissue prefixes allowed (D912345, PP12345, RE48123)."
+          },
+          {
+            "name": "direction",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "pattern": "^(both|backward|forward)$",
+              "description": "both | backward | forward.",
+              "default": "both",
+              "title": "Direction"
+            },
+            "description": "both | backward | forward."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 1000,
+              "minimum": 1,
+              "description": "Page size. Each 100 rows returned costs 1 request unit.",
+              "default": 100,
+              "title": "Limit"
+            },
+            "description": "Page size. Each 100 rows returned costs 1 request unit."
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Opaque cursor from a previous response's next_cursor. Omit for the first page.",
+              "title": "Cursor"
+            },
+            "description": "Opaque cursor from a previous response's next_cursor. Omit for the first page."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/publications/{publication_number}/claims": {
+      "get": {
+        "tags": [
+          "patent status"
+        ],
+        "summary": "Claims, abstract and CPC of a pre-grant publication",
+        "description": "Answers: what does this published application (as published, not as later amended) actually claim, what is it about, and how is it classified. Returns `claims` [{number, text, dependent_on}] (dependent_on lists the claims a dependent claim refers to; empty for independent claims; `canceled: true` marks claims canceled by amendment, `number_raw` flags a claim USPTO mis-numbered), `independent_claims`, `claim_count`, `canceled_claims`, `abstract`, `cpc` (CPC symbols as classified at publication, main first), `title`, `kind`, `application_number`, `date`. Text comes from USPTO's weekly full-text XML; a number outside the weeks we hold is a 404 whose `detail` states the covered dates — the status endpoints cover every application regardless. Costs 1 request. A bare number (2023/0080435) returns the latest kind on file (A9 corrected over A2 over A1).",
+        "operationId": "get_publication_claims_v1_publications__publication_number__claims_get",
+        "parameters": [
+          {
+            "name": "publication_number",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "Pre-grant publication number, e.g. US20230080435A1 or 2023/0080435.",
+              "title": "Publication Number"
+            },
+            "description": "Pre-grant publication number, e.g. US20230080435A1 or 2023/0080435."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/publications/{publication_number}": {
+      "get": {
+        "tags": [
+          "patent status"
+        ],
+        "summary": "Current status by pre-grant publication number",
+        "description": "Answers: what is the state of the application behind this published application — same object as /v1/applications/{n}, looked up by publication number as printed (US20230080435A1) or bare (2023/0080435).",
+        "operationId": "get_publication_v1_publications__publication_number__get",
+        "parameters": [
+          {
+            "name": "publication_number",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "Pre-grant publication number, e.g. US20230080435A1 or 2023/0080435.",
+              "title": "Publication Number"
+            },
+            "description": "Pre-grant publication number, e.g. US20230080435A1 or 2023/0080435."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/applications/status": {
+      "post": {
+        "tags": [
+          "patent status"
+        ],
+        "summary": "Status of many applications in one call",
+        "description": "Answers: what is the status of each of these applications — the `status` block, patent/publication numbers and applicant for up to 1,000 application numbers, in request order; a number we do not hold comes back in `not_found`, one that cannot be an application number in `invalid`, as you wrote it. Costs 1 request per 100 rows returned. Use /v1/applications/{n} for the full object.",
+        "operationId": "status_batch_v1_applications_status_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StatusBatchIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/events": {
+      "get": {
+        "tags": [
+          "patent status"
+        ],
+        "summary": "What happened, as a feed you can poll",
+        "description": "Answers: what happened to these applications / patents / entities since I last looked — office actions, allowances, abandonments, grants, publications, assignments, PTAB petitions, maintenance events — as detected by our nightly ingest. Filter by `types` and/or targets (at least one filter is required); page with `cursor`; use `since` (ISO date or datetime, on detected_at) for 'since my last poll'. The webhook alternative is POST /v1/monitors. Costs 1 request per 100 rows.",
+        "operationId": "events_feed_v1_events_get",
+        "parameters": [
+          {
+            "name": "types",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Comma-separated event types, e.g. office_action,allowance,grant.",
+              "title": "Types"
+            },
+            "description": "Comma-separated event types, e.g. office_action,allowance,grant."
+          },
+          {
+            "name": "application_numbers",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Comma-separated application numbers (no thousands separators: 17123456).",
+              "title": "Application Numbers"
+            },
+            "description": "Comma-separated application numbers (no thousands separators: 17123456)."
+          },
+          {
+            "name": "patent_numbers",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Comma-separated patent numbers (no thousands separators: 11987654).",
+              "title": "Patent Numbers"
+            },
+            "description": "Comma-separated patent numbers (no thousands separators: 11987654)."
+          },
+          {
+            "name": "entity_ids",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Comma-separated entity or family ids from /v1/entities/search.",
+              "title": "Entity Ids"
+            },
+            "description": "Comma-separated entity or family ids from /v1/entities/search."
+          },
+          {
+            "name": "since",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only events detected on/after this ISO date or datetime.",
+              "title": "Since"
+            },
+            "description": "Only events detected on/after this ISO date or datetime."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 1000,
+              "minimum": 1,
+              "description": "Page size. Each 100 rows returned costs 1 request unit.",
+              "default": 100,
+              "title": "Limit"
+            },
+            "description": "Page size. Each 100 rows returned costs 1 request unit."
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Opaque cursor from a previous response's next_cursor. Omit for the first page.",
+              "title": "Cursor"
+            },
+            "description": "Opaque cursor from a previous response's next_cursor. Omit for the first page."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/applications/{application_number}/transactions": {
+      "get": {
+        "tags": [
+          "patent status"
+        ],
+        "summary": "Prosecution timeline of one application",
+        "description": "Answers: what has happened to this application and when — every USPTO transaction (filing, office actions, responses, notice of allowance, issue, abandonment), newest first. Each item is {date, code, description, event_type} where code/description are USPTO's verbatim and event_type is our normalized enum (office_action, allowance, abandonment, grant, publication, ... or null). Pass `since=YYYY-MM-DD` to get only what happened on or after a date (e.g. since your last check).",
+        "operationId": "get_transactions_v1_applications__application_number__transactions_get",
+        "parameters": [
+          {
+            "name": "application_number",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "US application number, 8 digits. Slashes, commas and spaces are ignored ('17/123,456' = '17123456'), URL-encoded or not.",
+              "title": "Application Number"
+            },
+            "description": "US application number, 8 digits. Slashes, commas and spaces are ignored ('17/123,456' = '17123456'), URL-encoded or not."
+          },
+          {
+            "name": "since",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only transactions dated on or after this ISO date.",
+              "title": "Since"
+            },
+            "description": "Only transactions dated on or after this ISO date."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/applications/{application_number}/office-actions": {
+      "get": {
+        "tags": [
+          "patent status"
+        ],
+        "summary": "Office actions (examiner rejections) of one application, with text",
+        "description": "Answers: what did the examiner reject, under which statutes, and when is a response due. Each item is one office action (non-final, final, restriction, ...) with mailed_date, the reply deadline per 37 CFR 1.134 / MPEP 710.02(b) (`response_due_estimate`, `response_due_max` with extensions under 1.136(a), `response_period_months`, `response_extendable`, `restarts_period` — all null for an action whose period is set in the letter; on a notice of allowance the estimate is the issue-fee due date), `statutes` and `rejections` when USPTO's parsed data exists — `statutes` carries the bare section beside any paragraphed form (103, 112, 112(a)) so a filter on '103' never misses, and is null rather than empty when USPTO sent no structured rejections at all, which is not the same as an action that rejected nothing. The examiner's prose — `body_text` and the per-statute rejection text inside `sections` — costs include_text=true (tens of KB each); without it `text_chars` and `section_chars` say how much there is to ask for. Text lags mailing by 0–7 days; a transaction can exist before its text does.",
+        "operationId": "get_office_actions_v1_applications__application_number__office_actions_get",
+        "parameters": [
+          {
+            "name": "application_number",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "US application number, 8 digits. Slashes, commas and spaces are ignored ('17/123,456' = '17123456'), URL-encoded or not.",
+              "title": "Application Number"
+            },
+            "description": "US application number, 8 digits. Slashes, commas and spaces are ignored ('17/123,456' = '17123456'), URL-encoded or not."
+          },
+          {
+            "name": "include_text",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "Include the full text of each action.",
+              "default": false,
+              "title": "Include Text"
+            },
+            "description": "Include the full text of each action."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/applications/{application_number}/assignments": {
+      "get": {
+        "tags": [
+          "patent status"
+        ],
+        "summary": "Ownership records of one application",
+        "description": "Answers: who owns this application, and how did ownership change — every recorded assignment (reel/frame) whose properties include this application or the patent granted on it, newest recorded first. Each has `assignors`, `assignees` (with `entity_id` when resolved), `conveyance_type` (assignment, security interest, merger, ...), `recorded_date`, `execution_date`, and the `properties` covered by that recordation.",
+        "operationId": "get_application_assignments_v1_applications__application_number__assignments_get",
+        "parameters": [
+          {
+            "name": "application_number",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "US application number, 8 digits. Slashes, commas and spaces are ignored ('17/123,456' = '17123456'), URL-encoded or not.",
+              "title": "Application Number"
+            },
+            "description": "US application number, 8 digits. Slashes, commas and spaces are ignored ('17/123,456' = '17123456'), URL-encoded or not."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/applications/{application_number}": {
+      "get": {
+        "tags": [
+          "patent status"
+        ],
+        "summary": "Current status of one application",
+        "description": "Answers: what is the current state of this US patent application — pending, allowed, abandoned, or granted (and as which patent), who filed it, who examines it, what it claims priority to, and how much activity (office actions, assignments, PTAB challenges) it has seen. One object: `status` {code, description, category, date}, `patent_number`/`grant_date` (null until granted), `publication_number`/`publication_date`, `applicant_name` + `applicant_entity_id` (use with /v1/entities), `examiner_name`, `art_unit`, `entity_status` (small|micro|undiscounted), `continuity` {parents, children}, `counts`, and provenance `source` {product, file_date} / `as_of` / `stale`. For the timeline call /transactions; for ownership call /assignments. 404 not_found if we have no record.",
+        "operationId": "get_application_v1_applications__application_number__get",
+        "parameters": [
+          {
+            "name": "application_number",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "US application number, 8 digits. Slashes, commas and spaces are ignored ('17/123,456' = '17123456'), URL-encoded or not.",
+              "title": "Application Number"
+            },
+            "description": "US application number, 8 digits. Slashes, commas and spaces are ignored ('17/123,456' = '17123456'), URL-encoded or not."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/patents/{patent_number}/assignments": {
+      "get": {
+        "tags": [
+          "patent status"
+        ],
+        "summary": "Ownership records of one patent",
+        "description": "Same as /v1/applications/{n}/assignments but keyed by patent number: who owns this patent and every recorded transfer or security interest against it.",
+        "operationId": "get_patent_assignments_v1_patents__patent_number__assignments_get",
+        "parameters": [
+          {
+            "name": "patent_number",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "US patent number without commas; design/plant/reissue prefixes allowed (D912345, PP12345, RE48123).",
+              "title": "Patent Number"
+            },
+            "description": "US patent number without commas; design/plant/reissue prefixes allowed (D912345, PP12345, RE48123)."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/assignments": {
+      "get": {
+        "tags": [
+          "patent status"
+        ],
+        "summary": "Assignments received by an assignee",
+        "description": "Answers: what patents/applications has this company acquired or been assigned, and when. `assignee` is an entity id (ent_...) or family id (fam_...) from /v1/entities/search, or a name (matched as a normalized prefix, so 'Impossible Foods' finds 'IMPOSSIBLE FOODS INC.'). `recorded_after` narrows to recordations after a date — use it to watch for new acquisitions. Paginated newest first with `next_cursor`. Costs 1 unit per 100 rows.",
+        "operationId": "search_assignments_v1_assignments_get",
+        "parameters": [
+          {
+            "name": "assignee",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Entity id (ent_...), family id (fam_...) or assignee name.",
+              "title": "Assignee"
+            },
+            "description": "Entity id (ent_...), family id (fam_...) or assignee name."
+          },
+          {
+            "name": "recorded_after",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only recordations strictly after this ISO date.",
+              "title": "Recorded After"
+            },
+            "description": "Only recordations strictly after this ISO date."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 1000,
+              "minimum": 1,
+              "description": "Page size. Each 100 rows returned costs 1 request unit.",
+              "default": 100,
+              "title": "Limit"
+            },
+            "description": "Page size. Each 100 rows returned costs 1 request unit."
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Opaque cursor from a previous response's next_cursor. Omit for the first page.",
+              "title": "Cursor"
+            },
+            "description": "Opaque cursor from a previous response's next_cursor. Omit for the first page."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/patents/{patent_number}/ptab": {
+      "get": {
+        "tags": [
+          "patent status"
+        ],
+        "summary": "PTAB challenges against one patent",
+        "description": "Answers: is this patent under (or has it survived) an inter partes review, post-grant review, CBM or derivation proceeding at the PTAB, and what did the Board decide. Each proceeding has `type`, `petitioner`, `patent_owner`, `filed_date`, `status`, `instituted` (true|false|null), `claims_outcome` (all_unpatentable|some_unpatentable|none_unpatentable|null, from the final written decision), `final_decision_date`, and `decisions` — every Board decision document with `kind` (institution_granted, institution_denied, final_written_decision, termination, rehearing, appeal_mandate, other), `date`, `outcome`, `statutes`, `issue_types`, `title`, `pdf_url`. Pass include_text=true for each decision's text as USPTO's dataset carries it (a preview of a few hundred characters). Empty `proceedings` for a known patent means no challenge on record.",
+        "operationId": "get_patent_ptab_v1_patents__patent_number__ptab_get",
+        "parameters": [
+          {
+            "name": "patent_number",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "US patent number without commas; design/plant/reissue prefixes allowed (D912345, PP12345, RE48123).",
+              "title": "Patent Number"
+            },
+            "description": "US patent number without commas; design/plant/reissue prefixes allowed (D912345, PP12345, RE48123)."
+          },
+          {
+            "name": "include_text",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "Include the full text of each decision.",
+              "default": false,
+              "title": "Include Text"
+            },
+            "description": "Include the full text of each decision."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/ptab/{trial_number}": {
+      "get": {
+        "tags": [
+          "patent status"
+        ],
+        "summary": "One PTAB proceeding by trial number, with its decisions",
+        "description": "Answers: what happened in IPR2026-00047 — the proceeding's parties, dates and status, the folded `instituted` / `claims_outcome` / `final_decision_date`, and its `decisions` list (same shape as /v1/patents/{n}/ptab). Pass include_text=true for the full text of each decision.",
+        "operationId": "get_ptab_proceeding_v1_ptab__trial_number__get",
+        "parameters": [
+          {
+            "name": "trial_number",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "PTAB trial number: IPR2026-00047, PGR2026-00074, CBM..., DER... (case and spaces ignored).",
+              "title": "Trial Number"
+            },
+            "description": "PTAB trial number: IPR2026-00047, PGR2026-00074, CBM..., DER... (case and spaces ignored)."
+          },
+          {
+            "name": "include_text",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "Include the full text of each decision.",
+              "default": false,
+              "title": "Include Text"
+            },
+            "description": "Include the full text of each decision."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/ptab": {
+      "get": {
+        "tags": [
+          "patent status"
+        ],
+        "summary": "Search PTAB proceedings by petitioner, patent owner, filing date or status",
+        "description": "Answers: which patents is this petitioner attacking, which of this owner's patents are being challenged, or what was filed after a date. `petitioner` / `patent_owner` accept an entity id (ent_...), a family id (fam_...) or a case-insensitive name fragment. At least one filter is required. Paginated newest filed first. Costs 1 unit per 100 rows.",
+        "operationId": "search_ptab_v1_ptab_get",
+        "parameters": [
+          {
+            "name": "petitioner",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Entity id or name fragment of the petitioner.",
+              "title": "Petitioner"
+            },
+            "description": "Entity id or name fragment of the petitioner."
+          },
+          {
+            "name": "patent_owner",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Entity id or name fragment of the patent owner.",
+              "title": "Patent Owner"
+            },
+            "description": "Entity id or name fragment of the patent owner."
+          },
+          {
+            "name": "filed_after",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only petitions filed strictly after this ISO date.",
+              "title": "Filed After"
+            },
+            "description": "Only petitions filed strictly after this ISO date."
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "USPTO trialStatusCategory, e.g. 'Instituted', 'Terminated' (case-insensitive exact).",
+              "title": "Status"
+            },
+            "description": "USPTO trialStatusCategory, e.g. 'Instituted', 'Terminated' (case-insensitive exact)."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 1000,
+              "minimum": 1,
+              "description": "Page size. Each 100 rows returned costs 1 request unit.",
+              "default": 100,
+              "title": "Limit"
+            },
+            "description": "Page size. Each 100 rows returned costs 1 request unit."
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Opaque cursor from a previous response's next_cursor. Omit for the first page.",
+              "title": "Cursor"
+            },
+            "description": "Opaque cursor from a previous response's next_cursor. Omit for the first page."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/patents/{patent_number}/maintenance": {
+      "get": {
+        "tags": [
+          "patent status"
+        ],
+        "summary": "Is this patent alive? Maintenance fees and expiration",
+        "description": "Answers: is this patent still in force, have its 3.5/7.5/11.5-year maintenance fees been paid, and when does it expire. Returns `events` (every fee event: paid, reminder, expired, reinstated), `windows` {\"3.5y\", \"7.5y\", \"11.5y\": paid|due|expired|n/a}, `expired` (true once a fee lapsed or the term ended), `expiration_reason`, and `expiration_estimate` (`term_start` + 20 years + PTA, where `term_start` is the earliest filing date the patent claims benefit from under 35 U.S.C. 120/121/365(c), else its own filing date; `estimate: true` because terminal disclaimers may shorten it). Window values: paid, due (payable now), grace (overdue, surcharge), expired, upcoming (not yet payable), n/a (design/plant/reissue owe no fees); `deadlines` carries each window's opens/due/surcharge_until dates and `next_fee` the first unpaid window (null when the patent is not alive).",
+        "operationId": "get_patent_maintenance_v1_patents__patent_number__maintenance_get",
+        "parameters": [
+          {
+            "name": "patent_number",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "US patent number without commas; design/plant/reissue prefixes allowed (D912345, PP12345, RE48123).",
+              "title": "Patent Number"
+            },
+            "description": "US patent number without commas; design/plant/reissue prefixes allowed (D912345, PP12345, RE48123)."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/entities/search": {
+      "get": {
+        "tags": [
+          "patent status"
+        ],
+        "summary": "Resolve a company or inventor name to an entity id",
+        "description": "Answers: which entity is 'Impossible Foods' (or any assignee / inventor name) in the USPTO record, and what are its known name variants. Start here before /v1/entities/{id}/applications, /v1/assignments?assignee=, or /v1/ptab?patent_owner=. Results are ranked (prefix matches first) and include `aliases`, `location`, and `counts` {applications, patents, pending}. A company printed under several names is one row with a `fam_...` family id and `members`; a family id is accepted wherever an entity id is. `type` filters to assignee or inventor. Costs 1 unit per 100 rows.",
+        "operationId": "search_entities_v1_entities_search_get",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Name to resolve; punctuation, case and corporate suffixes are ignored.",
+              "title": "Q"
+            },
+            "description": "Name to resolve; punctuation, case and corporate suffixes are ignored."
+          },
+          {
+            "name": "type",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^(assignee|inventor)$"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "assignee or inventor.",
+              "title": "Type"
+            },
+            "description": "assignee or inventor."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 20,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/entities/{entity_id}": {
+      "get": {
+        "tags": [
+          "patent status"
+        ],
+        "summary": "One entity with aliases and portfolio counts",
+        "description": "Answers: who is this entity id (or `fam_...` family id) — canonical name, name variants, location, `family_id`, and how many applications / patents / pending applications it has (a family's counts span its `members`).",
+        "operationId": "get_entity_v1_entities__entity_id__get",
+        "parameters": [
+          {
+            "name": "entity_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Entity Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/entities/{entity_id}/applications": {
+      "get": {
+        "tags": [
+          "patent status"
+        ],
+        "summary": "An entity's applications (portfolio), filterable by status",
+        "description": "Answers: what has this company filed, and what is each filing's state right now. Each row carries the application's current `status` {code, description, category, bucket, date}, `patent_number` when granted, and the link `role`/`confidence`. `status` filters on USPTO's raw category: pending, granted, abandoned, allowed, expired, provisional, pct, other. `status.bucket` is what /v1/entities/{id}/stats counts (allowed folds into pending, expired-after-grant into granted, never-examined into other, null for an application we do not hold), so count buckets to reconcile a portfolio against the statistics. Newest serial first; paginate with `next_cursor`. Costs 1 unit per 100 rows.",
+        "operationId": "get_entity_applications_v1_entities__entity_id__applications_get",
+        "parameters": [
+          {
+            "name": "entity_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Entity Id"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Status category filter: pending | granted | abandoned | allowed | expired | provisional | pct | other.",
+              "title": "Status"
+            },
+            "description": "Status category filter: pending | granted | abandoned | allowed | expired | provisional | pct | other."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 1000,
+              "minimum": 1,
+              "description": "Page size. Each 100 rows returned costs 1 request unit.",
+              "default": 100,
+              "title": "Limit"
+            },
+            "description": "Page size. Each 100 rows returned costs 1 request unit."
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Opaque cursor from a previous response's next_cursor. Omit for the first page.",
+              "title": "Cursor"
+            },
+            "description": "Opaque cursor from a previous response's next_cursor. Omit for the first page."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/entities/{entity_id}/stats": {
+      "get": {
+        "tags": [
+          "patent status"
+        ],
+        "summary": "What is this company doing: portfolio size, velocity, prosecution, technology, examiners, PTAB exposure, deals",
+        "description": "Answers: how big is this company's US patent position, is it growing, how well does it prosecute, what technology is it in, who examines it, is it under attack at the PTAB, and is it buying or selling patents. One object of blocks — `portfolio` {applications, patents, pending, granted, abandoned, alive_patents, expiring_within_12_months, computed_over}, `velocity` {filings_per_year, grants_per_year: [{year, n}]}, `prosecution` (the same metrics as /v1/examiners/{name}/stats over this entity's applications: allowance_rate, median_months_to_first_action, median_months_to_grant, avg_office_actions_per_disposed, rce_rate, appeal_rate), `where` {cpc_subclasses [{subclass, n, share}], cpc_coverage, art_units}, `who` {examiners [{name, key, n}], prosecuted_by {customer_numbers}}, `ptab` {as_patent_owner {proceedings, instituted, claims_lost}, as_petitioner}, `ownership` {acquired, sold, since} — every number defined in `definitions`. Portfolio membership is that of /v1/entities/{id}/applications (title per recorded assignments beats filing). Rates are null when undefined; read `cpc_coverage` before trusting the subclasses. Large entities are precomputed nightly, the rest on first request (`computed_at`); 504 computation_timeout means the entity is queued for the next nightly run. Costs 1 request.",
+        "operationId": "get_entity_stats_v1_entities__entity_id__stats_get",
+        "parameters": [
+          {
+            "name": "entity_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Entity Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/entities/{entity_id}/patents": {
+      "get": {
+        "tags": [
+          "patent status"
+        ],
+        "summary": "An entity's granted patents",
+        "description": "Answers: which patents does this company hold (by applicant, assignee or inventor link), with grant date, expiration estimate and whether each has expired. Newest number first; paginate with `next_cursor`. Costs 1 unit per 100 rows.",
+        "operationId": "get_entity_patents_v1_entities__entity_id__patents_get",
+        "parameters": [
+          {
+            "name": "entity_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Entity Id"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 1000,
+              "minimum": 1,
+              "description": "Page size. Each 100 rows returned costs 1 request unit.",
+              "default": 100,
+              "title": "Limit"
+            },
+            "description": "Page size. Each 100 rows returned costs 1 request unit."
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Opaque cursor from a previous response's next_cursor. Omit for the first page.",
+              "title": "Cursor"
+            },
+            "description": "Opaque cursor from a previous response's next_cursor. Omit for the first page."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/examiners/{examiner_name}/stats": {
+      "get": {
+        "tags": [
+          "patent status"
+        ],
+        "summary": "How does this examiner prosecute: allowance rate, time to first action, RCE and appeal rates",
+        "description": "Answers: what are my odds and how long will it take with this examiner. Precomputed nightly over every application the examiner is listed on: `counts` by status (pending, granted, abandoned, other), `allowance_rate`, `median_months_to_first_action`, `median_months_to_disposal`, `avg_office_actions_per_disposed`, `rce_rate`, `appeal_rate`, `art_units`, plus `sample_size`, `computed_over` (filing-date range) and `definitions`. The name is matched case- and whitespace-insensitively ('smith, jane' = 'SMITH, JANE'). 404 not_found when there are no statistics for that name yet: the tables are rebuilt nightly, so a newly listed examiner appears the next day; USPTO's docket placeholders ('CENTRAL, DOCKET') never do.",
+        "operationId": "get_examiner_stats_v1_examiners__examiner_name__stats_get",
+        "parameters": [
+          {
+            "name": "examiner_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "Examiner name as USPTO prints it, 'LAST, FIRST M' (any case).",
+              "title": "Examiner Name"
+            },
+            "description": "Examiner name as USPTO prints it, 'LAST, FIRST M' (any case)."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/art-units/{art_unit}/stats": {
+      "get": {
+        "tags": [
+          "patent status"
+        ],
+        "summary": "How does this art unit prosecute: allowance rate, time to first action, RCE and appeal rates",
+        "description": "Answers: what does prosecution look like in this USPTO art unit (groupArtUnitNumber, e.g. 2857). Same metrics as /v1/examiners/{name}/stats aggregated over every application in the art unit, plus `examiners` (distinct count). 404 not_found for an unknown art unit.",
+        "operationId": "get_art_unit_stats_v1_art_units__art_unit__stats_get",
+        "parameters": [
+          {
+            "name": "art_unit",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "USPTO art unit number, e.g. 2857.",
+              "title": "Art Unit"
+            },
+            "description": "USPTO art unit number, e.g. 2857."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/search": {
+      "get": {
+        "tags": [
+          "patent status"
+        ],
+        "summary": "Find patents and applications by keywords, CPC class, filing date and owner",
+        "description": "Answers: which granted patents / published applications are about X — by words in the title, abstract or claims (`q`, websearch syntax: words are ANDed, \"quoted phrases\" must be adjacent, `-word` excludes, `or` alternates; English stemming), and/or in a CPC level (`cpc`: C, C12, C12N, C12N15 or C12N15/88 — one level, not a free-form prefix), optionally only `doc_type` grant|publication, filed within `filed_after`..`filed_before` (inclusive, on the application's filing date), and/or in one entity's portfolio (`entity_id` from /v1/entities/search). At least one of q / cpc / entity_id is required (400 otherwise). This is keyword search over the weekly full-text products, not similarity or prior-art search. Each result: `doc_number`, `doc_type`, `kind`, `application_number`, `title`, `date` (grant/publication), `filing_date`, `cpc`, `snippet` (abstract with **matches** marked) and `rank` (ts_rank_cd; null without q). Ranked best first, then newest; page with `next_cursor`. `total` is the number of matches up to 10,000 (`total_capped: true` beyond). A query that runs longer than 10 s is a 504 computation_timeout: add a cpc level, doc_type, a date range or more specific words. Status of any hit: /v1/applications/{application_number}; its full claims: /v1/patents/{n}/claims. Costs 1 unit per 100 rows.",
+        "operationId": "search_patents_v1_search_get",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Websearch query over title, abstract and claims: mRNA \"lipid nanoparticle\" -virus",
+              "title": "Q"
+            },
+            "description": "Websearch query over title, abstract and claims: mRNA \"lipid nanoparticle\" -virus"
+          },
+          {
+            "name": "cpc",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "One CPC level: C, C12, C12N, C12N15 (or C12N15/), C12N15/88.",
+              "title": "Cpc"
+            },
+            "description": "One CPC level: C, C12, C12N, C12N15 (or C12N15/), C12N15/88."
+          },
+          {
+            "name": "doc_type",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^(grant|publication)$"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "grant or publication; omit for both.",
+              "title": "Doc Type"
+            },
+            "description": "grant or publication; omit for both."
+          },
+          {
+            "name": "filed_after",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only applications filed on/after this ISO date.",
+              "title": "Filed After"
+            },
+            "description": "Only applications filed on/after this ISO date."
+          },
+          {
+            "name": "filed_before",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only applications filed on/before this ISO date.",
+              "title": "Filed Before"
+            },
+            "description": "Only applications filed on/before this ISO date."
+          },
+          {
+            "name": "entity_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Entity id (ent_...) or family id (fam_...) from /v1/entities/search: only that portfolio.",
+              "title": "Entity Id"
+            },
+            "description": "Entity id (ent_...) or family id (fam_...) from /v1/entities/search: only that portfolio."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 1000,
+              "minimum": 1,
+              "description": "Page size. Each 100 rows returned costs 1 request unit.",
+              "default": 100,
+              "title": "Limit"
+            },
+            "description": "Page size. Each 100 rows returned costs 1 request unit."
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Opaque cursor from a previous response's next_cursor. Omit for the first page.",
+              "title": "Cursor"
+            },
+            "description": "Opaque cursor from a previous response's next_cursor. Omit for the first page."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/agent/signup": {
+      "post": {
+        "tags": [
+          "billing"
+        ],
+        "summary": "Agent Signup",
+        "operationId": "agent_signup_agent_signup_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SignupIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/agent/checkout-link": {
+      "post": {
+        "tags": [
+          "billing"
+        ],
+        "summary": "Agent Checkout Link",
+        "operationId": "agent_checkout_link_agent_checkout_link_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CheckoutIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/webhooks/stripe": {
+      "post": {
+        "tags": [
+          "billing"
+        ],
+        "summary": "Stripe Webhook",
+        "operationId": "stripe_webhook_webhooks_stripe_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/keys": {
+      "post": {
+        "tags": [
+          "billing"
+        ],
+        "summary": "Mint Key",
+        "operationId": "mint_key_keys_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/KeyIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/agent/me": {
+      "get": {
+        "tags": [
+          "billing"
+        ],
+        "summary": "Agent Me",
+        "operationId": "agent_me_agent_me_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/monitors": {
+      "get": {
+        "tags": [
+          "monitors"
+        ],
+        "summary": "List your monitors",
+        "operationId": "list_monitors_v1_monitors_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response List Monitors V1 Monitors Get"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "monitors"
+        ],
+        "summary": "Watch applications, patents, or entities and get webhooks",
+        "description": "Creates a monitor. When our nightly ingest detects one of `events` on any target, we POST the event to `webhook_url` signed with HMAC-SHA256 of `secret` in `X-Signature`. Each delivery costs 1 request. The response carries `secret` exactly once (generated when you did not pass one); store it, and `coverage_since` — the monitor fires on what we detect from now on, and nothing before that time was ever seen.",
+        "operationId": "create_monitor_v1_monitors_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MonitorIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Create Monitor V1 Monitors Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/monitors/{monitor_id}": {
+      "delete": {
+        "tags": [
+          "monitors"
+        ],
+        "summary": "Stop a monitor",
+        "operationId": "delete_monitor_v1_monitors__monitor_id__delete",
+        "parameters": [
+          {
+            "name": "monitor_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Monitor Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/monitors/{monitor_id}/events": {
+      "get": {
+        "tags": [
+          "monitors"
+        ],
+        "summary": "Events matched by a monitor and their delivery status",
+        "description": "Every event this monitor matched, newest first, each with its delivery attempts and last status. `coverage_since` is when event detection began: nothing before it is here, whatever happened. Returns {monitor_id, count, coverage_since, events: [{event_id, event_type, occurred_on, detected_at, application_number, patent_number, entity_id, detail, attempts, last_status, delivered_at}]}.",
+        "operationId": "monitor_events_v1_monitors__monitor_id__events_get",
+        "parameters": [
+          {
+            "name": "monitor_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Monitor Id"
+            }
+          },
+          {
+            "name": "since",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "ISO date; only events detected on/after this date",
+              "title": "Since"
+            },
+            "description": "ISO date; only events detected on/after this date"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 1000,
+              "minimum": 1,
+              "default": 100,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Monitor Events V1 Monitors  Monitor Id  Events Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "CheckoutIn": {
+        "properties": {
+          "amount_usd": {
+            "type": "integer",
+            "title": "Amount Usd",
+            "description": "Whole US dollars, minimum 20."
+          }
+        },
+        "type": "object",
+        "required": [
+          "amount_usd"
+        ],
+        "title": "CheckoutIn"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "KeyIn": {
+        "properties": {
+          "name": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 200
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          }
+        },
+        "type": "object",
+        "title": "KeyIn"
+      },
+      "MonitorIn": {
+        "properties": {
+          "targets": {
+            "$ref": "#/components/schemas/Targets"
+          },
+          "events": {
+            "items": {
+              "type": "string",
+              "enum": [
+                "office_action",
+                "allowance",
+                "abandonment",
+                "rce",
+                "appeal",
+                "issue_fee_paid",
+                "grant",
+                "publication",
+                "response_filed",
+                "interview",
+                "terminal_disclaimer",
+                "pta",
+                "status_change",
+                "assignment",
+                "ptab_petition",
+                "ptab_decision",
+                "maintenance_due",
+                "maintenance_lapse",
+                "continuation_filed"
+              ]
+            },
+            "type": "array",
+            "title": "Events",
+            "description": "Event types to deliver; default all."
+          },
+          "webhook_url": {
+            "type": "string",
+            "maxLength": 2083,
+            "minLength": 1,
+            "format": "uri",
+            "title": "Webhook Url",
+            "description": "https:// endpoint we POST events to."
+          },
+          "secret": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 128,
+                "minLength": 16
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Secret"
+          }
+        },
+        "type": "object",
+        "required": [
+          "targets",
+          "webhook_url"
+        ],
+        "title": "MonitorIn"
+      },
+      "SignupIn": {
+        "properties": {
+          "owner_email": {
+            "type": "string",
+            "title": "Owner Email",
+            "description": "A real inbox belonging to the human responsible for this agent."
+          },
+          "agent_name": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 200
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent Name"
+          }
+        },
+        "type": "object",
+        "required": [
+          "owner_email"
+        ],
+        "title": "SignupIn"
+      },
+      "StatusBatchIn": {
+        "properties": {
+          "application_numbers": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 1000,
+            "minItems": 1,
+            "title": "Application Numbers"
+          }
+        },
+        "type": "object",
+        "required": [
+          "application_numbers"
+        ],
+        "title": "StatusBatchIn"
+      },
+      "Targets": {
+        "properties": {
+          "application_numbers": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 1000,
+            "title": "Application Numbers"
+          },
+          "patent_numbers": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 1000,
+            "title": "Patent Numbers"
+          },
+          "entity_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 100,
+            "title": "Entity Ids"
+          }
+        },
+        "type": "object",
+        "title": "Targets"
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "ctx": {
+            "type": "object",
+            "title": "Context"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      }
+    },
+    "securitySchemes": {
+      "ApiKey": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-API-KEY"
+      },
+      "Bearer": {
+        "type": "http",
+        "scheme": "bearer"
+      }
+    }
+  },
+  "security": [
+    {
+      "ApiKey": []
+    },
+    {
+      "Bearer": []
+    }
+  ],
+  "tags": [
+    {
+      "name": "patent status",
+      "description": "Application status, timelines, ownership, PTAB, maintenance, entities."
+    },
+    {
+      "name": "meta",
+      "description": "Health and discovery documents."
+    }
+  ]
+}
