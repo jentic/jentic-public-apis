@@ -1,6 +1,6 @@
 # APIs — S
 
-Browsing 720 APIs starting with **S**.
+Browsing 721 APIs starting with **S**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · **S** · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -131,6 +131,7 @@ Browsing 720 APIs starting with **S**.
 | [sendcrux.com](../../../../apis/openapi/sendcrux.com) | [main](../../../../apis/openapi/sendcrux.com/main) |
 | [sendfox.com](../../../../apis/openapi/sendfox.com) | [main](../../../../apis/openapi/sendfox.com/main) |
 | [sendgrid.com](../../../../apis/openapi/sendgrid.com) | [44 APIs](../../../../apis/openapi/sendgrid.com) |
+| [sendhq.cc](../../../../apis/openapi/sendhq.cc) | [main](../../../../apis/openapi/sendhq.cc/main) |
 | [sendible.com](../../../../apis/openapi/sendible.com) | [main](../../../../apis/openapi/sendible.com/main) |
 | [sendiio.com](../../../../apis/openapi/sendiio.com) | [main](../../../../apis/openapi/sendiio.com/main) |
 | [sendinblue.com](../../../../apis/openapi/sendinblue.com) | [main](../../../../apis/openapi/sendinblue.com/main) |
