@@ -1,6 +1,6 @@
 # APIs — A
 
-Browsing 455 APIs starting with **A**.
+Browsing 456 APIs starting with **A**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · **A** · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -157,6 +157,7 @@ Browsing 455 APIs starting with **A**.
 | [alegra.com](../../../../apis/openapi/alegra.com) | [main](../../../../apis/openapi/alegra.com/main) |
 | [alerty.ai](../../../../apis/openapi/alerty.ai) | [main](../../../../apis/openapi/alerty.ai/main) |
 | [aletheiaapi.com](../../../../apis/openapi/aletheiaapi.com) | [main](../../../../apis/openapi/aletheiaapi.com/main) |
+| [algeriacertify.com](../../../../apis/openapi/algeriacertify.com) | [main](../../../../apis/openapi/algeriacertify.com/main) |
 | [algodocs.com](../../../../apis/openapi/algodocs.com) | [main](../../../../apis/openapi/algodocs.com/main) |
 | [algolia.com](../../../../apis/openapi/algolia.com) | [10 APIs](../../../../apis/openapi/algolia.com) |
 | [algorand.org](../../../../apis/openapi/algorand.org) | [main](../../../../apis/openapi/algorand.org/main) |
