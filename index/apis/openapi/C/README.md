@@ -1,6 +1,6 @@
 # APIs — C
 
-Browsing 446 APIs starting with **C**.
+Browsing 447 APIs starting with **C**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · **C** · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -128,6 +128,7 @@ Browsing 446 APIs starting with **C**.
 | [cincopa.com](../../../../apis/openapi/cincopa.com) | [main](../../../../apis/openapi/cincopa.com/main) |
 | [cincpro.com](../../../../apis/openapi/cincpro.com) | [main](../../../../apis/openapi/cincpro.com/main) |
 | [cinnox.com](../../../../apis/openapi/cinnox.com) | [main](../../../../apis/openapi/cinnox.com/main) |
+| [ciphyr.ai](../../../../apis/openapi/ciphyr.ai) | [main](../../../../apis/openapi/ciphyr.ai/main) |
 | [circl.lu](../../../../apis/openapi/circl.lu) | [hashlookup](../../../../apis/openapi/circl.lu/hashlookup) |
 | [circle.so](../../../../apis/openapi/circle.so) | [main](../../../../apis/openapi/circle.so/main) |
 | [circleci.com](../../../../apis/openapi/circleci.com) | [main](../../../../apis/openapi/circleci.com/main) |
