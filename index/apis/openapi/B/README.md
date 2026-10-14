@@ -1,6 +1,6 @@
 # APIs — B
 
-Browsing 224 APIs starting with **B**.
+Browsing 225 APIs starting with **B**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · **B** · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -33,6 +33,7 @@ Browsing 224 APIs starting with **B**.
 | [base.customerpulze.com](../../../../apis/openapi/base.customerpulze.com) | [main](../../../../apis/openapi/base.customerpulze.com/main) |
 | [basecampapi.com](../../../../apis/openapi/basecampapi.com) | [main](../../../../apis/openapi/basecampapi.com/main) |
 | [baselinker.com](../../../../apis/openapi/baselinker.com) | [main](../../../../apis/openapi/baselinker.com/main) |
+| [baseray.ai](../../../../apis/openapi/baseray.ai) | [main](../../../../apis/openapi/baseray.ai/main) |
 | [basesnap.com](../../../../apis/openapi/basesnap.com) | [main](../../../../apis/openapi/basesnap.com/main) |
 | [basespace.illumina.com](../../../../apis/openapi/basespace.illumina.com) | [main](../../../../apis/openapi/basespace.illumina.com/main) |
 | [baseten.co](../../../../apis/openapi/baseten.co) | [main](../../../../apis/openapi/baseten.co/main) |
