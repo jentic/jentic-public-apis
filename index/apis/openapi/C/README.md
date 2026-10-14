@@ -1,6 +1,6 @@
 # APIs — C
 
-Browsing 452 APIs starting with **C**.
+Browsing 453 APIs starting with **C**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · **C** · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -383,6 +383,7 @@ Browsing 452 APIs starting with **C**.
 | [cratejoy.com](../../../../apis/openapi/cratejoy.com) | [main](../../../../apis/openapi/cratejoy.com/main) |
 | [crawlbase.com](../../../../apis/openapi/crawlbase.com) | [main](../../../../apis/openapi/crawlbase.com/main) |
 | [createprints.ai](../../../../apis/openapi/createprints.ai) | [main](../../../../apis/openapi/createprints.ai/main) |
+| [creatica.app](../../../../apis/openapi/creatica.app) | [main](../../../../apis/openapi/creatica.app/main) |
 | [creativecommons.tankerkoenig.de](../../../../apis/openapi/creativecommons.tankerkoenig.de) | [main](../../../../apis/openapi/creativecommons.tankerkoenig.de/main) |
 | [creatomate.com](../../../../apis/openapi/creatomate.com) | [main](../../../../apis/openapi/creatomate.com/main) |
 | [credas.co.uk](../../../../apis/openapi/credas.co.uk) | [pi](../../../../apis/openapi/credas.co.uk/pi) |
