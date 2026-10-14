@@ -1,6 +1,6 @@
 # APIs — G
 
-Browsing 182 APIs starting with **G**.
+Browsing 183 APIs starting with **G**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · **G** · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -130,6 +130,7 @@ Browsing 182 APIs starting with **G**.
 | [google.com](../../../../apis/openapi/google.com) | [main](../../../../apis/openapi/google.com/main) |
 | [google.home](../../../../apis/openapi/google.home) | [main](../../../../apis/openapi/google.home/main) |
 | [googleapis.com](../../../../apis/openapi/googleapis.com) | [274 APIs](../../../../apis/openapi/googleapis.com) |
+| [goosybear.ai](../../../../apis/openapi/goosybear.ai) | [main](../../../../apis/openapi/goosybear.ai/main) |
 | [gopay.com](../../../../apis/openapi/gopay.com) | [main](../../../../apis/openapi/gopay.com/main) |
 | [gopay.cz](../../../../apis/openapi/gopay.cz) | [main](../../../../apis/openapi/gopay.cz/main) |
 | [goqr.me](../../../../apis/openapi/goqr.me) | [main](../../../../apis/openapi/goqr.me/main) |
