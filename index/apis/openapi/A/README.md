@@ -1,6 +1,6 @@
 # APIs — A
 
-Browsing 448 APIs starting with **A**.
+Browsing 449 APIs starting with **A**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · **A** · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -56,6 +56,7 @@ Browsing 448 APIs starting with **A**.
 | [admin.easyfill.invo.zone](../../../../apis/openapi/admin.easyfill.invo.zone) | [main](../../../../apis/openapi/admin.easyfill.invo.zone/main) |
 | [adn.t-mobile.com](../../../../apis/openapi/adn.t-mobile.com) | [main](../../../../apis/openapi/adn.t-mobile.com/main) |
 | [adobe.com](../../../../apis/openapi/adobe.com) | [aem](../../../../apis/openapi/adobe.com/aem) |
+| [adona-robot.com](../../../../apis/openapi/adona-robot.com) | [main](../../../../apis/openapi/adona-robot.com/main) |
 | [adoptapet.com](../../../../apis/openapi/adoptapet.com) | [adoptapet-api](../../../../apis/openapi/adoptapet.com/adoptapet-api) |
 | [adp.com](../../../../apis/openapi/adp.com) | [main](../../../../apis/openapi/adp.com/main) |
 | [ads-api.twitter.com](../../../../apis/openapi/ads-api.twitter.com) | [main](../../../../apis/openapi/ads-api.twitter.com/main) |
