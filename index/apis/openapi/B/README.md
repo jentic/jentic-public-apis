@@ -1,6 +1,6 @@
 # APIs — B
 
-Browsing 223 APIs starting with **B**.
+Browsing 224 APIs starting with **B**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · **B** · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -62,6 +62,7 @@ Browsing 223 APIs starting with **B**.
 | [betfair.com](../../../../apis/openapi/betfair.com) | [main](../../../../apis/openapi/betfair.com/main) |
 | [bethmardutho.org](../../../../apis/openapi/bethmardutho.org) | [main](../../../../apis/openapi/bethmardutho.org/main) |
 | [betsapi.com](../../../../apis/openapi/betsapi.com) | [main](../../../../apis/openapi/betsapi.com/main) |
+| [betslipdoctor.ai](../../../../apis/openapi/betslipdoctor.ai) | [main](../../../../apis/openapi/betslipdoctor.ai/main) |
 | [bettermode.com](../../../../apis/openapi/bettermode.com) | [main](../../../../apis/openapi/bettermode.com/main) |
 | [betterstack.com](../../../../apis/openapi/betterstack.com) | [main](../../../../apis/openapi/betterstack.com/main) |
 | [bevigil](../../../../apis/openapi/bevigil) | [main](../../../../apis/openapi/bevigil/main) |
