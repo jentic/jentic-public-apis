@@ -1,6 +1,6 @@
 # APIs — M
 
-Browsing 296 APIs starting with **M**.
+Browsing 297 APIs starting with **M**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · **M** · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -159,6 +159,7 @@ Browsing 296 APIs starting with **M**.
 | [mindbodyonline.com](../../../../apis/openapi/mindbodyonline.com) | [main](../../../../apis/openapi/mindbodyonline.com/main) |
 | [mindburp.se](../../../../apis/openapi/mindburp.se) | [main](../../../../apis/openapi/mindburp.se/main) |
 | [mindee.com](../../../../apis/openapi/mindee.com) | [main](../../../../apis/openapi/mindee.com/main) |
+| [mindfort.ai](../../../../apis/openapi/mindfort.ai) | [main](../../../../apis/openapi/mindfort.ai/main) |
 | [mindgame.eu](../../../../apis/openapi/mindgame.eu) | [main](../../../../apis/openapi/mindgame.eu/main) |
 | [mindhunters.ai](../../../../apis/openapi/mindhunters.ai) | [main](../../../../apis/openapi/mindhunters.ai/main) |
 | [mindmemobile.com](../../../../apis/openapi/mindmemobile.com) | [mindme-api](../../../../apis/openapi/mindmemobile.com/mindme-api) |
