@@ -1,0 +1,1278 @@
+openapi: 3.1.0
+info:
+  title: DialValet API (current beta implementation)
+  version: 0.1.0-beta
+  description: >
+    Reference for the routes deployed in the current beta. POST /calls requires
+    per-account authorization, a verified caller ID, available prepaid credit, and
+    passing account limits. Current beta is U.S.-only. See
+    https://dialvalet.com/docs/API.md for the human summary.
+  contact:
+    url: https://dialvalet.com
+servers:
+  - url: https://api.dialvalet.com/v1
+    description: Deployed production URL; provider-backed routes require configuration.
+security:
+  - bearerAuth: []
+  - sessionCookie: []
+tags:
+  - name: Health
+  - name: Authentication
+  - name: Account
+  - name: Voices
+  - name: Caller identities
+  - name: API keys
+  - name: OAuth grants
+  - name: Billing
+  - name: Calls
+  - name: Policy
+  - name: Provider webhooks
+paths:
+  /health:
+    get:
+      tags: [Health]
+      operationId: health
+      security: []
+      summary: Worker liveness
+      description: >
+        Does not prove provider or call readiness. The Worker currently answers
+        both `/health` and `/v1/health` with `service: "dialvalet"`. Also reports
+        the current `@dialvalet/cli` release. Outdated CLI user-agents receive a
+        `cli_update` object in this and other JSON responses.
+      responses:
+        '200':
+          description: Worker is responding
+          headers:
+            X-CLI-Latest:
+              schema: { type: string, example: "0.2.0" }
+              description: Current @dialvalet/cli release agents should run.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, service, environment]
+                properties:
+                  status: { type: string, const: ok }
+                  service: { type: string, const: dialvalet }
+                  environment: { type: string }
+                  cli:
+                    type: object
+                    required: [latest, package]
+                    properties:
+                      latest: { type: string, example: "0.2.0" }
+                      package: { type: string, const: "@dialvalet/cli" }
+                  cli_update:
+                    type: object
+                    description: Present only when the caller is an outdated DialValet CLI.
+                    properties:
+                      current: { type: string }
+                      latest: { type: string }
+                      package: { type: string }
+                      command: { type: string }
+                      detail: { type: string }
+  /auth/otp/start:
+    post:
+      tags: [Authentication]
+      operationId: startPhoneOtp
+      security: []
+      summary: Start phone OTP signup or sign-in
+      description: >
+        U.S. numbers only. A new phone creates an account after successful
+        verification. Limited to 3 requests per phone per minute and 5 per IP
+        per minute. Login challenges expire after five minutes and allow at most
+        five tries. The dashboard OTP form requires a 5-digit code; this API
+        accepts 4-10 digits.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [phone_number]
+              properties:
+                phone_number: { $ref: '#/components/schemas/UsE164' }
+                client_type: { type: string, enum: [web, cli], default: web }
+      responses:
+        '202':
+          description: Challenge created and delivery requested
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [verification_id, expires_at, masked_destination]
+                properties:
+                  verification_id: { type: string }
+                  expires_at: { type: string, format: date-time }
+                  masked_destination: { type: string }
+        '400': { $ref: '#/components/responses/Error' }
+        '422': { $ref: '#/components/responses/Error' }
+        '429': { $ref: '#/components/responses/Error' }
+        '503': { $ref: '#/components/responses/Error' }
+  /auth/otp/verify:
+    post:
+      tags: [Authentication]
+      operationId: verifyPhoneOtp
+      security: []
+      summary: Consume a one-time code
+      description: >
+        Web challenges set an HttpOnly session cookie. CLI challenges return a
+        one-time API key in JSON. Protect the response and do not log the key.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [verification_id, code]
+              properties:
+                verification_id: { type: string }
+                code: { type: string, pattern: '^[0-9]{4,10}$' }
+      responses:
+        '200':
+          description: Verified and signed in
+          headers:
+            Set-Cookie:
+              schema: { type: string, description: Web flow sets dv_session; CLI flow does not. }
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, phone_number, authenticated]
+                properties:
+                  id: { type: string }
+                  phone_number: { $ref: '#/components/schemas/UsE164' }
+                  authenticated: { type: boolean, description: True for web; false for CLI. }
+                  api_key: { type: string, writeOnly: true, description: Returned only for CLI challenges. }
+        '400': { $ref: '#/components/responses/Error' }
+        '410': { $ref: '#/components/responses/Error' }
+        '429': { $ref: '#/components/responses/Error' }
+        '503': { $ref: '#/components/responses/Error' }
+  /auth/logout:
+    post:
+      tags: [Authentication]
+      operationId: logout
+      security: []
+      summary: Clear the browser session cookie
+      description: >
+        Best-effort cookie clear. Requires an approved Origin header. Does not
+        require an active session and does not revoke API keys.
+      responses:
+        '200':
+          description: Session revoked and cookie cleared
+          headers:
+            Set-Cookie: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { type: object, properties: { ok: { type: boolean, const: true } } }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+  /auth/api-key:
+    delete:
+      tags: [Authentication]
+      operationId: revokeCurrentApiKey
+      security:
+        - bearerAuth: []
+      summary: Revoke the presented API key
+      description: Used by CLI logout. Other explicit or environment credentials can still exist and must be revoked/unset separately.
+      responses:
+        '200':
+          description: Presented key revoked
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, api_key_revoked]
+                properties:
+                  ok: { type: boolean, const: true }
+                  api_key_revoked: { type: boolean, const: true }
+        '401': { $ref: '#/components/responses/Error' }
+  /me:
+    get:
+      tags: [Account]
+      operationId: getCurrentUser
+      summary: Get current account
+      description: Phone number is included for browser sessions and omitted for API keys.
+      responses:
+        '200':
+          description: Active account
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, created_at, authenticated, default_voice]
+                properties:
+                  id: { type: string }
+                  phone_number: { $ref: '#/components/schemas/UsE164' }
+                  created_at: { type: string, format: date-time }
+                  authenticated: { type: boolean, const: true }
+                  default_voice: { $ref: '#/components/schemas/VoiceId' }
+        '401': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+    patch:
+      tags: [Account]
+      operationId: updateCurrentUser
+      summary: Save account preferences
+      description: >
+        Currently accepts `default_voice`. The saved voice is used for future
+        calls when POST /calls omits `voice`. API keys and browser sessions may
+        both update this.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [default_voice]
+              properties:
+                default_voice: { $ref: '#/components/schemas/VoiceId' }
+      responses:
+        '200':
+          description: Updated account
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, created_at, authenticated, default_voice]
+                properties:
+                  id: { type: string }
+                  phone_number: { $ref: '#/components/schemas/UsE164' }
+                  created_at: { type: string, format: date-time }
+                  authenticated: { type: boolean, const: true }
+                  default_voice: { $ref: '#/components/schemas/VoiceId' }
+        '400': { $ref: '#/components/responses/Error' }
+        '401': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+    delete:
+      tags: [Account]
+      operationId: requestAccountDeletion
+      summary: Disable account and request deletion
+      description: >
+        Recent browser session only (session created within the last 10 minutes).
+        Currently marks account deleting and revokes sessions/keys; final deletion,
+        refund, and retention review are not automated. This does not remove the
+        phone hash, so the same number cannot sign up again until a hard delete.
+      responses:
+        '202':
+          description: Account disabled; follow-up is still required
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, detail]
+                properties:
+                  status: { type: string, const: deletion_requested }
+                  detail: { type: string }
+        '403': { $ref: '#/components/responses/Error' }
+  /caller-identities:
+    get:
+      tags: [Caller identities]
+      operationId: listCallerIdentities
+      summary: List caller identities
+      description: Masked values; current beta supports existing verified U.S. numbers only.
+      responses:
+        '200':
+          description: Caller identities owned by this user
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { type: array, items: { $ref: '#/components/schemas/CallerIdentity' } }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+  /caller-identities/verification:
+    post:
+      tags: [Caller identities]
+      operationId: startCallerIdVerification
+      summary: Send caller-ID verification code
+      description: >
+        Requires `caller_identities:write` (CLI API key or browser session).
+        Separate from sign-in OTP. Challenges expire after 10 minutes and allow
+        at most five confirmation attempts. Verification proves number control
+        for provider purposes only, not called-party consent. MCP OAuth cannot
+        perform this mutation.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [phone_number]
+              properties:
+                phone_number: { $ref: '#/components/schemas/UsE164' }
+                label: { type: string, maxLength: 80 }
+                channel: { type: string, enum: [sms, voice], default: sms }
+      responses:
+        '202':
+          description: Verification was requested
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [verification_id, expires_at, masked_destination]
+                properties:
+                  verification_id: { type: string }
+                  expires_at: { type: string, format: date-time }
+                  masked_destination: { type: string }
+        '403': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+        '429': { $ref: '#/components/responses/Error' }
+        '503': { $ref: '#/components/responses/Error' }
+  /caller-identities/verification/{verification_id}/confirm:
+    post:
+      tags: [Caller identities]
+      operationId: confirmCallerIdVerification
+      summary: Confirm caller-ID verification
+      parameters:
+        - name: verification_id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [code]
+              properties:
+                code: { type: string, pattern: '^[0-9]{4,10}$' }
+      responses:
+        '200':
+          description: Verified identity; selected as default
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CallerIdentity' }
+        '400': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '410': { $ref: '#/components/responses/Error' }
+        '429': { $ref: '#/components/responses/Error' }
+  /caller-identities/default:
+    post:
+      tags: [Caller identities]
+      operationId: setDefaultCallerIdentity
+      summary: Select a verified default caller ID
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [identity_id]
+              properties:
+                identity_id: { type: string }
+      responses:
+        '200':
+          description: Default changed
+          content:
+            application/json:
+              schema: { type: object, properties: { ok: { type: boolean, const: true } } }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+  /billing/balance:
+    get:
+      tags: [Billing]
+      operationId: getBalance
+      summary: Get prepaid wallet balance
+      description: Auto-reload is not implemented and is always disabled.
+      responses:
+        '200':
+          description: USD balance
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Balance' }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+  /billing/ledger:
+    get:
+      tags: [Billing]
+      operationId: listLedger
+      summary: List prepaid wallet credits and charges
+      description: >
+        Returns settled wallet activity: top-ups, talk-time charges, refunds,
+        and adjustments. Newest first. Authorization holds and $0 failed calls
+        are omitted.
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+        - name: cursor
+          in: query
+          schema: { type: string, minLength: 1, maxLength: 2048 }
+      responses:
+        '200':
+          description: Wallet activity page
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, next_cursor, has_more]
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/LedgerEntry' }
+                  next_cursor: { type: ['string', 'null'] }
+                  has_more: { type: boolean }
+        '400': { $ref: '#/components/responses/Error' }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+  /billing/checkout-session:
+    post:
+      tags: [Billing]
+      operationId: createCheckoutSession
+      summary: Create one-time Stripe Checkout session
+      description: >
+        Creates $5-$100 USD prepaid service credit. Accepts amount_cents or
+        legacy whole-dollar amount. Wallet credit is applied only after a
+        verified paid Stripe webhook. Checkout fails closed until the Stripe
+        webhook signing secret is configured.
+        Clients should supply and reuse a stable Idempotency-Key for retries;
+        same key and amount return the same session while it is live, while same
+        key with a different amount returns 409 idempotency_key_reused. Expired
+        sessions return 409 checkout_session_expired and require a new key;
+        completed sessions return 409 checkout_already_paid. A local reservation
+        without a saved provider URL is retried with its stable Stripe key only
+        during the first 23 hours; later attempts return 409
+        checkout_retry_window_expired without calling Stripe, because Stripe
+        can prune idempotency keys after at least 24 hours. Header omission is
+        legacy behavior and generates a fresh per-request key, so retries are
+        not deduplicated.
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: false
+          description: >
+            Recommended and required for safe client retries. 1-255 visible
+            ASCII characters. Reuse only for the same intended amount.
+          schema: { type: string, minLength: 1, maxLength: 255, pattern: '^[\x21-\x7e]+$' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              anyOf:
+                - required: [amount_cents]
+                - required: [amount]
+              properties:
+                amount_cents: { type: integer, minimum: 500, maximum: 10000, default: 500 }
+                amount: { type: integer, minimum: 5, maximum: 100, description: Legacy whole-dollar input; amount_cents takes precedence. }
+      responses:
+        '201':
+          description: Checkout URL; payment happens only if the user completes Checkout
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, checkout_url, url, amount, currency, expires_at]
+                properties:
+                  id: { type: string }
+                  checkout_url: { type: string, format: uri }
+                  url: { type: string, format: uri }
+                  amount: { type: string, pattern: '^[0-9]+\\.[0-9]{2}$' }
+                  currency: { type: string, const: USD }
+                  expires_at: { type: string, format: date-time }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '409':
+          description: >
+            Includes idempotency_key_reused, checkout_session_expired,
+            checkout_already_paid, and checkout_retry_window_expired. Expired
+            sessions and old incomplete reservations are not replaced under
+            the same key; use a new key only for a fresh top-up attempt.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '422': { $ref: '#/components/responses/Error' }
+        '503': { $ref: '#/components/responses/Error' }
+  /billing/portal:
+    post:
+      tags: [Billing]
+      operationId: createBillingPortalSession
+      summary: Open Stripe Billing Portal
+      description: Requires a Stripe customer from completed Checkout; request body is ignored.
+      responses:
+        '200':
+          description: Stripe portal URL
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [url]
+                properties: { url: { type: string, format: uri } }
+        '409': { $ref: '#/components/responses/Error' }
+        '503': { $ref: '#/components/responses/Error' }
+  /api-keys:
+    post:
+      tags: [API keys]
+      operationId: createApiKey
+      security:
+        - sessionCookie: []
+      summary: Create scoped bearer key
+      description: Recent browser session only (created within the last 10 minutes). Key secret is returned once; database stores its keyed hash. New keys may hold `calls:read`, `calls:write`, `billing:read`, and `caller_identities:read`; requests for `billing:write` or `caller_identities:write` are rejected with `invalid_api_key_scope`. Keys issued earlier keep their scopes.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [name, scopes]
+              properties:
+                name: { type: string, minLength: 1, maxLength: 80 }
+                scopes:
+                  type: array
+                  minItems: 1
+                  uniqueItems: true
+                  items: { $ref: '#/components/schemas/ApiScope' }
+      responses:
+        '201':
+          description: API key secret, show once
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [api_key, name, scopes]
+                properties:
+                  api_key: { type: string, writeOnly: true }
+                  name: { type: string }
+                  scopes: { type: array, items: { $ref: '#/components/schemas/ApiScope' } }
+        '400': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+    get:
+      tags: [API keys]
+      operationId: listApiKeys
+      summary: List key metadata
+      description: Session or API key. Returns metadata only; secret material is never returned.
+      responses:
+        '200':
+          description: Keys for current user
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { type: array, items: { $ref: '#/components/schemas/ApiKeyMetadata' } }
+  /api-keys/{key_id}:
+    delete:
+      tags: [API keys]
+      operationId: revokeApiKey
+      security:
+        - sessionCookie: []
+      summary: Revoke an API key
+      description: Recent browser session only; revokes the explicitly selected key.
+      parameters:
+        - name: key_id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '204': { description: Revoked, already revoked, or not owned }
+        '403': { $ref: '#/components/responses/Error' }
+  /oauth/grants:
+    get:
+      tags: [OAuth grants]
+      operationId: listOAuthGrants
+      security:
+        - sessionCookie: []
+      summary: List connected agents
+      description: Browser session only. API-key authentication is rejected. Returns grants owned by the current account, with a cursor for pagination.
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+        - name: cursor
+          in: query
+          schema: { type: string, maxLength: 2048 }
+      responses:
+        '200':
+          description: Current account's connected agents
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, next_cursor]
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      required: [id, client_id, client_name, scopes, created_at, expires_at]
+                      properties:
+                        id: { type: string }
+                        client_id: { type: string }
+                        client_name: { type: string }
+                        scopes: { type: string }
+                        created_at: { type: string, format: date-time }
+                        expires_at: { type: [string, 'null'], format: date-time }
+                  next_cursor: { type: [string, 'null'] }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+  /oauth/grants/{grant_id}:
+    delete:
+      tags: [OAuth grants]
+      operationId: revokeOAuthGrant
+      security:
+        - sessionCookie: []
+      summary: Revoke a connected agent
+      description: Requires a recent browser session (created within the last 10 minutes) and an approved Origin. A grant is revoked only within the authenticated account; unknown or other-account IDs are harmless.
+      parameters:
+        - name: grant_id
+          in: path
+          required: true
+          schema: { type: string, minLength: 1, maxLength: 256, pattern: '^[A-Za-z0-9_-]+$' }
+        - name: Origin
+          in: header
+          required: true
+          schema: { type: string, format: uri }
+      responses:
+        '204': { description: Revoked, already revoked, or not owned }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+  /voices:
+    get:
+      tags: [Voices]
+      operationId: listVoices
+      summary: List GPT-Live agent voices
+      description: >
+        Returns the GPT-Live-1 voices DialValet supports, with language and
+        descriptions. `default` is the product default (`marin`).
+        `account_default` is the saved account preference. Portuguese voices
+        (`bossa`, `tempo`) speak Brazilian Portuguese.
+      responses:
+        '200':
+          description: Voice catalog
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/VoiceCatalog' }
+        '401': { $ref: '#/components/responses/Error' }
+  /calls:
+    post:
+      tags: [Calls]
+      operationId: startCall
+      summary: Request one outbound call
+      description: >
+        Calls require provider/security configuration, verified caller ID, wallet
+        balance, explicit user authorization, and account policy. Usage is $0.12
+        per started connected minute. Account-holder attestation is not destination
+        party consent. DialValet does not inject a fixed opening disclosure; the
+        caller must include any legally required notice in the objective or context.
+        Set allow_user_transfer to true only when the user explicitly asked to
+        be rung into the call. That ring comes from +14804801077
+        (+1 480-480-1077). Without it the live agent cannot transfer. Before dialing, the objective and optional context are automatically
+        safety-screened. A stable Idempotency-Key header or idempotency_key body
+        property is mandatory. Reusing the key with different call parameters
+        returns 409; if both forms are sent, they must match.
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: false
+          description: Required in this header or the JSON body; both values must match if both are supplied.
+          schema: { type: string, minLength: 8, maxLength: 128, pattern: '^[\x21-\x7e]+$' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/StartCallRequest' }
+      responses:
+        '202':
+          description: Accepted when required provider/security secrets are configured and account checks pass
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Call' }
+        '400': { $ref: '#/components/responses/Error' }
+        '402': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '422': { $ref: '#/components/responses/Error' }
+        '429': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+        '503': { $ref: '#/components/responses/Error' }
+    get:
+      tags: [Calls]
+      operationId: listCalls
+      summary: List latest calls
+      description: >
+        limit defaults to 20 and is clamped to 1-100. A next_cursor is returned
+        if more records exist, but the route does not accept a cursor parameter;
+        only the latest page is accessible.
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+      responses:
+        '200':
+          description: Latest calls; no filtering is implemented
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, next_cursor, has_more]
+                properties:
+                  data: { type: array, items: { $ref: '#/components/schemas/Call' } }
+                  next_cursor: { type: [string, 'null'], description: Call ID; not accepted as a request parameter yet. }
+                  has_more: { type: boolean }
+  /calls/{call_id}:
+    parameters:
+      - name: call_id
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      tags: [Calls]
+      operationId: getCall
+      summary: Get call state and result
+      description: Destination to is returned unmasked. Treat the response as sensitive.
+      responses:
+        '200':
+          description: Call record
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Call' }
+        '404': { $ref: '#/components/responses/Error' }
+    delete:
+      tags: [Calls]
+      operationId: cancelCall
+      summary: Cancel or end a call
+      description: No body is read. Terminal calls return their existing record.
+      responses:
+        '200':
+          description: Current call record
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Call' }
+        '404': { $ref: '#/components/responses/Error' }
+  /calls/{call_id}/events:
+    get:
+      tags: [Calls]
+      operationId: getCallSnapshotEvent
+      summary: Get one SSE snapshot
+      description: Sends a single snapshot event and closes; this is not a continuing stream.
+      parameters:
+        - name: call_id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: One snapshot event
+          content:
+            text/event-stream:
+              schema: { type: string }
+        '404': { $ref: '#/components/responses/Error' }
+  /calls/{call_id}/live:
+    get:
+      tags: [Calls]
+      operationId: watchLiveTranscript
+      summary: Watch the live call transcript
+      description: >
+        WebSocket upgrade. Requires `calls:read`. Browser sessions may authenticate
+        with the `dv_session` cookie on this origin; API keys use `Authorization: Bearer`.
+        The server sends JSON events: `snapshot` (status plus turns so far),
+        `transcript.delta` (`speaker` is `assistant` or `callee`), `status`,
+        `input_required` (plain-text question, context, request ID, and expiry),
+        `guidance.answered`, `steer.sent`, and `ended`.
+        At most four listeners are accepted per call. Audio is not streamed on this socket.
+      parameters:
+        - name: call_id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '101': { description: WebSocket accepted. }
+        '401': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+        '503': { description: More than four live listeners are already connected. }
+        '426': { $ref: '#/components/responses/Error' }
+  /calls/{call_id}/guidance/{request_id}/answer:
+    post:
+      tags: [Calls]
+      operationId: answerCallGuidance
+      summary: Answer a pending live-agent question
+      description: >
+        Requires `calls:write`. Returns one plain-text answer to the pending
+        GPT-Live backend function and continues delegated work. The request must
+        still be pending and unexpired. A stable idempotency key is mandatory.
+      parameters:
+        - name: call_id
+          in: path
+          required: true
+          schema: { type: string }
+        - name: request_id
+          in: path
+          required: true
+          schema: { type: string }
+        - name: Idempotency-Key
+          in: header
+          required: false
+          schema: { type: string, minLength: 8, maxLength: 128, pattern: '^[\x21-\x7e]+$' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [text]
+              properties:
+                text: { type: string, minLength: 1, maxLength: 1000 }
+                idempotency_key: { type: string, minLength: 8, maxLength: 128, pattern: '^[\x21-\x7e]+$' }
+      responses:
+        '200':
+          description: Answer accepted or an exact retry recognized
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [accepted, call_id, request_id]
+                properties:
+                  accepted: { type: boolean, const: true }
+                  idempotent: { type: boolean }
+                  call_id: { type: string }
+                  request_id: { type: string }
+        '400': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+        '410': { $ref: '#/components/responses/Error' }
+        '503': { $ref: '#/components/responses/Error' }
+  /calls/{call_id}/steer:
+    post:
+      tags: [Calls]
+      operationId: steerLiveCall
+      summary: Correct or inform the live agent
+      description: >
+        Requires `calls:write` and a stable idempotency key. `instruction`
+        redirects behavior, `context` supplies a quiet fact, and `say` supplies
+        information for GPT-Live to speak. `interrupt` first clears queued Telnyx
+        output, but cannot retract speech already heard.
+      parameters:
+        - name: call_id
+          in: path
+          required: true
+          schema: { type: string }
+        - name: Idempotency-Key
+          in: header
+          required: false
+          schema: { type: string, minLength: 8, maxLength: 128, pattern: '^[\x21-\x7e]+$' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [mode, content]
+              properties:
+                mode: { type: string, enum: [instruction, context, say] }
+                content: { type: string, minLength: 1, maxLength: 2000 }
+                interrupt: { type: boolean, default: false }
+                idempotency_key: { type: string, minLength: 8, maxLength: 128, pattern: '^[\x21-\x7e]+$' }
+      responses:
+        '200':
+          description: Steering command sent or an exact retry recognized
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [accepted, command_id, status]
+                properties:
+                  accepted: { type: boolean, const: true }
+                  idempotent: { type: boolean }
+                  call_id: { type: string }
+                  command_id: { type: string }
+                  mode: { type: string, enum: [instruction, context, say] }
+                  interrupt: { type: boolean }
+                  status: { type: string, enum: [sent] }
+        '400': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+        '503': { $ref: '#/components/responses/Error' }
+  /calls/{call_id}/transcript:
+    get:
+      tags: [Calls]
+      operationId: getTranscript
+      summary: Request a transcript
+      description: Returns the retained speaker-labeled transcript when present. Encrypted with the structured result for up to 30 days.
+      parameters:
+        - name: call_id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Retained transcript
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, transcript]
+                properties:
+                  id: { type: string }
+                  transcript:
+                    type: array
+                    items: { $ref: '#/components/schemas/TranscriptTurn' }
+        '404': { $ref: '#/components/responses/Error' }
+    delete:
+      tags: [Calls]
+      operationId: deleteTranscript
+      summary: Delete call result content (legacy transcript route)
+      description: Requires `calls:write`. Deletes the encrypted structured result and any retained transcript; call, events, and billing metadata remain.
+      parameters:
+        - name: call_id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '204': { description: No content; result deletion is idempotent. }
+        '404': { $ref: '#/components/responses/Error' }
+  /calls/{call_id}/result:
+    delete:
+      tags: [Calls]
+      operationId: deleteCallResult
+      summary: Delete encrypted structured call result
+      description: Requires calls:write. Idempotently erases summary, resolution, commitments, follow-ups, and result expiry while retaining call, event, and billing metadata. A deletion tombstone prevents an in-flight summary job from recreating deleted content.
+      parameters:
+        - name: call_id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '204': { description: No content; result deletion is idempotent. }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+  /policy:
+    get:
+      tags: [Policy]
+      operationId: getPolicy
+      summary: Read current account safety limits
+      responses:
+        '200':
+          description: Current policy row
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Policy' }
+    patch:
+      tags: [Policy]
+      operationId: updatePolicy
+      security:
+        - sessionCookie: []
+      summary: Update supported safety limits
+      description: >
+        Recent browser session only. Recording cannot be enabled in beta.
+        Country, time, contact, and approval policy are not configurable here.
+        Each omitted numeric field resets to the hard-coded default; send all
+        four numeric fields to avoid unintentionally changing another limit.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                max_call_seconds: { type: integer, minimum: 60, maximum: 1800, default: 900, description: Omitted PATCH fields reset to 900, not the new-account signup default of 1200. }
+                max_call_cents: { type: integer, minimum: 12, maximum: 12000, default: 180, description: Omitted PATCH fields reset to 180, not the new-account signup default of 240. }
+                max_daily_calls: { type: integer, minimum: 1, maximum: 50, default: 5 }
+                daily_spend_cents: { type: integer, minimum: 12, maximum: 10000, default: 500 }
+                recording_enabled: { type: boolean, const: false }
+      responses:
+        '200':
+          description: Updated limits; recording remains disabled
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PolicyUpdate' }
+        '403': { $ref: '#/components/responses/Error' }
+        '422': { $ref: '#/components/responses/Error' }
+  /webhooks/telnyx:
+    post:
+      tags: [Provider webhooks]
+      operationId: receiveTelnyxWebhook
+      security: []
+      summary: Receive Telnyx Call Control events
+      description: Provider signature is verified. This is not a customer webhook registration API.
+      parameters:
+        - name: telnyx-signature-ed25519
+          in: header
+          required: true
+          schema: { type: string }
+        - name: telnyx-timestamp
+          in: header
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: true }
+      responses:
+        '204': { description: Event accepted or ignored as duplicate/irrelevant }
+        '400': { $ref: '#/components/responses/Error' }
+        '503': { $ref: '#/components/responses/Error' }
+  /webhooks/stripe:
+    post:
+      tags: [Provider webhooks]
+      operationId: receiveStripeWebhook
+      security: []
+      summary: Receive Stripe Checkout settlement event
+      description: >
+        Verifies Stripe-Signature over the raw request body. Handles
+        checkout.session.completed and checkout.session.async_payment_succeeded.
+        Matching paid Checkout Sessions credit a wallet once. This is not a
+        customer webhook API.
+      parameters:
+        - name: Stripe-Signature
+          in: header
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: true }
+      responses:
+        '204': { description: Handled event or irrelevant event ignored }
+        '400': { $ref: '#/components/responses/Error' }
+        '503': { $ref: '#/components/responses/Error' }
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: dv_live_
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: dv_session
+  schemas:
+    UsE164:
+      type: string
+      pattern: '^\\+1[2-9][0-9]{9}$'
+      description: Valid U.S. number in E.164 form; Canadian and other countries are rejected.
+      examples: ['+19495550199']
+    ApiScope:
+      type: string
+      enum: ['calls:read', 'calls:write', 'caller_identities:read', 'caller_identities:write', 'billing:read', 'billing:write']
+    ApiKeyMetadata:
+      type: object
+      required: [id, name, prefix, scopes, created_at, last_used_at, expires_at, revoked]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        prefix: { type: string }
+        scopes: { type: array, items: { $ref: '#/components/schemas/ApiScope' } }
+        created_at: { type: string, format: date-time }
+        last_used_at: { type: [string, 'null'], format: date-time }
+        expires_at: { type: [string, 'null'], format: date-time }
+        revoked: { type: boolean }
+    CallerIdentity:
+      type: object
+      required: [id, type, label, display, verification_status, is_default, callback_behavior]
+      properties:
+        id: { type: string }
+        type: { type: string, const: verified_number }
+        label: { type: string }
+        display: { type: string, description: Masked E.164 number. }
+        verification_status: { type: string, enum: [pending, verified, failed, released] }
+        is_default: { type: boolean }
+        callback_behavior: { type: string, const: original_carrier }
+        created_at: { type: string, format: date-time }
+        verified_at: { type: [string, 'null'], format: date-time }
+    VoiceId:
+      type: string
+      enum: [marin, quartz, ripple, vesper, willow, stone, gleam, meridian, bossa, tempo, beacon, delta, cinder]
+    Voice:
+      type: object
+      additionalProperties: false
+      required: [id, name, language, description, is_default, is_account_default]
+      properties:
+        id: { $ref: '#/components/schemas/VoiceId' }
+        name: { type: string }
+        language: { type: string, enum: [English, Portuguese] }
+        regional_influence: { type: [string, 'null'] }
+        presentation: { type: [string, 'null'], enum: [Feminine, Masculine, null] }
+        source: { type: [string, 'null'], enum: [Natural, Generated, null] }
+        description: { type: string }
+        is_default: { type: boolean }
+        is_account_default: { type: boolean }
+    VoiceCatalog:
+      type: object
+      additionalProperties: false
+      required: [default, account_default, data]
+      properties:
+        default: { $ref: '#/components/schemas/VoiceId' }
+        account_default: { $ref: '#/components/schemas/VoiceId' }
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/Voice' }
+    Money:
+      type: object
+      additionalProperties: false
+      required: [amount, currency]
+      properties:
+        amount: { type: string, pattern: '^[0-9]+\\.[0-9]{2}$' }
+        currency: { type: string, const: USD }
+    CallStatus:
+      type: string
+      enum: [queued, policy_check, dialing, ringing, screening, connected, completing, completed, rejected, busy, no_answer, failed, canceled, timed_out]
+    TranscriptTurn:
+      type: object
+      additionalProperties: false
+      required: [speaker, text]
+      properties:
+        speaker: { type: string, enum: [assistant, callee] }
+        text: { type: string, maxLength: 2000 }
+    Call:
+      type: object
+      required: [id, status, to, from, objective, voice, max_duration_seconds, maximum_estimated_charge, resolution, summary, commitments, follow_ups, transcript, transcript_available, recording_available, connected_seconds, charge, price_per_started_minute, error, created_at, answered_at, ended_at, updated_at]
+      description: >-
+        `completed` means provider termination and billing settlement are final.
+        The optional structured result is generated asynchronously; resolution,
+        summary, commitments, and follow_ups can remain unknown/null/empty after
+        completion if generation is still running or fails. A speaker-labeled
+        transcript is retained with the encrypted result for up to 30 days when
+        GPT-Live emitted text. Clients may poll this resource for up to 30
+        seconds after terminal completion, then treat an absent summary as
+        unavailable. Never retry the phone call to obtain a result.
+      properties:
+        id: { type: string }
+        status: { $ref: '#/components/schemas/CallStatus' }
+        to: { $ref: '#/components/schemas/UsE164', description: Unmasked destination; treat as sensitive. }
+        from: { type: string, description: Masked caller ID. }
+        objective: { type: string }
+        voice: { $ref: '#/components/schemas/VoiceId' }
+        allow_user_transfer: { type: boolean }
+        max_duration_seconds: { type: integer }
+        maximum_estimated_charge: { $ref: '#/components/schemas/Money' }
+        resolution: { type: [string, 'null'], enum: [achieved, partially_achieved, not_achieved, unknown, null], description: May remain unknown or null if asynchronous post-call summarization is pending or unavailable. }
+        summary: { type: [string, 'null'], maxLength: 1200, description: May remain null if asynchronous post-call summarization is pending or unavailable. }
+        commitments: { type: array, maxItems: 10, items: { type: string, maxLength: 240 } }
+        follow_ups: { type: array, maxItems: 10, items: { type: string, maxLength: 240 } }
+        transcript:
+          type: array
+          items: { $ref: '#/components/schemas/TranscriptTurn' }
+        transcript_available: { type: boolean }
+        recording_available: { type: boolean, const: false }
+        connected_seconds: { type: integer, minimum: 0 }
+        charge: { $ref: '#/components/schemas/Money' }
+        price_per_started_minute: { $ref: '#/components/schemas/Money' }
+        error:
+          oneOf:
+            - type: 'null'
+            - type: object
+              required: [code, retryable, safe_to_retry]
+              properties:
+                code: { type: string }
+                retryable: { type: boolean }
+                safe_to_retry: { type: boolean }
+        created_at: { type: string, format: date-time }
+        answered_at: { type: [string, 'null'], format: date-time }
+        ended_at: { type: [string, 'null'], format: date-time }
+        updated_at: { type: string, format: date-time }
+    StartCallRequest:
+      type: object
+      additionalProperties: false
+      required: [to, objective, consent]
+      properties:
+        to: { $ref: '#/components/schemas/UsE164' }
+        objective: { type: string, minLength: 3, maxLength: 2000 }
+        context: { type: string, maxLength: 8000 }
+        from_identity_id: { type: string }
+        max_duration_seconds: { type: integer, minimum: 60, maximum: 1800 }
+        voice:
+          $ref: '#/components/schemas/VoiceId'
+          description: >
+            Optional GPT-Live voice for this call. If omitted, the account default
+            is used, then marin. Portuguese voices speak Brazilian Portuguese.
+        allow_user_transfer:
+          type: boolean
+          default: false
+          description: >
+            Set true only when the user explicitly asked to be transferred into
+            the call if it needs them. The live agent may then ring the user's
+            verified number from +14804801077 (+1 480-480-1077) and hand the call
+            over, but only when the other party needs the user personally. If the
+            user does not answer, the agent continues the call.
+        consent:
+          type: boolean
+          const: true
+          description: >
+            Account-holder attestation only. It is not proof of called-party
+            consent and cannot replace provider configuration or applicable legal consent.
+        idempotency_key: { type: string, minLength: 8, maxLength: 128, pattern: '^[\x21-\x7e]+$' }
+    Balance:
+      type: object
+      required: [available, reserved, balance, available_cents, reserved_cents, currency, auto_reload]
+      properties:
+        available: { type: string, pattern: '^[0-9]+\\.[0-9]{2}$' }
+        reserved: { type: string, pattern: '^[0-9]+\\.[0-9]{2}$' }
+        balance: { type: string, pattern: '^[0-9]+\\.[0-9]{2}$' }
+        available_cents: { type: integer }
+        reserved_cents: { type: integer }
+        currency: { type: string, const: USD }
+        auto_reload:
+          type: object
+          required: [enabled, threshold, amount]
+          properties:
+            enabled: { type: boolean, const: false }
+            threshold: { type: 'null' }
+            amount: { type: 'null' }
+    LedgerEntry:
+      type: object
+      required: [id, type, amount, amount_cents, currency, direction, description, created_at]
+      properties:
+        id: { type: string }
+        type: { type: string, enum: [top_up, charge, refund, adjustment] }
+        amount: { type: string, pattern: '^[0-9]+\\.[0-9]{2}$' }
+        amount_cents: { type: integer, description: Signed cents. Credits are positive; charges are negative. }
+        currency: { type: string, const: USD }
+        direction: { type: string, enum: [credit, debit] }
+        description: { type: string }
+        call_id: { type: ['string', 'null'] }
+        created_at: { type: string, format: date-time }
+    Policy:
+      type: object
+      properties:
+        max_call_seconds: { type: integer, default: 1200, description: New-account signup default is 1200 seconds. }
+        max_call_cents: { type: integer, default: 240, description: New-account signup default is 240 cents. }
+        max_daily_calls: { type: integer, default: 5 }
+        daily_spend_cents: { type: integer, default: 500 }
+        allowed_countries: { type: string, const: US }
+        recording_enabled: { type: integer, const: 0 }
+        transcript_retention_days: { type: integer, default: 30, description: Legacy field name. Speaker-labeled transcript turns are retained inside the encrypted structured result for up to 30 days. }
+    PolicyUpdate:
+      type: object
+      required: [max_call_seconds, max_call_cents, max_daily_calls, daily_spend_cents, recording_enabled]
+      properties:
+        max_call_seconds: { type: integer }
+        max_call_cents: { type: integer }
+        max_daily_calls: { type: integer }
+        daily_spend_cents: { type: integer }
+        recording_enabled: { type: boolean, const: false }
+    Error:
+      type: object
+      required: [type, title, status, code, detail, retryable, safe_to_retry, human_action_required, request_id]
+      properties:
+        type: { type: string, format: uri }
+        title: { type: string }
+        status: { type: integer, minimum: 400, maximum: 599 }
+        code: { type: string }
+        detail: { type: string }
+        retryable: { type: boolean }
+        safe_to_retry: { type: boolean }
+        human_action_required: { type: [string, 'null'] }
+        request_id: { type: string }
+  responses:
+    Error:
+      description: JSON application error envelope (content type application/json)
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
