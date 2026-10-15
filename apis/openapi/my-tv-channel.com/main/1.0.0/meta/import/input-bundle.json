@@ -1,0 +1,1804 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "My TV Channel — Agent API",
+    "version": "1.0.0",
+    "summary": "Create and run 24/7 linear HLS TV channels programmatically.",
+    "description": "Create and run 24/7 linear TV channels — the kind that just play, with no menu to browse.\nImport videos, and the service transcodes them, builds a continuous schedule, and streams\nthe result at `https://{handle}.my-tv-channel.com` and in the iOS, iPadOS, tvOS, macOS,\nAndroid, Fire TV and Roku apps.\n\n## Before you start\n\n- **Every response uses the same envelope:** `{\"success\": true, \"data\": ...}` or\n  `{\"success\": false, \"error\": \"...\", \"code\": N}`. There is exactly one exception, and it\n  is called out on the operation: `GET /channels/schedule.php` returns `data` as a bare\n  **array**.\n- **Authentication is an API key**, `Authorization: Bearer mytv_sk_...`, created by a\n  signed-in human at <https://my-tv-channel.com/agent-keys/> or in the app under\n  Profile → Agent Access. An active subscription on any tier is required, and the key\n  inherits the owner's tier limits. **An agent cannot mint its own key, by design** — if\n  you do not have one, ask the owner for one.\n- **Rate limit:** 1,000 requests/hour per key. Exceeding it returns `429` with\n  `Retry-After`; honour it rather than spinning.\n- **Start with `GET /users/status.php`.** It returns the tier, the real quota numbers for\n  this account, every channel, and for each one exactly what it still needs before it can\n  go live. Agents that skip this step guess, and guessing is expensive.\n\n## The two things that catch everyone\n\n1. **Weights only reach the air when the schedule is generated.** A channel builds its\n   schedule the instant it crosses the launch threshold, from the weights present at that\n   moment. Weights set afterwards are stored faithfully, reported back correctly, and do\n   not change what is broadcasting. Either set each asset's weight as soon as it reports\n   `ready`, or call `POST /schedule/regenerate.php` when you are done.\n2. **You cannot upload a local file over MCP**, because tool arguments are JSON and there\n   is no multipart channel. `POST /assets/import-url.php` is therefore the ingestion path\n   for an agent. `POST /assets/upload.php` exists for clients that can post multipart.\n\n## Going live\n\nA channel launches **automatically** once it has ≥ 4 ready assets **and** ≥ 15 minutes of\ncontent with weight > 0. Transcoding is the slow step. Poll `GET /assets/status.php` for\n`summary.meetsLaunchRequirements`, then `GET /channels/get.php` until `scheduleStatus` is\n`active`, then report the watch URL to the owner.\n",
+    "contact": {
+      "name": "My TV Channel",
+      "url": "https://my-tv-channel.com/agents/"
+    },
+    "license": {
+      "name": "Proprietary",
+      "url": "https://my-tv-channel.com/terms.html"
+    },
+    "x-jentic-source-url": "https://my-tv-channel.com/openapi.yaml"
+  },
+  "servers": [
+    {
+      "url": "https://my-tv-channel.com/api/mytvchannel",
+      "description": "Production (canonical host)"
+    },
+    {
+      "url": "https://localtvbroadcast.com/api/mytvchannel",
+      "description": "Production (legacy host, still live — prefer the canonical one)"
+    }
+  ],
+  "paths": {
+    "/users/status.php": {
+      "get": {
+        "operationId": "getAccountStatus",
+        "tags": [
+          "Account"
+        ],
+        "summary": "Who am I — tier, limits, quotas, channels and launch gaps",
+        "description": "**The right first call.** Returns the owner's subscription tier and the real limits\nfor this account, upload and streaming quota used vs remaining over a rolling 7-day\nwindow, and every channel with its `launchGaps` — a human-readable list of what each\nchannel still needs, e.g. `\"needs 2 more ready asset(s)\"`.\n\nDo not hardcode tier limits from documentation; read them from here. Quota is measured\nin seconds for upload and minutes for streaming.\n",
+        "responses": {
+          "200": {
+            "description": "Account status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiSuccess"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "data": {
+                          "$ref": "#/components/schemas/AccountStatus"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      }
+    },
+    "/users/device.php": {
+      "get": {
+        "operationId": "getOwnershipTag",
+        "tags": [
+          "Account"
+        ],
+        "summary": "The owner's YouTube ownership-proof tag",
+        "description": "Returns the device tag used to prove YouTube ownership, in the form\n`MyTVChannelApp#<device_id>`. The owner pastes this exact string into a video's\ndescription or tags on YouTube; only the uploader can do that, which is the proof.\n\nSee `POST /assets/import-youtube.php`. **Relay the string verbatim** — it is matched\nexactly.\n",
+        "responses": {
+          "200": {
+            "description": "The ownership tag for this account",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiSuccess"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "data": {
+                          "type": "object",
+                          "properties": {
+                            "deviceId": {
+                              "type": "string"
+                            },
+                            "tag": {
+                              "type": "string",
+                              "examples": [
+                                "MyTVChannelApp#61030AF7-FC5C-4131-AA9F-1E62DC0BA25F"
+                              ]
+                            }
+                          }
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      }
+    },
+    "/subscriptions/quota.php": {
+      "get": {
+        "operationId": "getQuota",
+        "tags": [
+          "Account"
+        ],
+        "summary": "Upload and streaming quota detail",
+        "description": "A narrower view of the quota already included in `GET /users/status.php`. Prefer that call unless you specifically only want quota.",
+        "responses": {
+          "200": {
+            "description": "Quota detail",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiSuccess"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      }
+    },
+    "/channels/check-handle.php": {
+      "get": {
+        "operationId": "checkHandleAvailable",
+        "tags": [
+          "Channels"
+        ],
+        "summary": "Is a handle free",
+        "description": "Check before calling `create_channel`. The handle becomes the subdomain, so it is permanent in practice — archiving a channel keeps its handle reserved.",
+        "parameters": [
+          {
+            "name": "handle",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Handle"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Availability",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiSuccess"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "data": {
+                          "type": "object",
+                          "properties": {
+                            "available": {
+                              "type": "boolean"
+                            }
+                          }
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      }
+    },
+    "/channels/create.php": {
+      "post": {
+        "operationId": "createChannel",
+        "tags": [
+          "Channels"
+        ],
+        "summary": "Create a channel",
+        "description": "Creates a channel. It starts private and off air; it goes live by itself once the\nlaunch requirements are met.\n\n`is_public: true` lists it in Discover and is available on **every** tier, including\nStarter. Never tell an owner to upgrade for public listing — an earlier version of the\ndocumentation said Creator+ was required and that was wrong.\n",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateChannelRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Channel created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiSuccess"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "data": {
+                          "$ref": "#/components/schemas/Channel"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "409": {
+            "description": "The handle is already taken",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/channels/list.php": {
+      "get": {
+        "operationId": "listChannels",
+        "tags": [
+          "Channels"
+        ],
+        "summary": "List channels",
+        "parameters": [
+          {
+            "name": "owner",
+            "in": "query",
+            "required": false,
+            "description": "Pass `me` to restrict the list to channels owned by the authenticated account.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "me"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Channels",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiSuccess"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      }
+    },
+    "/channels/get.php": {
+      "get": {
+        "operationId": "getChannel",
+        "tags": [
+          "Channels"
+        ],
+        "summary": "One channel, including whether it is on air",
+        "description": "**This is the call that tells you whether a channel is broadcasting.** Poll\n`scheduleStatus` (also returned as `schedule_status`) until it reads `active`, then\nreport `watchUrl` to the owner.\n",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The channel",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiSuccess"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "data": {
+                          "$ref": "#/components/schemas/Channel"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/channels/update.php": {
+      "put": {
+        "operationId": "updateChannel",
+        "tags": [
+          "Channels"
+        ],
+        "summary": "Update allowlisted channel fields",
+        "description": "**The channel id goes in the query string as `?id=N`**, not in the body. This is the\nopposite of `PUT /assets/update.php`, where the id goes in the body as `asset_id`. The\ninconsistency is real; both are documented here so you do not have to find out.\n\nOnly allowlisted fields are accepted; anything else is ignored rather than erroring.\n",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "description": {
+                    "type": "string"
+                  },
+                  "tags": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "is_public": {
+                    "type": "boolean"
+                  },
+                  "category": {
+                    "type": "string"
+                  },
+                  "scheduling_mode": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiSuccess"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/channels/delete.php": {
+      "post": {
+        "operationId": "archiveChannel",
+        "tags": [
+          "Channels"
+        ],
+        "summary": "Take a channel off air (archive, not destroy)",
+        "description": "Takes the channel off air and removes it from every listing. **Not destructive in the\nirreversible sense:** the handle stays reserved and the assets are retained.\n\nIdempotent — safe to retry. Returns `409` if transcodes are still running for the\nchannel; wait for them or retry.\n",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "channel_id"
+                ],
+                "properties": {
+                  "channel_id": {
+                    "type": "integer"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Archived",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiSuccess"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "409": {
+            "description": "Transcodes are still running for this channel",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/channels/schedule.php": {
+      "get": {
+        "operationId": "getSchedule",
+        "tags": [
+          "Scheduling"
+        ],
+        "summary": "The EPG for a channel",
+        "description": "Returns the electronic programme guide — what is playing and what is next.\n\n**Two things are unlike every other endpoint here.** This one needs **no\nauthentication**, because an EPG is public; and its `data` is a **bare array**, not an\nobject. If you wrote a generic response handler that reaches into `data.something`, it\nwill break precisely here.\n",
+        "security": [],
+        "parameters": [
+          {
+            "name": "channel_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "EPG entries, oldest first",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "const": true
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/ScheduleEntry"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/assets/upload.php": {
+      "post": {
+        "operationId": "uploadAsset",
+        "tags": [
+          "Content"
+        ],
+        "summary": "Upload a video file (multipart)",
+        "description": "Posts a video file directly. **An MCP client cannot call this** — tool arguments are\nJSON and there is no multipart channel. Use `POST /assets/import-url.php` instead, or\nhave the owner upload through the app.\n\nAccepted: MP4, MOV, M4V, MPEG, AVI. Duration is charged against the rolling 7-day\nupload quota. The asset lands in `pending` and follows\n`pending → transcoding → ready`.\n",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "file",
+                  "channel_id"
+                ],
+                "properties": {
+                  "file": {
+                    "type": "string",
+                    "format": "binary"
+                  },
+                  "channel_id": {
+                    "type": "integer"
+                  },
+                  "title": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Accepted for transcoding",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiSuccess"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/QuotaExceeded"
+          },
+          "413": {
+            "description": "Body too large. If you see an HTML error page rather than the JSON envelope here, it came from the web server rather than the application."
+          }
+        }
+      }
+    },
+    "/assets/import-url.php": {
+      "post": {
+        "operationId": "importVideoFromUrl",
+        "tags": [
+          "Content"
+        ],
+        "summary": "Import a video from a public URL",
+        "description": "**The main way an agent adds content.** The server fetches the file, so you do not\ndownload it yourself.\n\nThe URL must be a **direct, public, unauthenticated** media link — `mp4`, `mov`,\n`m4v`, `mpeg`, `mpg`, `avi`, or a **finite** `.m3u8` (VOD, not a live stream). Not a\nweb page, not something behind a login.\n\n- Rejected with `400` immediately if it cannot be probed as video, so you get a clear\n  error rather than a silent failure later.\n- Quota is charged on the video's duration, checked at submit **and** re-verified\n  against the real file after download — a source that misreports duration fails then.\n- Maximum 20 queued imports at a time (`429` beyond that).\n- Submitting the same URL to the same channel twice returns the original asset with\n  `duplicate: true` instead of importing again, so retries are safe.\n\nReturns immediately; the asset starts at `downloading`, then\n`pending → transcoding → ready`. **Set `weight` here** rather than after the fact —\nsee the note on the schedule endpoints.\n",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "channel_id",
+                  "url"
+                ],
+                "properties": {
+                  "channel_id": {
+                    "type": "integer",
+                    "description": "`channelId` is also accepted."
+                  },
+                  "url": {
+                    "type": "string",
+                    "format": "uri"
+                  },
+                  "title": {
+                    "type": "string"
+                  },
+                  "tags": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "weight": {
+                    "$ref": "#/components/schemas/Weight"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Import queued (or an existing asset, if this URL was already imported)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiSuccess"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "data": {
+                          "$ref": "#/components/schemas/Asset"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Not a direct media URL, or it could not be probed as video",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/QuotaExceeded"
+          },
+          "429": {
+            "description": "More than 20 imports are already queued",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/assets/import-youtube.php": {
+      "post": {
+        "operationId": "importYouTubeVideo",
+        "tags": [
+          "Content"
+        ],
+        "summary": "Import a YouTube video the owner proves they own",
+        "description": "Imports a YouTube video, but **only one the owner can prove they uploaded** — and you\ncannot perform that proof for them:\n\n1. Get the owner's tag from `GET /users/device.php`\n   (`MyTVChannelApp#<device_id>`).\n2. Ask them to paste that exact string into the video's **description or tags on\n   YouTube**. Only the uploader can edit those; that is the proof.\n3. Retry the import.\n\nIf the tag is missing you get `403` whose message **already contains the exact string\nto paste — relay it verbatim**, do not paraphrase or reformat it.\n\nPublic, finished videos only: no live streams, no private or age-restricted videos, no\nplaylists or channel URLs. Capped at 10 imports per day. Same quota as upload.\n\nNever try to import a video the owner did not upload. The check exists because a\nchannel built from other people's videos is a copyright problem for the owner.\n",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "channel_id",
+                  "url"
+                ],
+                "properties": {
+                  "channel_id": {
+                    "type": "integer"
+                  },
+                  "url": {
+                    "type": "string",
+                    "format": "uri"
+                  },
+                  "title": {
+                    "type": "string"
+                  },
+                  "tags": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "weight": {
+                    "$ref": "#/components/schemas/Weight"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Import queued",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiSuccess"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "description": "Ownership not proved, or quota exceeded. When ownership is the cause, the `error` string contains the exact tag for the owner to publish — pass it through unchanged.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/assets/my.php": {
+      "get": {
+        "operationId": "listAssets",
+        "tags": [
+          "Content"
+        ],
+        "summary": "List the videos on a channel",
+        "parameters": [
+          {
+            "name": "channel_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Assets",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiSuccess"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      }
+    },
+    "/assets/status.php": {
+      "get": {
+        "operationId": "getTranscodeStatus",
+        "tags": [
+          "Content"
+        ],
+        "summary": "Poll transcoding, and find out when the channel can launch",
+        "description": "Each asset reports `uploadStatus` (`downloading → pending → transcoding → ready`) and\ntranscode progress. The `summary` object reports `meetsLaunchRequirements`, which is\nwhat you actually want.\n\nPoll every 30–60 seconds. Transcoding takes roughly real-time ÷ 4, depending on load\non the encoding farm. Give exactly one of `channel_id` or `asset_id`.\n",
+        "parameters": [
+          {
+            "name": "channel_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "asset_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Transcode status and launch-requirement summary",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiSuccess"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      }
+    },
+    "/assets/update.php": {
+      "put": {
+        "operationId": "setAssetWeight",
+        "tags": [
+          "Content"
+        ],
+        "summary": "Set a video's weight, title or tags",
+        "description": "**The asset id goes in the BODY as `asset_id`** — `?id=N` is also accepted, but the\nbody form is canonical. This is the opposite of `PUT /channels/update.php`, where the\nid goes in the query string.\n\n`weight` (0–10, default 5) controls how often the video plays. `0` removes it from\nscheduling entirely without deleting it.\n\n**Set the weight as soon as the asset reports `ready`, not after all imports finish.**\nThe channel auto-launches the instant it crosses the launch threshold and builds its\nschedule from the weights that exist at that moment. On a measured run, a channel went\nlive 16 seconds after the final transcode and weights set 20 seconds later had zero\neffect — a weight-3 asset got identical airtime to a weight-9 one. If the channel is\nalready live, follow this with `POST /schedule/regenerate.php`.\n\nFor an ordered mini-series, tag assets `seqXX01`, `seqXX02`, … (XX = any two letters).\nThey always play in order, and only the `01` episode enters the random draw.\n",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "asset_id"
+                ],
+                "properties": {
+                  "asset_id": {
+                    "type": "integer"
+                  },
+                  "weight": {
+                    "$ref": "#/components/schemas/Weight"
+                  },
+                  "title": {
+                    "type": "string"
+                  },
+                  "tags": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiSuccess"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      }
+    },
+    "/assets/delete.php": {
+      "post": {
+        "operationId": "deleteAsset",
+        "tags": [
+          "Content"
+        ],
+        "summary": "Remove a video (soft delete)",
+        "description": "Stops the asset being scheduled, cancels any running transcode, and auto-regenerates\nthe schedule. **Soft delete** — the file survives a grace period. Idempotent.\n\nDeletes are reversible by design, so prefer cleaning up after yourself to leaving\ndebris. Never delete content you did not create in this session unless the owner asked.\n",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "asset_id"
+                ],
+                "properties": {
+                  "asset_id": {
+                    "type": "integer"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiSuccess"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      }
+    },
+    "/assets/retry.php": {
+      "post": {
+        "operationId": "retryTranscode",
+        "tags": [
+          "Content"
+        ],
+        "summary": "Re-queue a failed transcode",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "asset_id"
+                ],
+                "properties": {
+                  "asset_id": {
+                    "type": "integer"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Re-queued",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiSuccess"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      }
+    },
+    "/schedule/regenerate.php": {
+      "post": {
+        "operationId": "regenerateSchedule",
+        "tags": [
+          "Scheduling"
+        ],
+        "summary": "Rebuild the schedule now, with the current weights",
+        "description": "**Call this after changing weights on a channel that is already live**, or the change\nwill not air until the hourly cron picks it up.\n\nDestructive in the sense that it replaces what was going to air — but not\nirreversible; it rebuilds from current state. Manual rows placed by\n`POST /schedule/batch-insert.php` survive regeneration.\n\nThrottled to **one call per channel per 5 minutes**. On `429`, honour `Retry-After`;\ndo not spin.\n",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "channel_id"
+                ],
+                "properties": {
+                  "channel_id": {
+                    "type": "integer"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Schedule rebuilt",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiSuccess"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      }
+    },
+    "/schedule/batch-insert.php": {
+      "post": {
+        "operationId": "batchInsertSchedule",
+        "tags": [
+          "Scheduling"
+        ],
+        "summary": "Place specific assets in the schedule manually (Pro tier and above)",
+        "description": "Manual placement. Requires **Pro tier or above** — check `tier` from `GET /users/status.php` first and tell the owner an upgrade is needed rather than retrying into `403`. Rows placed this way survive schedule regeneration.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "channelId",
+                  "assetIds",
+                  "mode"
+                ],
+                "properties": {
+                  "channelId": {
+                    "type": "integer"
+                  },
+                  "assetIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "integer"
+                    }
+                  },
+                  "mode": {
+                    "type": "string",
+                    "enum": [
+                      "end",
+                      "at_time"
+                    ]
+                  },
+                  "startTime": {
+                    "type": "string",
+                    "description": "Required when `mode` is `at_time`."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Inserted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiSuccess"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/TierRequired"
+          }
+        }
+      }
+    },
+    "/schedule/validate.php": {
+      "post": {
+        "operationId": "validateScheduleRules",
+        "tags": [
+          "Scheduling"
+        ],
+        "summary": "Dry-run a ruleset — saves nothing",
+        "description": "**Always call this before `PUT /schedule/rules.php`.** It takes exactly the payload\nthat `rules.php` accepts, **saves nothing**, and returns\n`{valid, errors[], warnings[], preview[]}` including a simulated 24-hour grid.\n\nDeliberately **not tier-gated**, so you can preview a ruleset on any plan — including\none the owner could not yet commit.\n",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RuleSet"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Validation result and a simulated 24-hour grid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiSuccess"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "data": {
+                          "type": "object",
+                          "properties": {
+                            "valid": {
+                              "type": "boolean"
+                            },
+                            "errors": {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              }
+                            },
+                            "warnings": {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              }
+                            },
+                            "preview": {
+                              "type": "array",
+                              "items": {
+                                "type": "object"
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      }
+    },
+    "/schedule/rules.php": {
+      "get": {
+        "operationId": "getScheduleRules",
+        "tags": [
+          "Scheduling"
+        ],
+        "summary": "The current ruleset for a channel",
+        "parameters": [
+          {
+            "name": "channel_id",
+            "in": "query",
+            "required": true,
+            "description": "`id` is also accepted.",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The ruleset",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiSuccess"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "data": {
+                          "$ref": "#/components/schemas/RuleSet"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      },
+      "put": {
+        "operationId": "setScheduleRules",
+        "tags": [
+          "Scheduling"
+        ],
+        "summary": "Replace the whole ruleset (Pro tier and above)",
+        "description": "**This REPLACES the entire ruleset**, it does not merge. Read the current rules first\nif you intend to add one, and always run `POST /schedule/validate.php` on the payload\nbefore committing it.\n\nRequires **Pro tier or above**. Rules are durable intent: the scheduler re-honours\nthem every time it rebuilds, so you compile the owner's wishes once rather than\nbabysitting the grid.\n",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RuleSet"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Ruleset replaced",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiSuccess"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/TierRequired"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "An API key, `Authorization: Bearer mytv_sk_...`. Created by a signed-in human at\n<https://my-tv-channel.com/agent-keys/> or in the app under Profile → Agent Access.\nRequires an active subscription on any tier; the key inherits the owner's tier limits.\n\nKey management — creating and revoking — is deliberately impossible with an API key,\nso an agent holding one cannot escalate to issuing more. **Never ask the owner for\ntheir Apple password or app login.** The key is all you need.\n"
+      }
+    },
+    "schemas": {
+      "ApiSuccess": {
+        "type": "object",
+        "required": [
+          "success"
+        ],
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "const": true
+          },
+          "message": {
+            "type": "string"
+          },
+          "data": {}
+        }
+      },
+      "ApiError": {
+        "type": "object",
+        "required": [
+          "success",
+          "error"
+        ],
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "const": false
+          },
+          "error": {
+            "type": "string",
+            "description": "Human-readable. For the YouTube ownership failure this string contains the exact tag the owner must publish — relay it verbatim."
+          },
+          "code": {
+            "type": "integer"
+          }
+        }
+      },
+      "Handle": {
+        "type": "string",
+        "pattern": "^[a-z0-9-]{3,63}$",
+        "description": "3–63 characters, lowercase letters, digits and hyphens. Becomes the channel's subdomain — `https://{handle}.my-tv-channel.com` — so treat it as permanent.",
+        "examples": [
+          "retro-arcade"
+        ]
+      },
+      "Weight": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 10,
+        "default": 5,
+        "description": "How often the video plays, relative to the others. `0` excludes it from scheduling without deleting it. Do not set everything to 10 — the *differences* between weights are what shape a channel."
+      },
+      "ScheduleStatus": {
+        "type": "string",
+        "enum": [
+          "inactive",
+          "pending",
+          "active",
+          "error"
+        ],
+        "description": "`active` means the channel is broadcasting."
+      },
+      "CreateChannelRequest": {
+        "type": "object",
+        "required": [
+          "handle",
+          "name",
+          "channel_type"
+        ],
+        "properties": {
+          "handle": {
+            "$ref": "#/components/schemas/Handle"
+          },
+          "name": {
+            "type": "string"
+          },
+          "channel_type": {
+            "type": "string",
+            "enum": [
+              "location",
+              "thematic"
+            ],
+            "description": "`location` requires a `location` object. `thematic` is the usual choice."
+          },
+          "description": {
+            "type": "string"
+          },
+          "primary_language": {
+            "type": "string",
+            "description": "ISO 639-1 code, e.g. `en`."
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "category": {
+            "type": "string"
+          },
+          "orientation": {
+            "type": "string",
+            "description": "Portrait or landscape presentation."
+          },
+          "is_public": {
+            "type": "boolean",
+            "default": false,
+            "description": "List the channel in Discover. **Available on every tier**, including Starter."
+          },
+          "location": {
+            "type": "object",
+            "description": "Required when `channel_type` is `location`.",
+            "properties": {
+              "latitude": {
+                "type": "number"
+              },
+              "longitude": {
+                "type": "number"
+              },
+              "radius_km": {
+                "type": "number"
+              },
+              "name": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "Channel": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer"
+          },
+          "handle": {
+            "$ref": "#/components/schemas/Handle"
+          },
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "channelType": {
+            "type": "string"
+          },
+          "isPublic": {
+            "type": "boolean"
+          },
+          "category": {
+            "type": "string"
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "scheduleStatus": {
+            "$ref": "#/components/schemas/ScheduleStatus"
+          },
+          "schedule_status": {
+            "$ref": "#/components/schemas/ScheduleStatus",
+            "description": "Snake-case alias of `scheduleStatus`; both are returned."
+          },
+          "watchUrl": {
+            "type": "string",
+            "format": "uri",
+            "examples": [
+              "https://retro-arcade.my-tv-channel.com"
+            ]
+          },
+          "launchGaps": {
+            "type": "array",
+            "description": "What this channel still needs before it can go live, in plain language. Empty once the requirements are met.",
+            "items": {
+              "type": "string"
+            },
+            "examples": [
+              [
+                "needs 2 more ready asset(s)"
+              ]
+            ]
+          }
+        }
+      },
+      "Asset": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer"
+          },
+          "channelId": {
+            "type": "integer"
+          },
+          "title": {
+            "type": "string"
+          },
+          "uploadStatus": {
+            "type": "string",
+            "enum": [
+              "downloading",
+              "pending",
+              "transcoding",
+              "ready",
+              "error"
+            ]
+          },
+          "durationSeconds": {
+            "type": "number"
+          },
+          "weight": {
+            "$ref": "#/components/schemas/Weight"
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "duplicate": {
+            "type": "boolean",
+            "description": "Present and true when this URL had already been imported to this channel, in which case the original asset is returned rather than a new import being started."
+          }
+        }
+      },
+      "ScheduleEntry": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer"
+          },
+          "channelId": {
+            "type": "integer"
+          },
+          "assetId": {
+            "type": "integer"
+          },
+          "title": {
+            "type": "string"
+          },
+          "startTime": {
+            "type": "string"
+          },
+          "endTime": {
+            "type": "string"
+          },
+          "durationSeconds": {
+            "type": "number"
+          },
+          "isLive": {
+            "type": "boolean"
+          },
+          "hlsUrl": {
+            "type": "string",
+            "format": "uri"
+          }
+        }
+      },
+      "RuleSet": {
+        "type": "object",
+        "required": [
+          "channel_id",
+          "rules"
+        ],
+        "properties": {
+          "channel_id": {
+            "type": "integer"
+          },
+          "timezone": {
+            "type": "string",
+            "description": "IANA name, e.g. `Europe/Paris`. **Set this** — rule times are wall clock in the channel timezone, and omitting it means UTC, which is almost never what the owner meant. `schedule_timezone` is also accepted.",
+            "examples": [
+              "Europe/Paris"
+            ]
+          },
+          "rules": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Rule"
+            }
+          }
+        }
+      },
+      "Rule": {
+        "type": "object",
+        "required": [
+          "rule_type",
+          "start_time",
+          "days_mask",
+          "selector_type",
+          "selector_value"
+        ],
+        "description": "A `time_slot` puts something on at a time. A `daypart_weight` changes how likely\nsomething is during a window.\n\n**Slots start ON-OR-AFTER their time.** The programme running into a slot is never cut\nshort, so an 18:00 slot may actually begin at 18:02. That is deliberate — a linear\nchannel must not chop a video in half to hit a clock time. Do not report it as a fault.\n",
+        "properties": {
+          "rule_type": {
+            "type": "string",
+            "enum": [
+              "time_slot",
+              "daypart_weight"
+            ]
+          },
+          "start_time": {
+            "type": "string",
+            "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$",
+            "examples": [
+              "18:00"
+            ]
+          },
+          "end_time": {
+            "type": "string",
+            "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$",
+            "description": "On a `time_slot`, this makes it a **block**: it keeps drawing from the selector until this time. Without it you get a single programme, not a morning of cartoons."
+          },
+          "days_mask": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 127,
+            "description": "Bitmask — bit0=Mon, bit1=Tue … bit6=Sun. `127` = every day, `31` = Mon–Fri, `96` = weekend.",
+            "examples": [
+              127,
+              31,
+              96
+            ]
+          },
+          "selector_type": {
+            "type": "string",
+            "enum": [
+              "asset",
+              "tag",
+              "playlist"
+            ]
+          },
+          "selector_value": {
+            "description": "An asset id, a tag string, or — for `playlist` — an array of asset ids, which play in order.",
+            "oneOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "integer"
+                }
+              }
+            ]
+          },
+          "priority": {
+            "type": "integer",
+            "default": 0
+          },
+          "weight_multiplier": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 10,
+            "description": "`daypart_weight` only. `0` removes matching assets from that window entirely."
+          }
+        }
+      },
+      "AccountStatus": {
+        "type": "object",
+        "properties": {
+          "user": {
+            "type": "object"
+          },
+          "tier": {
+            "type": "string"
+          },
+          "hasSubscription": {
+            "type": "boolean"
+          },
+          "subscription": {
+            "type": "object"
+          },
+          "limits": {
+            "type": "object",
+            "description": "The real limits for this account. Read them here rather than hardcoding.",
+            "properties": {
+              "uploadMinutesPerWeek": {
+                "type": "number"
+              },
+              "streamMinutesPerWeek": {
+                "type": "number"
+              },
+              "liveStreaming": {
+                "type": "boolean"
+              },
+              "manualSchedule": {
+                "type": "boolean"
+              },
+              "publicChannel": {
+                "type": "boolean"
+              },
+              "resolution": {
+                "type": "string"
+              }
+            }
+          },
+          "quota": {
+            "type": "object",
+            "description": "Usage over a rolling 7-day window.",
+            "properties": {
+              "uploadUsedSeconds": {
+                "type": "number"
+              },
+              "uploadLimitSeconds": {
+                "type": "number"
+              },
+              "uploadRemainingSeconds": {
+                "type": "number"
+              },
+              "streamUsedMinutes": {
+                "type": "number"
+              },
+              "streamLimitMinutes": {
+                "type": "number"
+              },
+              "streamRemainingMinutes": {
+                "type": "number"
+              },
+              "window": {
+                "type": "string"
+              }
+            }
+          },
+          "channels": {
+            "type": "array",
+            "items": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/Channel"
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "readyAssetCount": {
+                      "type": "integer"
+                    },
+                    "readyDurationSeconds": {
+                      "type": "number"
+                    },
+                    "meetsLaunchRequirements": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              ]
+            }
+          },
+          "launchRequirements": {
+            "type": "object",
+            "properties": {
+              "minReadyAssets": {
+                "type": "integer",
+                "examples": [
+                  4
+                ]
+              },
+              "minReadySeconds": {
+                "type": "integer",
+                "examples": [
+                  900
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "responses": {
+      "BadRequest": {
+        "description": "Malformed request or a rejected value",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ApiError"
+            }
+          }
+        }
+      },
+      "Unauthorized": {
+        "description": "Missing, malformed or revoked API key",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ApiError"
+            }
+          }
+        }
+      },
+      "NotFound": {
+        "description": "No such resource, or it does not belong to this account",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ApiError"
+            }
+          }
+        }
+      },
+      "QuotaExceeded": {
+        "description": "Weekly quota exceeded. The message reports the remaining allowance. Tell the owner a plan upgrade is needed rather than retrying into repeated 403s.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ApiError"
+            }
+          }
+        }
+      },
+      "TierRequired": {
+        "description": "This operation needs a higher subscription tier. Check `tier` from `GET /users/status.php` before calling rather than discovering it here.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ApiError"
+            }
+          }
+        }
+      },
+      "RateLimited": {
+        "description": "Rate limit or throttle exceeded — 1,000 requests/hour per key, and separately one schedule regeneration per channel per 5 minutes. Honour `Retry-After`; do not spin.",
+        "headers": {
+          "Retry-After": {
+            "schema": {
+              "type": "integer"
+            },
+            "description": "Seconds to wait before retrying."
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ApiError"
+            }
+          }
+        }
+      }
+    }
+  },
+  "security": [
+    {
+      "bearerAuth": []
+    }
+  ],
+  "tags": [
+    {
+      "name": "Account",
+      "description": "Who am I, what may I do, and how much of it is left."
+    },
+    {
+      "name": "Channels",
+      "description": "Create, inspect, update and archive channels."
+    },
+    {
+      "name": "Content",
+      "description": "Get video in, and follow it through transcoding to ready."
+    },
+    {
+      "name": "Scheduling",
+      "description": "Shape what actually airs, and when."
+    }
+  ],
+  "externalDocs": {
+    "description": "Agent guide, with a worked path from nothing to a broadcasting channel. Read this if the spec alone leaves you unsure what order to call things in.",
+    "url": "https://my-tv-channel.com/api/mytvchannel/docs/AGENTS.md"
+  }
+}
