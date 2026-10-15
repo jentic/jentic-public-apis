@@ -1,6 +1,6 @@
 # APIs — C
 
-Browsing 472 APIs starting with **C**.
+Browsing 473 APIs starting with **C**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · **C** · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -45,6 +45,7 @@ Browsing 472 APIs starting with **C**.
 | [captivated](../../../../apis/openapi/captivated) | [main](../../../../apis/openapi/captivated/main) |
 | [captivated.works](../../../../apis/openapi/captivated.works) | [main](../../../../apis/openapi/captivated.works/main) |
 | [captureiq.ai](../../../../apis/openapi/captureiq.ai) | [main](../../../../apis/openapi/captureiq.ai/main) |
+| [capy.ai](../../../../apis/openapi/capy.ai) | [main](../../../../apis/openapi/capy.ai/main) |
 | [carapi.dev](../../../../apis/openapi/carapi.dev) | [main](../../../../apis/openapi/carapi.dev/main) |
 | [carbon.inc](../../../../apis/openapi/carbon.inc) | [main](../../../../apis/openapi/carbon.inc/main) |
 | [carbonapi.io](../../../../apis/openapi/carbonapi.io) | [main](../../../../apis/openapi/carbonapi.io/main) |
