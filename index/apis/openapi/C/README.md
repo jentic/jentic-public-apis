@@ -1,6 +1,6 @@
 # APIs — C
 
-Browsing 466 APIs starting with **C**.
+Browsing 467 APIs starting with **C**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · **C** · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -356,6 +356,7 @@ Browsing 466 APIs starting with **C**.
 | [coordinatehq.com](../../../../apis/openapi/coordinatehq.com) | [main](../../../../apis/openapi/coordinatehq.com/main) |
 | [copper.com](../../../../apis/openapi/copper.com) | [main](../../../../apis/openapi/copper.com/main) |
 | [copperx.dev](../../../../apis/openapi/copperx.dev) | [copperx-api](../../../../apis/openapi/copperx.dev/copperx-api) |
+| [coppica.com](../../../../apis/openapi/coppica.com) | [main](../../../../apis/openapi/coppica.com/main) |
 | [copy.ai](../../../../apis/openapi/copy.ai) | [main](../../../../apis/openapi/copy.ai/main) |
 | [corbado.com](../../../../apis/openapi/corbado.com) | [main](../../../../apis/openapi/corbado.com/main) |
 | [core.ac.uk](../../../../apis/openapi/core.ac.uk) | [main](../../../../apis/openapi/core.ac.uk/main) |
