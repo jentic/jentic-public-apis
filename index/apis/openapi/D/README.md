@@ -1,6 +1,6 @@
 # APIs — D
 
-Browsing 194 APIs starting with **D**.
+Browsing 195 APIs starting with **D**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · **D** · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -175,6 +175,7 @@ Browsing 194 APIs starting with **D**.
 | [drata.com](../../../../apis/openapi/drata.com) | [main](../../../../apis/openapi/drata.com/main) |
 | [drchrono.com](../../../../apis/openapi/drchrono.com) | [main](../../../../apis/openapi/drchrono.com/main) |
 | [dregs.com](../../../../apis/openapi/dregs.com) | [main](../../../../apis/openapi/dregs.com/main) |
+| [dribba.com](../../../../apis/openapi/dribba.com) | [main](../../../../apis/openapi/dribba.com/main) |
 | [drift.com](../../../../apis/openapi/drift.com) | [main](../../../../apis/openapi/drift.com/main) |
 | [drillr.ai](../../../../apis/openapi/drillr.ai) | [main](../../../../apis/openapi/drillr.ai/main) |
 | [drips.com](../../../../apis/openapi/drips.com) | [drips-api](../../../../apis/openapi/drips.com/drips-api) |
