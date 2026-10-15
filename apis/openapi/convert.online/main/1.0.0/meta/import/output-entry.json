@@ -1,0 +1,1065 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Convert.Online API",
+    "description": "Convert files between more than 400 formats — images, video, audio, documents, ebooks, archives and fonts.\n\nA **job** is one conversion request. Inside it are **tasks**, named by you and wired together with `input`: something imports the source, `convert` changes the format, something exports the result. That structure is what lets one request pull a file from S3, convert it and drop it on SFTP.\n\nThe short version of the flow:\n\n1. `POST /v1/process/jobs` — create the job. For an uploaded source you get an upload target back.\n2. Send the bytes, if the source is a local file.\n3. `POST /v1/process/jobs/{id}/complete-upload` — start the conversion.\n4. `GET /v1/process/jobs/{id}` until `status` is `finished`, or subscribe to `/events`.\n5. Download from the export task's `result.url`.\n\nSet `\"sandbox\": true` on a job to validate it and get a simulated finished response — nothing converts, no quota is used, and no key is needed.",
+    "version": "1.0.0",
+    "contact": {
+      "name": "Convert.Online support",
+      "url": "https://convert.online/contact",
+      "email": "support@convert.online"
+    },
+    "termsOfService": "https://convert.online/terms",
+    "license": {
+      "name": "Proprietary",
+      "url": "https://convert.online/terms"
+    },
+    "x-jentic-source-url": "https://api.convert.online/openapi.json"
+  },
+  "servers": [
+    {
+      "url": "https://api.convert.online",
+      "description": "Production"
+    }
+  ],
+  "paths": {
+    "/v1/formats": {
+      "get": {
+        "tags": [
+          "Catalogue"
+        ],
+        "summary": "List formats",
+        "description": "With no argument, every format we can read. With `input_format`, every format that input can be converted to.\n\nThe answer comes from the same catalogue the website is built from, so a pair listed here is a pair `POST /v1/process/jobs` will accept.",
+        "operationId": "listFormats",
+        "parameters": [
+          {
+            "name": "input_format",
+            "in": "query",
+            "required": false,
+            "description": "Source format, e.g. `pdf`. Omit to list every input format.",
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9]{1,16}$"
+            },
+            "example": "heic"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The formats",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FormatList"
+                },
+                "examples": {
+                  "targetsForMarkdown": {
+                    "summary": "What a Markdown file can become",
+                    "value": {
+                      "status": "success",
+                      "count": 8,
+                      "input_format": "md",
+                      "formats": [
+                        "docx",
+                        "htm",
+                        "html",
+                        "odt",
+                        "pdf",
+                        "rtf",
+                        "txt",
+                        "xhtml"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "description": "Nothing converts that format",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The catalogue is unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/options": {
+      "get": {
+        "tags": [
+          "Catalogue"
+        ],
+        "summary": "List the settings one conversion accepts",
+        "description": "Resize, quality, codecs, bitrate, trim, crop and the rest — with the exact names, types and allowed values for this pair.\n\nOption names differ per conversion, so read them from here rather than guessing: an option the conversion does not accept is ignored silently. Pass what you get back in a convert task's `options` object, keyed by `name`.\n\nCodec lists are narrowed by the output format, because a container only carries certain codecs. An option carrying `applies_when` is only honoured when that other option has that value.",
+        "operationId": "listOptions",
+        "parameters": [
+          {
+            "name": "input_format",
+            "in": "query",
+            "required": true,
+            "description": "Source format, e.g. `mp4`.",
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9]{1,16}$"
+            },
+            "example": "mp4"
+          },
+          {
+            "name": "output_format",
+            "in": "query",
+            "required": true,
+            "description": "Target format, e.g. `webm`.",
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9]{1,16}$"
+            },
+            "example": "webm"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The options this conversion accepts, possibly none",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OptionList"
+                },
+                "examples": {
+                  "videoOptions": {
+                    "summary": "A couple of the settings mp4 to webm takes",
+                    "value": {
+                      "status": "success",
+                      "input_format": "mp4",
+                      "output_format": "webm",
+                      "count": 31,
+                      "options": [
+                        {
+                          "name": "video_codec",
+                          "type": "select",
+                          "label": "Video Codec",
+                          "description": "Select video codec.",
+                          "group": "Video",
+                          "values": [
+                            {
+                              "value": "libaom-av1",
+                              "label": "aom-av1"
+                            },
+                            {
+                              "value": "libvpx",
+                              "label": "vpx"
+                            },
+                            {
+                              "value": "libvpx-vp9",
+                              "label": "vpx-vp9"
+                            }
+                          ]
+                        },
+                        {
+                          "name": "video_frame_rate",
+                          "type": "range",
+                          "label": "Frame Rate",
+                          "group": "Video",
+                          "min": 1,
+                          "max": 60
+                        },
+                        {
+                          "name": "crf",
+                          "type": "range",
+                          "group": "Video",
+                          "min": 18,
+                          "max": 51,
+                          "applies_when": {
+                            "rate_control_method": "crf"
+                          }
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "description": "A format we do not know, or a pair we do not convert",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The catalogue is unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/process/jobs": {
+      "post": {
+        "tags": [
+          "Jobs"
+        ],
+        "summary": "Create a conversion job",
+        "description": "Creates a job from a map of named tasks. A task's `input` names the task it takes its source from, which is how several steps chain into one job.\n\nWhen the source is an upload, the response carries where to send the bytes and the job waits at `waiting_upload` until you call `complete-upload`.",
+        "operationId": "createJob",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateJobRequest"
+              },
+              "examples": {
+                "convertAnUpload": {
+                  "summary": "Upload a HEIC photo and get a JPG",
+                  "value": {
+                    "tasks": {
+                      "import-1": {
+                        "operation": "import/upload"
+                      },
+                      "convert-1": {
+                        "operation": "convert",
+                        "input": "import-1",
+                        "input_format": "heic",
+                        "output_format": "jpg"
+                      },
+                      "export-1": {
+                        "operation": "export/url",
+                        "input": [
+                          "convert-1"
+                        ]
+                      }
+                    }
+                  }
+                },
+                "convertFromUrl": {
+                  "summary": "Convert a file that is already online",
+                  "value": {
+                    "tasks": {
+                      "import-1": {
+                        "operation": "import/url",
+                        "url": "https://example.com/report.docx"
+                      },
+                      "convert-1": {
+                        "operation": "convert",
+                        "input": "import-1",
+                        "output_format": "pdf"
+                      },
+                      "export-1": {
+                        "operation": "export/url",
+                        "input": [
+                          "convert-1"
+                        ]
+                      }
+                    }
+                  }
+                },
+                "sandbox": {
+                  "summary": "Validate the shape without converting anything",
+                  "value": {
+                    "sandbox": true,
+                    "tasks": {
+                      "import-1": {
+                        "operation": "import/url",
+                        "url": "https://example.com/a.png"
+                      },
+                      "convert-1": {
+                        "operation": "convert",
+                        "input": "import-1",
+                        "output_format": "jpg"
+                      },
+                      "export-1": {
+                        "operation": "export/url",
+                        "input": [
+                          "convert-1"
+                        ]
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Job created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Job"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "402": {
+            "description": "Not enough conversion quota left on the plan",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The job did not validate — an unknown operation, a broken chain, or more conversions than the plan runs at once",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The job store is unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/process/jobs/{jobId}": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/JobId"
+        }
+      ],
+      "get": {
+        "tags": [
+          "Jobs"
+        ],
+        "summary": "Get a job",
+        "description": "Poll until `status` is `finished` or `failed`. The finished job's export task carries the download URL.",
+        "operationId": "getJob",
+        "responses": {
+          "200": {
+            "description": "The job as it stands",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Job"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "503": {
+            "description": "The job store is unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/process/jobs/{jobId}/complete-upload": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/JobId"
+        }
+      ],
+      "post": {
+        "tags": [
+          "Jobs"
+        ],
+        "summary": "Start the conversion once the bytes have arrived",
+        "description": "Call this after sending the file. Until it is called the job stays at `waiting_upload` and nothing is converted.",
+        "operationId": "completeUpload",
+        "responses": {
+          "200": {
+            "description": "The job is queued",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Job"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/v1/process/jobs/{jobId}/events": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/JobId"
+        }
+      ],
+      "get": {
+        "tags": [
+          "Jobs"
+        ],
+        "summary": "Follow a job as it runs (Server-Sent Events)",
+        "description": "An `text/event-stream` of the job's progress, so a client can react the moment the conversion ends instead of polling.",
+        "operationId": "streamJobEvents",
+        "responses": {
+          "200": {
+            "description": "An event stream; each event carries the job in the same shape as GET /v1/process/jobs/{jobId}",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/v1/imports": {
+      "post": {
+        "tags": [
+          "Imports"
+        ],
+        "summary": "Create an import to receive a local file",
+        "description": "Returns somewhere to put the bytes. Use it for any file that is not already reachable at a URL.",
+        "operationId": "createImport",
+        "responses": {
+          "200": {
+            "description": "Where to send the file",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Import"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "503": {
+            "description": "The import store is unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/imports/{importId}/content": {
+      "parameters": [
+        {
+          "name": "importId",
+          "in": "path",
+          "required": true,
+          "description": "The import's id",
+          "schema": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{32}$"
+          }
+        },
+        {
+          "name": "token",
+          "in": "query",
+          "required": false,
+          "description": "One-use upload token, as returned with the import. It stands in for the API key, so no key need appear in an upload command.",
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "put": {
+        "tags": [
+          "Imports"
+        ],
+        "summary": "Send the file's bytes",
+        "description": "The body is the raw file, streamed — not a form upload. `POST` is accepted as well as `PUT`.",
+        "operationId": "uploadImportContent",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The file arrived",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "413": {
+            "description": "The file is larger than the import ceiling",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/download/{token}": {
+      "parameters": [
+        {
+          "name": "token",
+          "in": "path",
+          "required": true,
+          "description": "The token from a finished export task's URL",
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "get": {
+        "tags": [
+          "Downloads"
+        ],
+        "summary": "Download a converted file",
+        "description": "The URL a finished `export/url` task hands back. The token is the whole credential, so the link works on its own.",
+        "operationId": "downloadResult",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "The converted file",
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "An API key from Dashboard → API Keys, sent as `Authorization: Bearer <key>`."
+      },
+      "apiKeyHeader": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-API-Key",
+        "description": "The same key, sent in its own header instead."
+      }
+    },
+    "parameters": {
+      "JobId": {
+        "name": "jobId",
+        "in": "path",
+        "required": true,
+        "description": "The job's id",
+        "schema": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{32}$"
+        }
+      }
+    },
+    "responses": {
+      "Unauthorized": {
+        "description": "The key is missing, wrong, or restricted to other IPs",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "NotFound": {
+        "description": "No such job, import or file",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "BadRequest": {
+        "description": "A parameter is missing or malformed",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      }
+    },
+    "schemas": {
+      "CreateJobRequest": {
+        "type": "object",
+        "required": [
+          "tasks"
+        ],
+        "properties": {
+          "tasks": {
+            "type": "object",
+            "description": "Named tasks. The key is the name you refer to in another task's `input`.",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/Task"
+            }
+          },
+          "tag": {
+            "type": "string",
+            "maxLength": 255,
+            "description": "Your own label, echoed back on the job."
+          },
+          "sandbox": {
+            "type": "boolean",
+            "description": "Validate and return a simulated finished job. Nothing converts, no quota is spent, no key is required."
+          },
+          "import_id": {
+            "type": "string",
+            "description": "Build the job around a file already sent to an import, instead of an `import/*` task.",
+            "pattern": "^[a-f0-9]{32}$"
+          }
+        }
+      },
+      "Task": {
+        "type": "object",
+        "required": [
+          "operation"
+        ],
+        "properties": {
+          "operation": {
+            "type": "string",
+            "description": "What this step does.",
+            "enum": [
+              "import/upload",
+              "import/url",
+              "import/base64",
+              "import/s3",
+              "import/sftp",
+              "import/googlecloud",
+              "convert",
+              "export/url",
+              "export/s3",
+              "export/sftp",
+              "export/googlecloud",
+              "export/webhook"
+            ]
+          },
+          "input": {
+            "description": "The task this one takes its source from. `convert` names one; an export takes a list.",
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            ]
+          },
+          "url": {
+            "type": "string",
+            "format": "uri",
+            "description": "For `import/url`: where to fetch the source from."
+          },
+          "input_format": {
+            "type": "string",
+            "description": "Source format. Optional — inferred from the file name or URL when it can be."
+          },
+          "output_format": {
+            "type": "string",
+            "description": "For `convert`: the target format, e.g. `jpg`, `pdf`, `mp3`."
+          },
+          "options": {
+            "type": "object",
+            "description": "Conversion settings — resizing, quality, codecs and so on. The names differ per conversion; see the documentation for the pair you are converting.",
+            "additionalProperties": true
+          }
+        }
+      },
+      "Job": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{32}$"
+          },
+          "tag": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "description": "`waiting_upload` until the bytes arrive and `complete-upload` is called; then it queues, runs, and ends `finished` or `failed`.",
+            "enum": [
+              "waiting_upload",
+              "waiting",
+              "queued",
+              "processing",
+              "converting",
+              "finished",
+              "failed"
+            ]
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "startedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "endedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "tasks": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/TaskStatus"
+            }
+          },
+          "result": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "Present once the job has finished.",
+            "additionalProperties": true
+          },
+          "error": {
+            "type": "string",
+            "description": "Why the job failed; empty otherwise."
+          },
+          "links": {
+            "type": "object",
+            "properties": {
+              "self": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "TaskStatus": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "job": {
+            "type": "string"
+          },
+          "operation": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "Import": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{32}$"
+          },
+          "upload": {
+            "type": "object",
+            "description": "The ways to deliver the bytes. The signed storage URL is the direct route; the proxy accepts the same file through this API, for a network that cannot reach storage.",
+            "additionalProperties": true
+          }
+        }
+      },
+      "Error": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "example": "error"
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      },
+      "FormatList": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "example": "success"
+          },
+          "count": {
+            "type": "integer",
+            "description": "How many formats are listed.",
+            "example": 165
+          },
+          "input_format": {
+            "type": "string",
+            "description": "Echoed back when the request named one; absent when listing every input format.",
+            "example": "heic"
+          },
+          "formats": {
+            "type": "array",
+            "description": "Lowercase extensions, sorted.",
+            "items": {
+              "type": "string"
+            },
+            "example": [
+              "jpg",
+              "png",
+              "webp"
+            ]
+          }
+        }
+      },
+      "OptionList": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "example": "success"
+          },
+          "input_format": {
+            "type": "string",
+            "example": "mp4"
+          },
+          "output_format": {
+            "type": "string",
+            "example": "webm"
+          },
+          "count": {
+            "type": "integer",
+            "example": 31
+          },
+          "options": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ConversionOption"
+            }
+          }
+        }
+      },
+      "ConversionOption": {
+        "type": "object",
+        "description": "One setting this conversion accepts. `name` is the key to use in a convert task's `options` object.",
+        "properties": {
+          "name": {
+            "type": "string",
+            "example": "video_codec"
+          },
+          "type": {
+            "type": "string",
+            "description": "`checkbox` takes true/false, `number` takes an integer, `select` and `radio` take one of `values`.",
+            "example": "select"
+          },
+          "label": {
+            "type": "string",
+            "description": "What the website calls it.",
+            "example": "Video codec"
+          },
+          "description": {
+            "type": "string"
+          },
+          "group": {
+            "type": "string",
+            "description": "The panel it is grouped under.",
+            "example": "Video"
+          },
+          "min": {
+            "type": "integer"
+          },
+          "max": {
+            "type": "integer"
+          },
+          "step": {
+            "type": "integer"
+          },
+          "default": {
+            "description": "The value used when the option is not given.",
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "boolean"
+              }
+            ]
+          },
+          "values": {
+            "type": "array",
+            "description": "The allowed values, for `select` and `radio`. An entry is a bare value, or an object when its label differs from the value we need back.",
+            "items": {
+              "oneOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "value": {
+                      "type": "string"
+                    },
+                    "label": {
+                      "type": "string"
+                    }
+                  }
+                }
+              ]
+            }
+          },
+          "applies_when": {
+            "type": "object",
+            "description": "Only honoured when the named option has the given value, e.g. `{\"video_codec\": \"h264\"}`.",
+            "additionalProperties": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "name",
+          "type"
+        ]
+      }
+    }
+  },
+  "security": [
+    {
+      "bearerAuth": []
+    },
+    {
+      "apiKeyHeader": []
+    }
+  ],
+  "tags": [
+    {
+      "name": "Catalogue",
+      "description": "What we convert, and what each conversion accepts"
+    },
+    {
+      "name": "Jobs",
+      "description": "Create, start and follow conversion jobs"
+    },
+    {
+      "name": "Imports",
+      "description": "Getting a local file to the server"
+    },
+    {
+      "name": "Downloads",
+      "description": "Collecting the converted file"
+    }
+  ],
+  "externalDocs": {
+    "description": "Full API documentation",
+    "url": "https://convert.online/api-docs"
+  }
+}
