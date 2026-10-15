@@ -1,6 +1,6 @@
 # APIs — H
 
-Browsing 132 APIs starting with **H**.
+Browsing 133 APIs starting with **H**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · **H** · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -22,6 +22,7 @@ Browsing 132 APIs starting with **H**.
 | [handwrytten.com](../../../../apis/openapi/handwrytten.com) | [main](../../../../apis/openapi/handwrytten.com/main) |
 | [hanko.io](../../../../apis/openapi/hanko.io) | [main](../../../../apis/openapi/hanko.io/main) |
 | [haplotypefrequencycu](../../../../apis/openapi/haplotypefrequencycu) | [main](../../../../apis/openapi/haplotypefrequencycu/main) |
+| [happenstance.ai](../../../../apis/openapi/happenstance.ai) | [main](../../../../apis/openapi/happenstance.ai/main) |
 | [happyreturns.com](../../../../apis/openapi/happyreturns.com) | [main](../../../../apis/openapi/happyreturns.com/main) |
 | [harpoonapp.com](../../../../apis/openapi/harpoonapp.com) | [main](../../../../apis/openapi/harpoonapp.com/main) |
 | [harvardartmuseums.org](../../../../apis/openapi/harvardartmuseums.org) | [main](../../../../apis/openapi/harvardartmuseums.org/main) |
