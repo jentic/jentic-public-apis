@@ -1,0 +1,693 @@
+openapi: 3.1.0
+info:
+  title: Nirvana Task API
+  version: 1.0.0-beta
+  description: >
+    Nirvana Task API (Public Beta). Clean REST endpoints for integrations,
+    automation, and AI agents (MCP servers, scripts, webhooks). Auth: `Bearer
+    <nirvana-auth-token>`. Legacy v0 endpoints are removed from this service;
+    migrate integrations to /v1/* endpoints. During beta, backward compatibility
+    is best-effort and minor response changes may occur before GA.
+
+servers:
+  - url: https://api.nirvanahq.com
+
+security:
+  - bearerAuth: []
+
+paths:
+  /v1/tasks:
+    get:
+      operationId: v1GetTasks
+      summary: Query tasks
+      description: >
+        Returns tasks matching the specified filters. Notes are excluded by
+        default. Excludes internal types (headings, area folders).
+      tags: [Tasks]
+      parameters:
+        - name: state
+          in: query
+          description: >
+            GTD state filter. Valid values: inbox, next, waiting, scheduled,
+            someday, later, logbook, trash. Comma-separate for multiple
+            (e.g. "next,waiting").
+          schema:
+            type: string
+          example: next
+        - name: type
+          in: query
+          description: "Item type: task, project, reflist, refitem."
+          schema:
+            type: string
+            enum: [task, project, reflist, refitem]
+        - name: tags
+          in: query
+          description: Comma-separated tags. All must be present (AND logic).
+          schema:
+            type: string
+          example: work,calls
+        - name: query
+          in: query
+          description: Keyword search across task name and notes.
+          schema:
+            type: string
+        - name: starred
+          in: query
+          description: If true, return only Focus list (starred) tasks.
+          schema:
+            type: boolean
+        - name: overdue
+          in: query
+          description: If true, return only tasks with a past due date.
+          schema:
+            type: boolean
+        - name: due_before
+          in: query
+          description: Return tasks due on or before this date (YYYY-MM-DD).
+          schema:
+            type: string
+            format: date
+        - name: due_after
+          in: query
+          description: Return tasks due on or after this date (YYYY-MM-DD).
+          schema:
+            type: string
+            format: date
+        - name: include_notes
+          in: query
+          description: Include note field in response. Default false.
+          schema:
+            type: boolean
+        - name: logbook_days
+          in: query
+          description: >-
+            Window of logbook history to include (days). Only affects results when state=logbook.
+            Default 90, max 1825 (5 years). Tasks completed before this window are excluded.
+          schema:
+            type: integer
+            default: 90
+            minimum: 1
+            maximum: 1825
+        - name: limit
+          in: query
+          description: Max results per page. Default 50, max 200.
+          schema:
+            type: integer
+            default: 50
+            maximum: 200
+        - name: offset
+          in: query
+          description: Number of matched results to skip. Use with limit for pagination.
+          schema:
+            type: integer
+            default: 0
+            minimum: 0
+      responses:
+        '200':
+          description: Task list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskListResponse'
+              example:
+                ok: true
+                tasks:
+                  - id: "019ce35b-74b0-7ff2-bb1a-179285e14c4e"
+                    name: "Review Q2 roadmap"
+                    type: task
+                    state: next
+                    starred: false
+                    tags: [work]
+                    duedate: "2026-03-20"
+                    created: "2026-03-12"
+                total: 1
+                has_more: false
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+    post:
+      operationId: v1CreateTask
+      summary: Create a task or project
+      description: >
+        Creates a new task or project. Combination rules: `state=scheduled`
+        requires `startdate`; `state=next` and `startdate` cannot both be set
+        (next tasks are undated by definition); `waitingfor` is only valid when
+        `state=waiting`.
+      tags: [Tasks]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateTaskBody'
+            example:
+              name: "Review Q2 roadmap"
+              state: next
+              tags: [work]
+              duedate: "2026-03-20"
+      responses:
+        '201':
+          description: Task created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /v1/tasks/{id}:
+    patch:
+      operationId: v1UpdateTask
+      summary: Update a task
+      description: >
+        Updates only the fields included in the request body. Only include fields
+        that need to change.
+
+
+        **State side-effects (automatic):**
+
+        - `state=logbook` sets `completed` to today; `state=inbox` clears it.
+
+        - `state=next` clears `startdate` (next tasks are undated by definition).
+
+        - Moving away from `state=waiting` auto-clears `waitingfor` unless
+          `waitingfor` is also included in this request.
+
+
+        **Field combination rules (enforced — returns 400 on violation):**
+
+        - `state=scheduled` requires `startdate` — either already set or
+          included in this request.
+
+        - `state=next` and `startdate` cannot be set in the same request.
+
+        - `waitingfor` (non-empty) is only valid when `state=waiting` (current
+          or being set in this request).
+
+        - `type` is not accepted — type cannot be changed on an existing item.
+
+        - Recurring template tasks (read-only `state=recurring`) cannot be
+          updated via this endpoint.
+
+
+        **Tags:** Tags are fully replaced — include all desired tags, or omit
+        the field entirely to leave tags unchanged.
+      tags: [Tasks]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Task ID
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateTaskBody'
+            example:
+              state: logbook
+      responses:
+        '200':
+          description: Task updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskResponse'
+        '400':
+          description: Invalid request — combination rule violated or field constraint failed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                  error:
+                    type: string
+              examples:
+                scheduled_no_startdate:
+                  summary: state=scheduled without startdate
+                  value:
+                    ok: false
+                    error: "state=scheduled requires a startdate"
+                next_with_startdate:
+                  summary: state=next with startdate
+                  value:
+                    ok: false
+                    error: "state=next tasks have no start date. To schedule a task, use state=scheduled with a startdate instead."
+                waitingfor_not_waiting:
+                  summary: waitingfor set on non-waiting task
+                  value:
+                    ok: false
+                    error: "waitingfor can only be set when state is waiting"
+                type_change:
+                  summary: Attempted type change
+                  value:
+                    ok: false
+                    error: "type cannot be changed on an existing item"
+                recurring_update:
+                  summary: Attempted update of recurring template
+                  value:
+                    ok: false
+                    error: "Recurring templates cannot be updated via this endpoint. Edit the recurring schedule in the Nirvana app."
+                logbook_completed_conflict:
+                  summary: completed:false contradicts state:logbook
+                  value:
+                    ok: false
+                    error: "completed cannot be false when state is \"logbook\""
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /v1/tags:
+    get:
+      operationId: v1GetTags
+      summary: List tags with usage counts
+      description: >
+        Returns all user tags and areas with task usage counts. Call before
+        tagging tasks to see available options.
+      tags: [Tags]
+      responses:
+        '200':
+          description: Tag list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                  tags:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        name:
+                          type: string
+                        type:
+                          type: string
+                          enum: [context, area]
+                        count:
+                          type: integer
+              example:
+                ok: true
+                tags:
+                  - name: work
+                    type: context
+                    count: 14
+                  - name: Home
+                    type: area
+                    count: 6
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /v1/analytics:
+    get:
+      operationId: v1GetAnalytics
+      summary: GTD system health analytics
+      description: >
+        Returns a comprehensive GTD system health snapshot computed server-side
+        over the user's full task graph. Covers velocity (tasks captured/completed
+        in 7d/30d), dormancy (tasks untouched 30/60/90 days), inbox age, due date
+        pressure, waiting-for aging, someday graveyard, project health, tag usage,
+        and effort distribution. Suitable for weekly reviews, coaching insights,
+        or identifying stalled tasks.
+      tags: [Analytics]
+      responses:
+        '200':
+          description: Analytics snapshot
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                  analytics:
+                    type: object
+              example:
+                ok: true
+                analytics:
+                  snapshot_ts: 1743278400
+                  velocity:
+                    captured_7d: 12
+                    captured_30d: 48
+                    completed_7d: 9
+                    completed_30d: 35
+                    logbook_total: 892
+                    capture_to_completion_ratio_30d: 1.37
+                    avg_throughput_days: 4.2
+                  dormancy:
+                    dormant_30d: 14
+                    dormant_60d: 8
+                    dormant_90d: 3
+                    inbox_count: 2
+                    inbox_avg_age_days: 1
+                    inbox_older_than_2d: 0
+                    inbox_older_than_7d: 0
+                  due_dates:
+                    overdue: 1
+                    due_7d: 3
+                    due_14d: 2
+                    due_30d: 5
+                  waiting:
+                    total: 4
+                    avg_age_days: 6
+                    older_than_7d: 1
+                    older_than_14d: 0
+                  scheduled_horizon:
+                    arriving_7d: 2
+                    arriving_14d: 1
+                  someday:
+                    total: 18
+                    older_than_90d: 7
+                    older_than_180d: 3
+                    older_than_365d: 1
+                  projects:
+                    active: 5
+                    stalled: 1
+                    engaged_pct: 80
+                    avg_tasks_per_project: 3.4
+                  tags:
+                    unique_count: 12
+                    top: [{tag: work, count: 22}]
+                    next_tasks_with_context_pct: 68
+                  effort:
+                    next_with_etime_pct: 45
+                    etime_distribution: {short: 8, medium: 12, long: 3}
+                    next_with_energy_pct: 30
+                    energy_distribution: {"1": 4, "2": 6, "3": 2}
+                  pressure:
+                    actionable_total: 47
+                    weeks_of_backlog: 5.5
+                  system:
+                    total_items: 1284
+                    tasks: 363
+                    projects: 5
+                    reflists: 2
+                    refitems: 14
+                    logbook: 892
+                    trash: 8
+                    oldest_item_year: 2018
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /v1/counts:
+    get:
+      operationId: v1GetCounts
+      summary: Task counts per GTD state
+      description: >
+        Returns task counts per GTD state for a quick system overview.
+        "focus" is the starred/Focus list count.
+      tags: [Counts]
+      responses:
+        '200':
+          description: Counts per state
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                  counts:
+                    type: object
+                    properties:
+                      inbox:
+                        type: integer
+                      next:
+                        type: integer
+                      waiting:
+                        type: integer
+                      scheduled:
+                        type: integer
+                      someday:
+                        type: integer
+                      later:
+                        type: integer
+                      focus:
+                        type: integer
+                      projects:
+                        type: integer
+                      logbook:
+                        type: integer
+                      trash:
+                        type: integer
+              example:
+                ok: true
+                counts:
+                  inbox: 1
+                  next: 40
+                  waiting: 0
+                  scheduled: 0
+                  someday: 3
+                  later: 0
+                  focus: 33
+                  projects: 7
+                  logbook: 1009
+                  trash: 0
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+
+  responses:
+    Unauthorized:
+      description: Missing or invalid Bearer token
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error:
+                type: string
+          example:
+            error: Unauthorized
+    BadRequest:
+      description: Invalid request body
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              ok:
+                type: boolean
+              error:
+                type: string
+          example:
+            ok: false
+            error: "name is required"
+    NotFound:
+      description: Task not found
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              ok:
+                type: boolean
+              error:
+                type: string
+          example:
+            ok: false
+            error: "Task not found"
+
+  schemas:
+    TaskItem:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+          maxLength: 1000
+        type:
+          type: string
+          enum: [task, project, reflist, refitem]
+        state:
+          type: string
+          description: >
+            GTD state. "recurring" is read-only — these are recurring task
+            templates managed by the Nirvana app and cannot be created or
+            modified via this API. "active" applies to in-progress projects.
+          enum: [inbox, next, waiting, scheduled, someday, later, logbook, trash, active, recurring]
+        starred:
+          type: boolean
+        tags:
+          type: array
+          maxItems: 10
+          items:
+            type: string
+            maxLength: 100
+        parentid:
+          type: string
+        duedate:
+          type: string
+          format: date
+        startdate:
+          type: string
+          format: date
+        completed:
+          type: string
+          format: date
+        waitingfor:
+          type: string
+          maxLength: 100
+          description: Person or entity being waited on. Only present when state is "waiting".
+        energy:
+          type: integer
+          minimum: 0
+          maximum: 3
+          description: "Effort level: 0=routine, 1=low, 2=medium, 3=high"
+        etime:
+          type: integer
+          description: "Estimated time in minutes (e.g. 15, 30, 60, 90, 120)"
+        note:
+          type: string
+          maxLength: 100000
+          description: Only present when include_notes=true or on write responses
+        created:
+          type: string
+          format: date
+
+    TaskListResponse:
+      type: object
+      properties:
+        ok:
+          type: boolean
+        tasks:
+          type: array
+          items:
+            $ref: '#/components/schemas/TaskItem'
+        total:
+          type: integer
+          description: Total number of matched tasks before limit/offset are applied.
+        has_more:
+          type: boolean
+          description: True if there are more matched tasks beyond the current page.
+
+    TaskResponse:
+      type: object
+      properties:
+        ok:
+          type: boolean
+        task:
+          $ref: '#/components/schemas/TaskItem'
+
+    CreateTaskBody:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          maxLength: 1000
+        note:
+          type: string
+          maxLength: 100000
+        state:
+          type: string
+          enum: [inbox, next, waiting, scheduled, someday, later, logbook, trash, active]
+          default: inbox
+          description: >
+            GTD state. Rules: `scheduled` requires `startdate`; `next` and
+            `startdate` cannot both be set; `waitingfor` requires `waiting`.
+        type:
+          type: string
+          enum: [task, project, reflist, refitem]
+          default: task
+        tags:
+          type: array
+          maxItems: 10
+          items:
+            type: string
+            maxLength: 100
+        starred:
+          type: boolean
+          default: false
+        duedate:
+          type: string
+          format: date
+        startdate:
+          type: string
+          format: date
+          description: >
+            Required when state is "scheduled". Cannot be set when state is
+            "next".
+        waitingfor:
+          type: string
+          maxLength: 100
+          description: Person or entity being waited on. Only valid when state is "waiting".
+        energy:
+          type: integer
+          minimum: 0
+          maximum: 3
+          description: "Effort level: 0=routine, 1=low, 2=medium, 3=high"
+        etime:
+          type: integer
+          description: "Estimated time in minutes (e.g. 15, 30, 60, 90, 120)"
+        parentid:
+          type: string
+          description: ID of a parent project
+
+    UpdateTaskBody:
+      type: object
+      description: >
+        All fields are optional — only include fields that need to change.
+        `type` is not accepted (type cannot be changed on an existing item).
+        Recurring template tasks (state=recurring) cannot be updated.
+      properties:
+        name:
+          type: string
+          maxLength: 1000
+        note:
+          type: string
+          maxLength: 100000
+        state:
+          type: string
+          enum: [inbox, next, waiting, scheduled, someday, later, logbook, trash, active]
+          description: >
+            State transitions apply side effects automatically. See operation
+            description for full rules and combination constraints.
+        tags:
+          type: array
+          maxItems: 10
+          items:
+            type: string
+            maxLength: 100
+          description: Full replacement — any tags not listed will be removed.
+        starred:
+          type: boolean
+        duedate:
+          type: string
+          format: date
+          description: Pass empty string to clear.
+        startdate:
+          type: string
+          format: date
+          description: >
+            Pass "" to clear. Required (in this request or already set) when
+            state is "scheduled". Cannot be set when state is "next".
+        waitingfor:
+          type: string
+          maxLength: 100
+          description: >
+            Person or entity being waited on. Only valid when state is
+            "waiting" (current or being set in this request). Pass "" to clear.
+            Moving away from "waiting" state auto-clears this field.
+        energy:
+          type: integer
+          minimum: 0
+          maximum: 3
+          description: "Effort level: 0=routine, 1=low, 2=medium, 3=high"
+        etime:
+          type: integer
+          description: "Estimated time in minutes (e.g. 15, 30, 60, 90, 120)"
