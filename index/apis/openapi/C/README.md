@@ -1,6 +1,6 @@
 # APIs — C
 
-Browsing 473 APIs starting with **C**.
+Browsing 474 APIs starting with **C**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · **C** · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -122,6 +122,7 @@ Browsing 473 APIs starting with **C**.
 | [checkr.com](../../../../apis/openapi/checkr.com) | [main](../../../../apis/openapi/checkr.com/main) |
 | [checkvist.com](../../../../apis/openapi/checkvist.com) | [checkvist-api](../../../../apis/openapi/checkvist.com/checkvist-api) |
 | [cheddarup.com](../../../../apis/openapi/cheddarup.com) | [cheddar-up](../../../../apis/openapi/cheddarup.com/cheddar-up) |
+| [cheers.tech](../../../../apis/openapi/cheers.tech) | [main](../../../../apis/openapi/cheers.tech/main) |
 | [cheetaho.com](../../../../apis/openapi/cheetaho.com) | [main](../../../../apis/openapi/cheetaho.com/main) |
 | [chess.com](../../../../apis/openapi/chess.com) | [main](../../../../apis/openapi/chess.com/main) |
 | [chimprewriter.com](../../../../apis/openapi/chimprewriter.com) | [main](../../../../apis/openapi/chimprewriter.com/main) |
