@@ -1,6 +1,6 @@
 # APIs — A
 
-Browsing 470 APIs starting with **A**.
+Browsing 471 APIs starting with **A**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · **A** · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -65,6 +65,7 @@ Browsing 470 APIs starting with **A**.
 | [adsabs.harvard.edu](../../../../apis/openapi/adsabs.harvard.edu) | [main](../../../../apis/openapi/adsabs.harvard.edu/main) |
 | [adsapi.snapchat.com](../../../../apis/openapi/adsapi.snapchat.com) | [main](../../../../apis/openapi/adsapi.snapchat.com/main) |
 | [adsbexchange.com](../../../../apis/openapi/adsbexchange.com) | [main](../../../../apis/openapi/adsbexchange.com/main) |
+| [adslighthouse.com](../../../../apis/openapi/adslighthouse.com) | [main](../../../../apis/openapi/adslighthouse.com/main) |
 | [adviceslip.com](../../../../apis/openapi/adviceslip.com) | [main](../../../../apis/openapi/adviceslip.com/main) |
 | [adyen.com](../../../../apis/openapi/adyen.com) | [29 APIs](../../../../apis/openapi/adyen.com) |
 | [adyntel.com](../../../../apis/openapi/adyntel.com) | [adyntel-api](../../../../apis/openapi/adyntel.com/adyntel-api) |
