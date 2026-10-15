@@ -1,6 +1,6 @@
 # APIs — R
 
-Browsing 256 APIs starting with **R**.
+Browsing 257 APIs starting with **R**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · **R** · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -204,6 +204,7 @@ Browsing 256 APIs starting with **R**.
 | [ro.am](../../../../apis/openapi/ro.am) | [main](../../../../apis/openapi/ro.am/main) |
 | [roadgoat.com](../../../../apis/openapi/roadgoat.com) | [main](../../../../apis/openapi/roadgoat.com/main) · [roadgoat-cities](../../../../apis/openapi/roadgoat.com/roadgoat-cities) |
 | [roadie.com](../../../../apis/openapi/roadie.com) | [main](../../../../apis/openapi/roadie.com/main) |
+| [roark.ai](../../../../apis/openapi/roark.ai) | [main](../../../../apis/openapi/roark.ai/main) |
 | [robinpowered.com](../../../../apis/openapi/robinpowered.com) | [main](../../../../apis/openapi/robinpowered.com/main) |
 | [roblox.com](../../../../apis/openapi/roblox.com) | [main](../../../../apis/openapi/roblox.com/main) |
 | [roboflow.com](../../../../apis/openapi/roboflow.com) | [rest-api](../../../../apis/openapi/roboflow.com/rest-api) |
