@@ -1,0 +1,819 @@
+openapi: 3.1.0
+info:
+  title: Edwyna API
+  version: 1.1.0
+  summary: Prepaid outbound faxing for software and AI agents
+  description: |
+    Edwyna is an API-only, paid outbound fax service powered by FaxZero.
+    This contract covers supported United States and Canada destinations, one PDF,
+    one recipient, and a maximum of 25 pages.
+
+    Creating a draft is synchronous and non-consequential: the request waits
+    for isolated PDF validation and returns either a ready fax with an exact
+    server-generated quote or a structured rejection without creating a fax.
+    There is no validation-status polling step. Preparation requires enough available Edwyna credit to
+    cover the quote, but does not deduct that credit. Sending is consequential:
+    it deducts prepaid balance and queues an external fax transmission. Every
+    send request requires an idempotency key.
+  contact:
+    name: Edwyna Support
+    email: support@edwyna.com
+servers:
+  - url: https://edwyna.com
+    description: Production
+tags:
+  - name: Pricing
+  - name: Balance
+  - name: Faxes
+  - name: PDF handoff
+security:
+  - ApiKeyAuth: []
+paths:
+  /v1/pricing:
+    get:
+      tags: [Pricing]
+      operationId: getPricing
+      summary: Get an authoritative fax price
+      description: |
+        Returns the active server-side price and service limits for a supported
+        destination. Callers cannot supply or override a price.
+      parameters:
+        - name: destination_country
+          in: query
+          required: true
+          schema:
+            $ref: '#/components/schemas/DestinationCountry'
+      responses:
+        '200':
+          description: Active price rule
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PricingRule'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: No active price rule covers this destination
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+  /v1/balance:
+    get:
+      tags: [Balance]
+      operationId: getBalance
+      summary: Get the available prepaid balance
+      description: Requires the `balance:read` scope.
+      responses:
+        '200':
+          description: Current available balance
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Balance'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+  /v1/pdf-uploads:
+    post:
+      tags: [PDF handoff]
+      operationId: createPdfUpload
+      summary: Create a short-lived, single-use PDF upload URL
+      description: |
+        Requires `fax:prepare` and at least $4 in available Edwyna credit.
+        Returns a 15-minute URL that can accept the PDF with an HTTP PUT or a
+        small browser upload form. Uploading does not prepare, charge, or send
+        a fax. After upload, pass `upload_id` to `/v1/fax-drafts` exactly once.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/CreatePdfUploadRequest'
+      responses:
+        '201':
+          description: Single-use upload URL created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PdfUpload'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '402':
+          description: At least $4 in available Edwyna credit is required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+  /v1/pdf-uploads/{upload_id}:
+    get:
+      tags: [PDF handoff]
+      operationId: getPdfUpload
+      summary: Check whether a PDF handoff is ready
+      description: Requires `fax:prepare`. The upload can be consumed only once.
+      parameters:
+        - $ref: '#/components/parameters/UploadId'
+      responses:
+        '200':
+          description: Current upload state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PdfUploadStatus'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: Upload not found for this API key
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /v1/fax-drafts:
+    post:
+      tags: [Faxes]
+      operationId: createFaxDraft
+      summary: Upload, validate, and quote one PDF fax
+      description: |
+        Requires the `fax:prepare` scope. Supply exactly one `document` or one
+        previously uploaded `upload_id`. This operation does not deduct funds
+        and does not contact an external fax provider, but the account must have
+        enough available Edwyna credit to cover the quote (currently at least
+        $4.00). Preparation attempts are limited to 5 per UTC day per account and
+        API key, 10 per hour per source IP, and 60 per hour service-wide. An
+        account may have at most 3 unexpired unsent drafts. Rejected PDF attempts
+        count toward these limits. The returned normalized destination, page
+        count, document fingerprint, and price should be shown to the user before
+        the separate send operation. Unsupported and high-cost destination
+        prefixes are rejected before the PDF is validated or stored. This request
+        waits for validation; callers poll fax status only after a successful
+        response returns a fax_id.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/CreateFaxDraftRequest'
+            encoding:
+              document:
+                contentType: application/pdf
+      responses:
+        '201':
+          description: Fax draft validated and quoted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Fax'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '402':
+          description: Available Edwyna credit does not cover the quote
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '413':
+          description: PDF exceeds the configured byte limit
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '415':
+          description: Uploaded content is not an acceptable PDF
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+  /v1/fax-drafts/{fax_id}/send:
+    post:
+      tags: [Faxes]
+      operationId: sendFax
+      summary: Charge the prepaid balance and queue one fax
+      description: |
+        Requires the `fax:send` scope. This is a consequential external action.
+        Edwyna atomically verifies the draft, quote, account, API-key limits,
+        customer limits, idempotency record, and available balance before it
+        deducts funds and queues the fax. An internal worker then submits the
+        validated PDF to an internal fax provider; provider credentials never
+        cross this API.
+
+        Repeating the same Idempotency-Key with the same request returns the
+        original response without another charge or fax. Reusing the key with
+        different input returns a conflict.
+      parameters:
+        - $ref: '#/components/parameters/FaxId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '202':
+          description: Charged and queued exactly once
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Fax'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '402':
+          description: Insufficient prepaid balance
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/FaxNotFound'
+        '409':
+          description: Draft state, quote, or idempotency conflict
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+  /v1/faxes:
+    get:
+      tags: [Faxes]
+      operationId: listFaxes
+      summary: List faxes belonging to the authenticated customer
+      description: Requires the `fax:read` scope.
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema:
+            $ref: '#/components/schemas/FaxStatus'
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 25
+      responses:
+        '200':
+          description: Customer fax history
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FaxList'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+  /v1/faxes/{fax_id}:
+    get:
+      tags: [Faxes]
+      operationId: getFax
+      summary: Get one fax and its current delivery state
+      description: Requires the `fax:read` scope.
+      parameters:
+        - $ref: '#/components/parameters/FaxId'
+      responses:
+        '200':
+          description: Fax state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Fax'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/FaxNotFound'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+  /v1/faxes/{fax_id}/transmitted-document:
+    get:
+      tags: [Faxes]
+      operationId: downloadTransmittedDocument
+      summary: Optionally download the transmitted PDF after delivery
+      description: |
+        This optional endpoint requires the `fax:read` scope. After the fax
+        reaches `delivered`, it streams the fax backend's PDF representation of
+        the pages Edwyna submitted. Edwyna does not claim that this file proves
+        exactly what the receiving machine printed. The response is not cached
+        by Edwyna.
+      parameters:
+        - $ref: '#/components/parameters/FaxId'
+      responses:
+        '200':
+          description: Transmitted PDF
+          headers:
+            Content-Disposition:
+              description: Suggested attachment filename
+              schema:
+                type: string
+            X-Edwyna-Document-Sha256:
+              description: Lowercase SHA-256 fingerprint of the returned PDF bytes
+              schema:
+                type: string
+                pattern: '^[a-f0-9]{64}$'
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/FaxNotFound'
+        '409':
+          description: Fax has not been successfully delivered
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: Transmitted PDF is temporarily unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /v1/faxes/{fax_id}/delivery-record:
+    get:
+      tags: [Faxes]
+      operationId: downloadDeliveryRecord
+      summary: Download Edwyna's delivery-record PDF
+      description: |
+        Requires `fax:read` and a final `delivered` status. The PDF identifies
+        the fax, sender, recipient, document fingerprint, and recorded delivery
+        time. It reports the backend provider's final delivered status; it does
+        not establish that a particular person read, understood, or accepted
+        the document.
+      parameters:
+        - $ref: '#/components/parameters/FaxId'
+      responses:
+        '200':
+          description: Edwyna delivery record
+          headers:
+            Content-Disposition:
+              description: Suggested attachment filename
+              schema:
+                type: string
+            X-Edwyna-Record-Sha256:
+              description: Lowercase SHA-256 fingerprint of the returned record
+              schema:
+                type: string
+                pattern: '^[a-f0-9]{64}$'
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/FaxNotFound'
+        '409':
+          description: Fax has not been successfully delivered
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: Edwyna API key
+      description: |
+        Supply the high-entropy Edwyna API secret. Never put the secret in a URL
+        or user-visible prompt. Each key has explicit scopes and spending limits.
+  parameters:
+    FaxId:
+      name: fax_id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+      description: Opaque Edwyna fax identifier
+    UploadId:
+      name: upload_id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+      description: Opaque, single-use Edwyna PDF upload identifier
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema:
+        type: string
+        minLength: 16
+        maxLength: 255
+      description: Unique caller-generated key for this intended send
+  responses:
+    Unauthorized:
+      description: Missing, invalid, expired, or revoked API key
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Forbidden:
+      description: Scope, account status, or configured limit forbids the operation
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    FaxNotFound:
+      description: Fax not found for the authenticated customer
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    ValidationFailed:
+      description: One or more request, destination, document, quote, or policy checks failed
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    RateLimited:
+      description: Configured daily fax count or spending limit exceeded
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+  schemas:
+    DestinationCountry:
+      type: string
+      enum: [US, CA]
+    Money:
+      type: object
+      additionalProperties: false
+      required: [currency, amount_cents, display]
+      properties:
+        currency:
+          type: string
+          const: USD
+        amount_cents:
+          type: integer
+          minimum: 0
+        display:
+          type: string
+          examples: ['$4.00']
+    PricingRule:
+      type: object
+      additionalProperties: false
+      required:
+        - pricing_rule_id
+        - destination_country
+        - price
+        - max_pages
+        - effective_at
+      properties:
+        pricing_rule_id:
+          type: string
+          format: uuid
+        destination_country:
+          $ref: '#/components/schemas/DestinationCountry'
+        price:
+          $ref: '#/components/schemas/Money'
+        max_pages:
+          type: integer
+          const: 25
+        effective_at:
+          type: string
+          format: date-time
+    Balance:
+      type: object
+      additionalProperties: false
+      required: [available, updated_at]
+      properties:
+        available:
+          $ref: '#/components/schemas/Money'
+        updated_at:
+          type: string
+          format: date-time
+    CreatePdfUploadRequest:
+      type: object
+      additionalProperties: false
+      required: [filename]
+      properties:
+        filename:
+          type: string
+          maxLength: 180
+          pattern: '\.pdf$'
+    PdfUploadStatus:
+      type: object
+      required: [upload_id, filename, status, expires_at, ready_for_prepare]
+      properties:
+        upload_id:
+          type: string
+          format: uuid
+        filename:
+          type: string
+        status:
+          type: string
+          enum: [pending, receiving, uploaded, claimed, consumed, rejected, expired]
+        bytes:
+          type: [integer, 'null']
+        sha256:
+          type: [string, 'null']
+        expires_at:
+          type: string
+          format: date-time
+        uploaded_at:
+          type: [string, 'null']
+          format: date-time
+        ready_for_prepare:
+          type: boolean
+    PdfUpload:
+      allOf:
+        - $ref: '#/components/schemas/PdfUploadStatus'
+        - type: object
+          required: [upload_url, browser_upload_url, max_bytes, accepted_methods]
+          properties:
+            upload_url:
+              type: string
+              format: uri
+            browser_upload_url:
+              type: string
+              format: uri
+            max_bytes:
+              type: integer
+            accepted_methods:
+              type: array
+              items:
+                type: string
+                enum: [PUT, POST]
+    CreateFaxDraftRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - destination_country
+        - recipient_name
+        - recipient_fax
+        - sender_name
+        - sender_email
+        - sender_phone
+      oneOf:
+        - required: [document]
+        - required: [upload_id]
+      properties:
+        document:
+          type: string
+          format: binary
+          description: >-
+            One unencrypted PDF containing no more than 25 supported-size pages.
+            Edwyna rejects documents it cannot safely render or accept.
+        upload_id:
+          type: string
+          format: uuid
+          description: A ready, single-use PDF handoff created by `/v1/pdf-uploads`.
+        destination_country:
+          $ref: '#/components/schemas/DestinationCountry'
+        recipient_name:
+          type: string
+          minLength: 1
+          maxLength: 120
+        recipient_company:
+          type: string
+          maxLength: 120
+        recipient_fax:
+          type: string
+          minLength: 10
+          maxLength: 32
+          description: >-
+            Supported United States or Canada destination, normalized
+            server-side. Premium, unsupported, and high-cost prefixes are
+            rejected.
+        sender_name:
+          type: string
+          minLength: 1
+          maxLength: 120
+        sender_company:
+          type: string
+          maxLength: 120
+        sender_email:
+          type: string
+          format: email
+          maxLength: 255
+        sender_phone:
+          type: string
+          minLength: 10
+          maxLength: 32
+        client_reference:
+          type: string
+          maxLength: 191
+          description: Optional caller reference returned unchanged; not interpreted by Edwyna
+    FaxStatus:
+      type: string
+      enum:
+        - ready
+        - queued
+        - submitted
+        - transmitting
+        - delivered
+        - failed
+        - canceled
+    FinancialStatus:
+      type: string
+      enum:
+        - not_charged
+        - charged
+        - credit_pending
+        - credited
+    Fax:
+      type: object
+      additionalProperties: false
+      required:
+        - fax_id
+        - status
+        - financial_status
+        - recipient
+        - sender
+        - document
+        - created_at
+        - updated_at
+      properties:
+        fax_id:
+          type: string
+          format: uuid
+        client_reference:
+          type: [string, 'null']
+        status:
+          $ref: '#/components/schemas/FaxStatus'
+        financial_status:
+          $ref: '#/components/schemas/FinancialStatus'
+        recipient:
+          type: object
+          additionalProperties: false
+          required: [name, fax, country]
+          properties:
+            name:
+              type: string
+            company:
+              type: [string, 'null']
+            fax:
+              type: string
+              examples: ['+15035551212']
+            country:
+              $ref: '#/components/schemas/DestinationCountry'
+        sender:
+          type: object
+          additionalProperties: false
+          required: [name, email, phone]
+          properties:
+            name:
+              type: string
+            company:
+              type: [string, 'null']
+            email:
+              type: string
+              format: email
+            phone:
+              type: string
+        document:
+          type: object
+          additionalProperties: false
+          required: [filename, content_type, bytes, pages, sha256]
+          properties:
+            filename:
+              type: string
+            content_type:
+              type: string
+              const: application/pdf
+            bytes:
+              type: integer
+              minimum: 1
+            pages:
+              type: integer
+              minimum: 1
+              maximum: 25
+            sha256:
+              type: string
+              pattern: '^[a-f0-9]{64}$'
+        quote:
+          oneOf:
+            - $ref: '#/components/schemas/FaxQuote'
+            - type: 'null'
+        provider:
+          oneOf:
+            - $ref: '#/components/schemas/ProviderState'
+            - type: 'null'
+        failure:
+          oneOf:
+            - $ref: '#/components/schemas/Failure'
+            - type: 'null'
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        queued_at:
+          type: [string, 'null']
+          format: date-time
+        delivered_at:
+          type: [string, 'null']
+          format: date-time
+    FaxQuote:
+      type: object
+      additionalProperties: false
+      required: [pricing_rule_id, price, expires_at]
+      properties:
+        pricing_rule_id:
+          type: string
+          format: uuid
+        price:
+          $ref: '#/components/schemas/Money'
+        expires_at:
+          type: string
+          format: date-time
+    ProviderState:
+      type: object
+      additionalProperties: false
+      required: [attempts]
+      properties:
+        attempts:
+          type: integer
+          minimum: 0
+        last_update_at:
+          type: [string, 'null']
+          format: date-time
+    Failure:
+      type: object
+      additionalProperties: false
+      required: [code, message, final]
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+        final:
+          type: boolean
+    FaxList:
+      type: object
+      additionalProperties: false
+      required: [data, next_cursor]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/Fax'
+        next_cursor:
+          type: 'null'
+    Error:
+      type: object
+      additionalProperties: false
+      required: [error]
+      properties:
+        error:
+          type: object
+          additionalProperties: false
+          required: [code, message, request_id]
+          properties:
+            code:
+              type: string
+              examples: [insufficient_balance]
+            message:
+              type: string
+            request_id:
+              type: string
+              format: uuid
+            details:
+              type: array
+              items:
+                type: object
+                additionalProperties: false
+                required: [field, code, message]
+                properties:
+                  field:
+                    type: string
+                  code:
+                    type: string
+                  message:
+                    type: string
