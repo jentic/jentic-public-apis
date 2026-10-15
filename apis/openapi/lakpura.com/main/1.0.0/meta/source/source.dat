@@ -1,0 +1,354 @@
+openapi: 3.0.3
+info:
+  title: Lakpura® API
+  version: "1.0.0"
+  description: |
+    REST API for the Lakpura mobile app (Android/iOS).
+
+    **Authentication** is a JWT Bearer token (HS256). Obtain one from
+    `POST /auth/login`, then send `Authorization: Bearer <access_token>` on every
+    protected request. Tokens are **stateless** and expire after **1 hour**;
+    there is no refresh token in v1, so on a `401` re-authenticate via
+    `/auth/login`.
+
+    **Errors** for every endpoint use the shape `{ "error": "message" }`. Branch
+    on the HTTP status code, not the message text.
+
+    Accounts are staff accounts; **self-registration is disabled**
+    (`/auth/register` always returns 403). Administrators create accounts via
+    `POST /users/create`.
+
+servers:
+  - url: https://api.lakpura.com/mobile/v1
+    description: Production
+  - url: https://app.lakpura.com/api/mobile/v1
+    description: Production (legacy base — kept for shipped app builds that pin it)
+
+tags:
+  - name: Authentication
+  - name: Users
+  - name: Notifications
+  - name: Customers
+  - name: Jobs
+
+paths:
+  /auth/login:
+    post:
+      tags: [Authentication]
+      summary: Log in and obtain a JWT
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email: { type: string, format: email, example: user@lakpura.com }
+                password: { type: string, format: password, example: "secret" }
+      responses:
+        "200":
+          description: Authenticated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  access_token: { type: string, example: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..." }
+                  user: { $ref: "#/components/schemas/User" }
+        "400": { $ref: "#/components/responses/Error", description: "Missing fields or invalid JSON" }
+        "401": { $ref: "#/components/responses/Error", description: "Invalid email or password" }
+        "403": { $ref: "#/components/responses/Error", description: "Account inactive, or two-factor enabled (sign in on the web)" }
+        "429": { $ref: "#/components/responses/Error", description: "Too many failed attempts (5 / 15 min per IP + email)" }
+
+  /auth/register:
+    post:
+      tags: [Authentication]
+      summary: Register (disabled)
+      description: Self-registration is disabled. Always returns 403. Admins create accounts via `POST /users/create`.
+      security: []
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                email: { type: string }
+                password: { type: string }
+                full_name: { type: string }
+      responses:
+        "403": { $ref: "#/components/responses/Error", description: "Registration is disabled" }
+
+  /auth/logout:
+    post:
+      tags: [Authentication]
+      summary: Log out
+      description: Tokens are stateless; the client should discard its token. This call just confirms intent.
+      responses:
+        "200":
+          description: Logged out
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean, example: true }
+        "401": { $ref: "#/components/responses/Error", description: "Unauthenticated" }
+
+  /users/count:
+    get:
+      tags: [Users]
+      summary: Total registered users (admin only)
+      responses:
+        "200":
+          description: Count
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  count: { type: integer, example: 104 }
+        "401": { $ref: "#/components/responses/Error", description: "Unauthenticated" }
+        "403": { $ref: "#/components/responses/Error", description: "Administrator access required" }
+
+  /users/create:
+    post:
+      tags: [Users]
+      summary: Create a user (admin only)
+      description: |
+        Creates a staff account. user_code, user_name and phone extension are
+        auto-generated; the user defaults to the Solutions division and can be
+        refined in the web admin afterwards.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password, full_name]
+              properties:
+                email: { type: string, format: email }
+                password: { type: string }
+                full_name: { type: string }
+                is_admin: { type: boolean, default: false }
+      responses:
+        "200":
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  message: { type: string }
+        "409": { $ref: "#/components/responses/Error", description: "A user with this email already exists" }
+        "401": { $ref: "#/components/responses/Error", description: "Unauthenticated" }
+        "403": { $ref: "#/components/responses/Error", description: "Administrator access required" }
+
+  /notifications:
+    get:
+      tags: [Notifications]
+      summary: List the signed-in user's notifications
+      description: Newest first, dismissed items excluded, max 200.
+      responses:
+        "200":
+          description: Notifications
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Notification" }
+        "401": { $ref: "#/components/responses/Error", description: "Unauthenticated" }
+
+  /notifications/send:
+    post:
+      tags: [Notifications]
+      summary: Broadcast a notification to all active users (admin only)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [subject, message]
+              properties:
+                subject: { type: string }
+                message: { type: string }
+      responses:
+        "200":
+          description: Sent
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  message: { type: string, example: "Notification sent to 104 users" }
+        "400": { $ref: "#/components/responses/Error", description: "Subject and message are required" }
+        "401": { $ref: "#/components/responses/Error", description: "Unauthenticated" }
+        "403": { $ref: "#/components/responses/Error", description: "Administrator access required" }
+
+  /customers:
+    get:
+      tags: [Customers]
+      summary: List customers
+      parameters:
+        - name: search
+          in: query
+          required: false
+          schema: { type: string }
+          description: Filter by name or phone, e.g. ?search=silva
+      responses:
+        "200":
+          description: Customers
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Customer" }
+        "401": { $ref: "#/components/responses/Error", description: "Unauthenticated" }
+
+  /customers/{id}:
+    get:
+      tags: [Customers]
+      summary: Get a customer
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Customer
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Customer" }
+        "401": { $ref: "#/components/responses/Error", description: "Unauthenticated" }
+        "404": { $ref: "#/components/responses/Error", description: "Customer not found" }
+
+  /jobs:
+    get:
+      tags: [Jobs]
+      summary: List jobs
+      parameters:
+        - name: customer_id
+          in: query
+          required: false
+          schema: { type: string }
+          description: Filter by customer, e.g. ?customer_id=123
+      responses:
+        "200":
+          description: Jobs
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Job" }
+        "401": { $ref: "#/components/responses/Error", description: "Unauthenticated" }
+
+  /jobs/{id}:
+    get:
+      tags: [Jobs]
+      summary: Get a job
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Job
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Job" }
+        "401": { $ref: "#/components/responses/Error", description: "Unauthenticated" }
+        "404": { $ref: "#/components/responses/Error", description: "Job not found" }
+    patch:
+      tags: [Jobs]
+      summary: Update a job's status
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status:
+                  type: string
+                  enum: [open, in_progress, completed, cancelled]
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: { type: string, example: "Job updated successfully" }
+        "400": { $ref: "#/components/responses/Error", description: "Invalid or missing status" }
+        "401": { $ref: "#/components/responses/Error", description: "Unauthenticated" }
+        "404": { $ref: "#/components/responses/Error", description: "Job not found" }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    User:
+      type: object
+      properties:
+        id: { type: string, description: "User id (string)", example: "5" }
+        email: { type: string, format: email, example: user@lakpura.com }
+        full_name: { type: string, example: "Jane Doe" }
+        is_admin: { type: boolean, example: false }
+    Notification:
+      type: object
+      properties:
+        id: { type: string, example: "123" }
+        subject: { type: string, example: "Order shipped" }
+        message: { type: string, example: "Your order LK123 has shipped." }
+        sent_at: { type: string, format: date-time, example: "2026-06-25T10:00:00Z" }
+    Customer:
+      type: object
+      properties:
+        id: { type: string, example: "123" }
+        name: { type: string, example: "Nimal Silva" }
+        phone: { type: string, example: "+94771234567" }
+        email: { type: string, example: "nimal@example.com" }
+        address: { type: string, example: "12 Galle Rd, Colombo, Western, 00300, Sri Lanka" }
+    Job:
+      type: object
+      properties:
+        id: { type: string, example: "38577" }
+        title: { type: string, example: "303-5040323-0839551" }
+        status:
+          type: string
+          enum: [open, in_progress, completed, cancelled]
+        customer_name: { type: string, example: "Nimal Silva" }
+        scheduled_date: { type: string, format: date, nullable: true, example: "2026-06-30" }
+        notes: { type: string, example: "Leave at reception" }
+    Error:
+      type: object
+      properties:
+        error: { type: string, example: "Invalid email or password" }
+
+  responses:
+    Error:
+      description: Error
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+
+security:
+  - bearerAuth: []
