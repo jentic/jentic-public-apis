@@ -1,6 +1,6 @@
 # APIs — F
 
-Browsing 150 APIs starting with **F**.
+Browsing 151 APIs starting with **F**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · **F** · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -153,6 +153,7 @@ Browsing 150 APIs starting with **F**.
 | [funtranslations.com](../../../../apis/openapi/funtranslations.com) | [braile](../../../../apis/openapi/funtranslations.com/braile) · [index](../../../../apis/openapi/funtranslations.com/index) · [starwars](../../../../apis/openapi/funtranslations.com/starwars) |
 | [furkot.com](../../../../apis/openapi/furkot.com) | [main](../../../../apis/openapi/furkot.com/main) |
 | [fusionauth.io](../../../../apis/openapi/fusionauth.io) | [main](../../../../apis/openapi/fusionauth.io/main) |
+| [fxapis.com](../../../../apis/openapi/fxapis.com) | [main](../../../../apis/openapi/fxapis.com/main) |
 | [fxmacrodata.com](../../../../apis/openapi/fxmacrodata.com) | [main](../../../../apis/openapi/fxmacrodata.com/main) |
 | [fxnewsbias.com](../../../../apis/openapi/fxnewsbias.com) | [main](../../../../apis/openapi/fxnewsbias.com/main) |
 | [fynk.com](../../../../apis/openapi/fynk.com) | [main](../../../../apis/openapi/fynk.com/main) |
