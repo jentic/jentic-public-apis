@@ -1,6 +1,6 @@
 # APIs — F
 
-Browsing 138 APIs starting with **F**.
+Browsing 139 APIs starting with **F**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · **F** · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -73,6 +73,7 @@ Browsing 138 APIs starting with **F**.
 | [finicity.com](../../../../apis/openapi/finicity.com) | [main](../../../../apis/openapi/finicity.com/main) |
 | [finnhub.io](../../../../apis/openapi/finnhub.io) | [main](../../../../apis/openapi/finnhub.io/main) |
 | [finstar.ch](../../../../apis/openapi/finstar.ch) | [finstar-api](../../../../apis/openapi/finstar.ch/finstar-api) |
+| [fintechstudios.com](../../../../apis/openapi/fintechstudios.com) | [main](../../../../apis/openapi/fintechstudios.com/main) |
 | [fintel.io](../../../../apis/openapi/fintel.io) | [main](../../../../apis/openapi/fintel.io/main) |
 | [fire.com](../../../../apis/openapi/fire.com) | [main](../../../../apis/openapi/fire.com/main) |
 | [firebase.google.com](../../../../apis/openapi/firebase.google.com) | [main](../../../../apis/openapi/firebase.google.com/main) |
