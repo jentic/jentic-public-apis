@@ -1,0 +1,866 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "MailInApp API",
+    "version": "1.0.0",
+    "description": "The MailInApp public API (/api/v1): transactional sends, contacts, deals, journeys, webinars and courses, plus account-level webhook subscriptions (REST Hooks) for Zapier, n8n and your own backend.\n\nAuthenticate with an API key from Dashboard → Developers, sent as `Authorization: Bearer mia_live_…`. Each key is rate limited per route family (60 requests/minute unless noted); over the limit answers 429. Errors are always `{\"error\": \"…\"}`.\n\nWebhook deliveries are signed: `X-MailInApp-Signature: v1=<hex HMAC-SHA256 of \"<X-MailInApp-Timestamp>.<raw body>\" keyed with the subscription secret>`, and carry `X-MailInApp-Idempotency-Key` (the event id) so a receiver can drop a redelivery.",
+    "contact": { "name": "MailInApp", "url": "https://mailinapp.com" }
+  },
+  "servers": [{ "url": "https://mailinapp.com" }],
+  "security": [{ "apiKey": [] }],
+  "tags": [
+    { "name": "Contacts" },
+    { "name": "Deals" },
+    { "name": "Journeys" },
+    { "name": "Webhooks" },
+    { "name": "Send" },
+    { "name": "Webinars" },
+    { "name": "Courses" },
+    { "name": "Live view" }
+  ],
+  "paths": {
+    "/api/v1/contacts": {
+      "get": {
+        "tags": ["Contacts"],
+        "operationId": "findContacts",
+        "summary": "Find a contact by email",
+        "description": "The address's row in each of the account's contacts lists (or only in `listId`), most recently updated first. An empty array when it's in none. Each read is recorded in the account's data-access log.",
+        "parameters": [
+          { "name": "email", "in": "query", "required": true, "schema": { "type": "string", "format": "email" } },
+          { "name": "listId", "in": "query", "required": false, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Matching contacts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["contacts"],
+                  "properties": { "contacts": { "type": "array", "items": { "$ref": "#/components/schemas/Contact" } } }
+                }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "429": { "$ref": "#/components/responses/RateLimited" }
+        }
+      },
+      "post": {
+        "tags": ["Contacts"],
+        "operationId": "upsertContacts",
+        "summary": "Create or update contacts",
+        "description": "Upserts into one contacts list, keyed by email (case-insensitive): an existing address updates in place, a new one is added. Send one contact (`email` + `fields`) or a batch (`contacts`, at most 500). Every address is verified on the server as it is written; invalid addresses are kept but never sent to. New field names are added to the list's columns (at most 40 per list).",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "oneOf": [
+                  {
+                    "title": "One contact",
+                    "type": "object",
+                    "required": ["listId", "email"],
+                    "properties": {
+                      "listId": { "type": "string" },
+                      "email": { "type": "string", "format": "email" },
+                      "fields": {
+                        "type": "object",
+                        "description": "Field name → value. Scalars are stored as strings; nested values are ignored.",
+                        "additionalProperties": { "type": ["string", "number", "boolean", "null"] }
+                      }
+                    }
+                  },
+                  {
+                    "title": "Batch",
+                    "type": "object",
+                    "required": ["listId", "contacts"],
+                    "properties": {
+                      "listId": { "type": "string" },
+                      "contacts": {
+                        "type": "array",
+                        "minItems": 1,
+                        "maxItems": 500,
+                        "items": {
+                          "type": "object",
+                          "required": ["email"],
+                          "properties": { "email": { "type": "string", "format": "email" } },
+                          "additionalProperties": { "type": ["string", "number", "boolean", "null"] }
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated an existing contact (one-contact form), or the batch's counts",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ContactUpsertResult" } } }
+          },
+          "201": {
+            "description": "Created a new contact (one-contact form)",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ContactUpsertResult" } } }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "409": { "description": "The plan's contact limit is reached (one-contact form)", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "429": { "$ref": "#/components/responses/RateLimited" }
+        }
+      }
+    },
+    "/api/v1/lists": {
+      "get": {
+        "tags": ["Contacts"],
+        "operationId": "listContactLists",
+        "summary": "List contacts lists",
+        "description": "Every contacts list of the account, by name. No contact data.",
+        "responses": {
+          "200": {
+            "description": "The lists",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["lists"],
+                  "properties": { "lists": { "type": "array", "items": { "$ref": "#/components/schemas/ContactList" } } }
+                }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "429": { "$ref": "#/components/responses/RateLimited" }
+        }
+      }
+    },
+    "/api/v1/pipelines": {
+      "get": {
+        "tags": ["Deals"],
+        "operationId": "listPipelines",
+        "summary": "List deal pipelines",
+        "description": "Every deal pipeline of the account with its stages in board order, the default pipeline first. Creates the default pipeline if the account has none yet. No deal data.",
+        "responses": {
+          "200": {
+            "description": "The pipelines",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["pipelines"],
+                  "properties": { "pipelines": { "type": "array", "items": { "$ref": "#/components/schemas/Pipeline" } } }
+                }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "429": { "$ref": "#/components/responses/RateLimited" }
+        }
+      }
+    },
+    "/api/v1/deals": {
+      "post": {
+        "tags": ["Deals"],
+        "operationId": "createDeal",
+        "summary": "Create a deal",
+        "description": "A deal on one of the account's contacts. Name the contact by `email` (the most recently updated list that has it, unless `listId` is given) or by `listId` + `rowId`. Without `pipelineId`/`stageId` the deal goes to the default pipeline's first open stage. Fires the `deal.created` webhook event and any deal-stage journey.",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Retrying with the same key answers with the deal it already made (200, `created: false`).",
+            "schema": { "type": "string" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["title"],
+                "properties": {
+                  "email": { "type": "string", "format": "email" },
+                  "listId": { "type": "string" },
+                  "rowId": { "type": "string" },
+                  "title": { "type": "string", "maxLength": 200 },
+                  "value": { "type": ["number", "string"], "description": "Decimal amount, rounded to cents. Default 0." },
+                  "currency": { "type": "string", "pattern": "^[A-Za-z]{3}$", "description": "Default USD." },
+                  "pipelineId": { "type": "string" },
+                  "stageId": { "type": "string" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Already created under this Idempotency-Key", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/DealCreateResult" } } } },
+          "201": { "description": "Created", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/DealCreateResult" } } } },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "429": { "$ref": "#/components/responses/RateLimited" }
+        }
+      }
+    },
+    "/api/v1/deals/{id}": {
+      "patch": {
+        "tags": ["Deals"],
+        "operationId": "updateDeal",
+        "summary": "Update or move a deal",
+        "description": "Any of `title`, `value`, `currency` and `stageId` (a stage of the deal's own pipeline). A stage change is recorded in the deal's history and fires the `deal.stage_changed` webhook event and any deal-stage journey; moving to the current stage changes nothing (`moved: false`). Nothing is written when any part of the body is invalid.",
+        "parameters": [{ "$ref": "#/components/parameters/Id" }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "minProperties": 1,
+                "properties": {
+                  "title": { "type": "string", "maxLength": 200 },
+                  "value": { "type": ["number", "string"] },
+                  "currency": { "type": "string", "pattern": "^[A-Za-z]{3}$" },
+                  "stageId": { "type": "string" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The updated deal",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["deal", "moved"],
+                  "properties": { "deal": { "$ref": "#/components/schemas/Deal" }, "moved": { "type": "boolean" } }
+                }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "429": { "$ref": "#/components/responses/RateLimited" }
+        }
+      }
+    },
+    "/api/v1/journeys": {
+      "get": {
+        "tags": ["Journeys"],
+        "operationId": "listJourneys",
+        "summary": "List journeys",
+        "parameters": [
+          {
+            "name": "trigger",
+            "in": "query",
+            "required": false,
+            "description": "Only journeys with this trigger kind. `api` lists the ones POST /api/v1/journeys/{id}/trigger accepts.",
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The journeys, most recently updated first",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["journeys"],
+                  "properties": { "journeys": { "type": "array", "items": { "$ref": "#/components/schemas/Journey" } } }
+                }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "429": { "$ref": "#/components/responses/RateLimited" }
+        }
+      }
+    },
+    "/api/v1/journeys/{id}/trigger": {
+      "post": {
+        "tags": ["Journeys"],
+        "operationId": "triggerJourney",
+        "summary": "Enroll a contact in a journey",
+        "description": "For a journey whose trigger is \"API\" and that is enabled. Adds the address to `listId` first if it isn't there yet.",
+        "parameters": [{ "$ref": "#/components/parameters/Id" }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["email", "listId"],
+                "properties": { "email": { "type": "string", "format": "email" }, "listId": { "type": "string" } }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "$ref": "#/components/responses/Ok" },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "429": { "$ref": "#/components/responses/RateLimited" }
+        }
+      }
+    },
+    "/api/v1/webhooks": {
+      "get": {
+        "tags": ["Webhooks"],
+        "operationId": "listWebhookSubscriptions",
+        "summary": "List webhook subscriptions",
+        "description": "Rate limit: 30 requests/minute per key. Secrets are never listed.",
+        "responses": {
+          "200": {
+            "description": "The account's subscriptions",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["subscriptions"],
+                  "properties": { "subscriptions": { "type": "array", "items": { "$ref": "#/components/schemas/WebhookSubscription" } } }
+                }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "429": { "$ref": "#/components/responses/RateLimited" }
+        }
+      },
+      "post": {
+        "tags": ["Webhooks"],
+        "operationId": "subscribeWebhook",
+        "summary": "Subscribe to events (REST Hooks)",
+        "description": "Rate limit: 30 requests/minute per key. At most 50 subscriptions per account. The returned `secret` signs every delivery and is shown only here. An endpoint answering 410 Gone is unsubscribed automatically; revoking the API key disables the subscriptions it made.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["url"],
+                "properties": {
+                  "url": { "type": "string", "format": "uri", "description": "A public http(s) URL." },
+                  "events": { "type": "array", "minItems": 1, "items": { "$ref": "#/components/schemas/WebhookEventType" } },
+                  "event": { "$ref": "#/components/schemas/WebhookEventType", "description": "Shorthand for `events: [event]`." },
+                  "source": { "type": "string", "enum": ["zapier", "n8n"] }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Subscribed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["id", "secret", "subscription"],
+                  "properties": {
+                    "id": { "type": "string" },
+                    "secret": { "type": "string", "description": "whsec_…, shown once." },
+                    "subscription": { "$ref": "#/components/schemas/WebhookSubscription" }
+                  }
+                }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "409": { "description": "The account already has 50 subscriptions", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "429": { "$ref": "#/components/responses/RateLimited" }
+        }
+      }
+    },
+    "/api/v1/webhooks/{id}": {
+      "delete": {
+        "tags": ["Webhooks"],
+        "operationId": "unsubscribeWebhook",
+        "summary": "Unsubscribe",
+        "description": "Any of the account's subscriptions, not only the key's own. Rate limit: 30 requests/minute per key.",
+        "parameters": [{ "$ref": "#/components/parameters/Id" }],
+        "responses": {
+          "200": { "$ref": "#/components/responses/Ok" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "429": { "$ref": "#/components/responses/RateLimited" }
+        }
+      }
+    },
+    "/api/v1/events/sample": {
+      "get": {
+        "tags": ["Webhooks"],
+        "operationId": "sampleEvents",
+        "summary": "Sample webhook events",
+        "description": "Example deliveries, exactly as a subscription receives them, for field mapping before a real event has fired. One type with `type`, every type without.",
+        "parameters": [
+          { "name": "type", "in": "query", "required": false, "schema": { "$ref": "#/components/schemas/WebhookEventType" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Sample events",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["events"],
+                  "properties": { "events": { "type": "array", "items": { "$ref": "#/components/schemas/WebhookEvent" } } }
+                }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "429": { "$ref": "#/components/responses/RateLimited" }
+        }
+      }
+    },
+    "/api/v1/send": {
+      "post": {
+        "tags": ["Send"],
+        "operationId": "send",
+        "summary": "Send an email",
+        "description": "Freeform (`subject`, `html`, `text`) or template (`projectId` + `mergeData`, sends an existing studio project). Suppressed and invalid addresses are not sent to (`status: suppressed`).",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Retrying with the same key returns the first call's result instead of sending again.",
+            "schema": { "type": "string", "maxLength": 200 }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["to"],
+                "properties": {
+                  "to": { "type": "string", "format": "email" },
+                  "type": { "type": "string", "enum": ["transactional", "marketing"], "default": "transactional" },
+                  "subject": { "type": "string", "maxLength": 200 },
+                  "html": { "type": "string" },
+                  "text": { "type": "string" },
+                  "projectId": { "type": "string" },
+                  "mergeData": { "type": "object", "additionalProperties": { "type": ["string", "number", "boolean", "null"] } },
+                  "from": {
+                    "type": "object",
+                    "required": ["email"],
+                    "properties": { "email": { "type": "string", "format": "email" }, "name": { "type": "string" } }
+                  },
+                  "senderId": { "type": "string" },
+                  "replyTo": { "type": "string", "format": "email" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The send's outcome",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["id", "status"],
+                  "properties": {
+                    "id": { "type": "string" },
+                    "status": { "type": "string", "enum": ["pending", "sent", "failed", "suppressed"] },
+                    "reason": { "type": "string" },
+                    "error": { "type": "string" }
+                  }
+                }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "429": { "$ref": "#/components/responses/RateLimited" }
+        }
+      }
+    },
+    "/api/v1/webinars": {
+      "get": {
+        "tags": ["Webinars"],
+        "operationId": "listWebinars",
+        "summary": "List webinars",
+        "responses": {
+          "200": {
+            "description": "Registration-gated webinars",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["webinars"],
+                  "properties": { "webinars": { "type": "array", "items": { "type": "object", "additionalProperties": true } } }
+                }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" }
+        }
+      },
+      "post": {
+        "tags": ["Webinars"],
+        "operationId": "createWebinar",
+        "summary": "Schedule a webinar",
+        "description": "Counts toward the plan's monthly Embed API quota.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["title"],
+                "properties": {
+                  "title": { "type": "string" },
+                  "scheduledAt": { "type": "number", "description": "Epoch ms." },
+                  "courseId": { "type": "string" },
+                  "capacity": { "type": "number", "minimum": 0 }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": { "type": "object", "required": ["webinar"], "properties": { "webinar": { "type": "object", "additionalProperties": true } } }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "description": "Not included in the plan, or the live-session quota is reached", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "429": { "$ref": "#/components/responses/RateLimited" }
+        }
+      }
+    },
+    "/api/v1/webinars/{id}/register": {
+      "post": {
+        "tags": ["Webinars"],
+        "operationId": "registerForWebinar",
+        "summary": "Register someone for a webinar",
+        "description": "Sends the confirmation (or waitlist) email. `joinUrl` is null while waitlisted.",
+        "parameters": [{ "$ref": "#/components/parameters/Id" }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["email", "name"],
+                "properties": { "email": { "type": "string", "format": "email" }, "name": { "type": "string", "maxLength": 200 } }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Registered",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["status", "joinUrl"],
+                  "properties": {
+                    "status": { "type": "string", "enum": ["confirmed", "waitlisted"] },
+                    "joinUrl": { "type": ["string", "null"], "format": "uri" }
+                  }
+                }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "409": { "description": "The webinar has ended", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "429": { "$ref": "#/components/responses/RateLimited" }
+        }
+      }
+    },
+    "/api/v1/courses/{id}/enroll": {
+      "post": {
+        "tags": ["Courses"],
+        "operationId": "enrollInCourse",
+        "summary": "Grant or revoke membership access",
+        "description": "Membership-wide access, keyed off one of the account's courses. `active: false` revokes.",
+        "parameters": [{ "$ref": "#/components/parameters/Id" }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["email"],
+                "properties": { "email": { "type": "string", "format": "email" }, "active": { "type": "boolean", "default": true } }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Done",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["subscriberId", "active"],
+                  "properties": { "subscriberId": { "type": "string" }, "active": { "type": "boolean" } }
+                }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "description": "The Embed API isn't included in the plan", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "429": { "description": "Too many requests for this key, or the plan's monthly Embed API quota is used up", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      }
+    },
+    "/api/v1/courses/{id}/embed-token": {
+      "post": {
+        "tags": ["Courses"],
+        "operationId": "courseEmbedToken",
+        "summary": "Mint a member-portal embed URL",
+        "description": "A short-lived portal URL that signs the member in, for an iframe. The member must currently have access.",
+        "parameters": [{ "$ref": "#/components/parameters/Id" }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "type": "object", "required": ["email"], "properties": { "email": { "type": "string", "format": "email" } } }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The portal URL",
+            "content": {
+              "application/json": {
+                "schema": { "type": "object", "required": ["portalUrl"], "properties": { "portalUrl": { "type": "string", "format": "uri" } } }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "description": "Not included in the plan, or the member has no access", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "409": { "description": "The course's membership has no portal", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "429": { "$ref": "#/components/responses/RateLimited" }
+        }
+      }
+    },
+    "/api/v1/liveview/{token}": {
+      "get": {
+        "tags": ["Live view"],
+        "operationId": "liveView",
+        "summary": "An email's live view as JSON",
+        "description": "Used by the MailInApp mobile app. The signed live-view token in the path is the only authorization; no API key.",
+        "security": [],
+        "parameters": [{ "name": "token", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": {
+          "200": {
+            "description": "The block tree, theme and this recipient's state",
+            "content": { "application/json": { "schema": { "type": "object", "additionalProperties": true } } }
+          },
+          "404": { "$ref": "#/components/responses/NotFound" }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "apiKey": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "An API key from Dashboard → Developers (mia_live_…)."
+      }
+    },
+    "parameters": {
+      "Id": { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+    },
+    "responses": {
+      "Ok": {
+        "description": "Done",
+        "content": {
+          "application/json": {
+            "schema": { "type": "object", "required": ["ok"], "properties": { "ok": { "type": "boolean", "const": true } } }
+          }
+        }
+      },
+      "BadRequest": { "description": "Invalid request", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+      "Unauthorized": { "description": "Missing or invalid API key", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+      "NotFound": { "description": "Not found, or not this account's", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+      "RateLimited": { "description": "Too many requests for this key", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+    },
+    "schemas": {
+      "Error": {
+        "type": "object",
+        "required": ["error"],
+        "properties": { "error": { "type": "string" } }
+      },
+      "Pipeline": {
+        "type": "object",
+        "required": ["id", "name", "isDefault", "stages"],
+        "properties": {
+          "id": { "type": "string" },
+          "name": { "type": "string" },
+          "isDefault": { "type": "boolean", "description": "Where a deal goes when no pipeline is named." },
+          "stages": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["id", "name", "kind"],
+              "properties": {
+                "id": { "type": "string" },
+                "name": { "type": "string" },
+                "kind": { "type": "string", "enum": ["open", "won", "lost"] }
+              }
+            }
+          }
+        }
+      },
+      "ContactList": {
+        "type": "object",
+        "required": ["id", "name", "fields", "rowCount", "createdAt", "updatedAt"],
+        "properties": {
+          "id": { "type": "string" },
+          "name": { "type": "string" },
+          "fields": { "type": "array", "items": { "type": "string" } },
+          "rowCount": { "type": "integer" },
+          "createdAt": { "type": ["integer", "null"], "description": "Epoch ms." },
+          "updatedAt": { "type": ["integer", "null"], "description": "Epoch ms." }
+        }
+      },
+      "Contact": {
+        "type": "object",
+        "required": ["listId", "listName", "rowId", "email", "fields", "status", "verification", "createdAt", "updatedAt"],
+        "properties": {
+          "listId": { "type": "string" },
+          "listName": { "type": "string" },
+          "rowId": { "type": "string", "description": "Stable per address: the same in every list." },
+          "email": { "type": "string", "format": "email" },
+          "fields": { "type": "object", "additionalProperties": { "type": "string" } },
+          "status": { "type": "string", "enum": ["active", "pending"], "description": "pending until a double opt-in signup confirms." },
+          "verification": {
+            "type": ["object", "null"],
+            "description": "The server's email verification verdict; null when not checked yet.",
+            "required": ["status", "reasons", "checkedAt"],
+            "properties": {
+              "status": { "type": "string", "enum": ["valid", "risky", "invalid", "unknown"] },
+              "reasons": { "type": "array", "items": { "type": "string" } },
+              "checkedAt": { "type": "integer", "description": "Epoch ms." }
+            }
+          },
+          "createdAt": { "type": "integer", "description": "Epoch ms." },
+          "updatedAt": { "type": "integer", "description": "Epoch ms." }
+        }
+      },
+      "ContactUpsertResult": {
+        "type": "object",
+        "required": ["created", "updated", "skipped"],
+        "properties": {
+          "created": { "type": "integer" },
+          "updated": { "type": "integer" },
+          "skipped": { "type": "integer", "description": "New contacts not added because the plan's contact limit is reached." },
+          "contact": { "$ref": "#/components/schemas/Contact", "description": "The one-contact form only." }
+        }
+      },
+      "Deal": {
+        "type": "object",
+        "required": ["id", "title", "value", "currency", "pipelineId", "stageId", "stage", "status", "source", "listId", "rowId", "email"],
+        "properties": {
+          "id": { "type": "string" },
+          "title": { "type": "string" },
+          "value": { "type": "number" },
+          "currency": { "type": "string" },
+          "pipelineId": { "type": "string" },
+          "stageId": { "type": "string" },
+          "stage": { "type": ["string", "null"], "description": "The stage's name." },
+          "status": { "type": "string", "enum": ["open", "won", "lost"] },
+          "source": { "type": "string", "enum": ["manual", "journey", "booking", "checkout", "proposal", "api"] },
+          "listId": { "type": "string" },
+          "rowId": { "type": "string" },
+          "email": { "type": "string", "format": "email" }
+        }
+      },
+      "DealCreateResult": {
+        "type": "object",
+        "required": ["deal", "created"],
+        "properties": { "deal": { "$ref": "#/components/schemas/Deal" }, "created": { "type": "boolean" } }
+      },
+      "Journey": {
+        "type": "object",
+        "required": ["id", "name", "enabled", "triggerKind", "createdAt", "updatedAt"],
+        "properties": {
+          "id": { "type": "string" },
+          "name": { "type": "string" },
+          "enabled": { "type": "boolean" },
+          "triggerKind": { "type": "string", "description": "What enrolls contacts, e.g. api, list-added, form-submitted, deal-stage-changed." },
+          "createdAt": { "type": "integer", "description": "Epoch ms." },
+          "updatedAt": { "type": "integer", "description": "Epoch ms." }
+        }
+      },
+      "WebhookEventType": {
+        "type": "string",
+        "enum": [
+          "interaction.received",
+          "form.submitted",
+          "contact.created",
+          "contact.updated",
+          "lead.hot",
+          "lead.new",
+          "booking.created",
+          "booking.cancelled",
+          "deal.created",
+          "deal.stage_changed",
+          "purchase.completed",
+          "journey.completed"
+        ]
+      },
+      "WebhookEvent": {
+        "type": "object",
+        "description": "One delivery. `id` is stable per real-world event and is also sent as X-MailInApp-Idempotency-Key.",
+        "required": ["id", "type", "createdAt", "data"],
+        "properties": {
+          "id": { "type": "string" },
+          "type": { "$ref": "#/components/schemas/WebhookEventType" },
+          "createdAt": { "type": "integer", "description": "Epoch ms." },
+          "data": { "type": "object", "additionalProperties": true }
+        }
+      },
+      "WebhookSubscription": {
+        "type": "object",
+        "required": ["id", "url", "events", "createdVia", "status", "createdAt"],
+        "properties": {
+          "id": { "type": "string" },
+          "apiKeyId": { "type": "string" },
+          "url": { "type": "string", "format": "uri" },
+          "events": { "type": "array", "items": { "$ref": "#/components/schemas/WebhookEventType" } },
+          "createdVia": { "type": "string", "enum": ["dashboard", "api", "zapier", "n8n"] },
+          "status": { "type": "string", "enum": ["active", "disabled"] },
+          "disabledReason": { "type": "string", "enum": ["gone", "api-key-revoked"] },
+          "createdAt": { "type": "integer" },
+          "lastDeliveryAt": { "type": "integer" },
+          "lastFailureAt": { "type": "integer" },
+          "lastError": { "type": "string" }
+        }
+      }
+    }
+  }
+}
