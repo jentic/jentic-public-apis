@@ -1,6 +1,6 @@
 # APIs — Y
 
-Browsing 19 APIs starting with **Y**.
+Browsing 20 APIs starting with **Y**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · **Y** · [Z](../Z) · [~rest](../~rest)
 
@@ -14,6 +14,7 @@ Browsing 19 APIs starting with **Y**.
 | [yespo.io](../../../../apis/openapi/yespo.io) | [marketing-api](../../../../apis/openapi/yespo.io/marketing-api) · [yespo-api](../../../../apis/openapi/yespo.io/yespo-api) |
 | [yeti-snow.com](../../../../apis/openapi/yeti-snow.com) | [main](../../../../apis/openapi/yeti-snow.com/main) |
 | [yeti-switch.org](../../../../apis/openapi/yeti-switch.org) | [main](../../../../apis/openapi/yeti-switch.org/main) |
+| [yezza.com](../../../../apis/openapi/yezza.com) | [main](../../../../apis/openapi/yezza.com/main) |
 | [ygoprodeck.com](../../../../apis/openapi/ygoprodeck.com) | [main](../../../../apis/openapi/ygoprodeck.com/main) |
 | [yiyan.baidu.com](../../../../apis/openapi/yiyan.baidu.com) | [main](../../../../apis/openapi/yiyan.baidu.com/main) |
 | [ymove.app](../../../../apis/openapi/ymove.app) | [main](../../../../apis/openapi/ymove.app/main) |
