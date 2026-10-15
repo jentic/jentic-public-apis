@@ -1,6 +1,6 @@
 # APIs — V
 
-Browsing 64 APIs starting with **V**.
+Browsing 65 APIs starting with **V**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · **V** · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -48,6 +48,7 @@ Browsing 64 APIs starting with **V**.
 | [visualcrossing.com](../../../../apis/openapi/visualcrossing.com) | [weather](../../../../apis/openapi/visualcrossing.com/weather) |
 | [visualdx.com](../../../../apis/openapi/visualdx.com) | [main](../../../../apis/openapi/visualdx.com/main) |
 | [visualstudio.com](../../../../apis/openapi/visualstudio.com) | [main](../../../../apis/openapi/visualstudio.com/main) |
+| [vitablehealth.com](../../../../apis/openapi/vitablehealth.com) | [main](../../../../apis/openapi/vitablehealth.com/main) |
 | [vivifyscrum.com](../../../../apis/openapi/vivifyscrum.com) | [main](../../../../apis/openapi/vivifyscrum.com/main) |
 | [vk.com](../../../../apis/openapi/vk.com) | [main](../../../../apis/openapi/vk.com/main) |
 | [vlow.com.br](../../../../apis/openapi/vlow.com.br) | [main](../../../../apis/openapi/vlow.com.br/main) |
