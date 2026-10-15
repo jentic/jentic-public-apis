@@ -1,6 +1,6 @@
 # APIs — F
 
-Browsing 141 APIs starting with **F**.
+Browsing 142 APIs starting with **F**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · **F** · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -91,6 +91,7 @@ Browsing 141 APIs starting with **F**.
 | [flexopus.com](../../../../apis/openapi/flexopus.com) | [main](../../../../apis/openapi/flexopus.com/main) |
 | [flickr.com](../../../../apis/openapi/flickr.com) | [main](../../../../apis/openapi/flickr.com/main) |
 | [flight-mcp.com](../../../../apis/openapi/flight-mcp.com) | [main](../../../../apis/openapi/flight-mcp.com/main) |
+| [flightpowers.com](../../../../apis/openapi/flightpowers.com) | [main](../../../../apis/openapi/flightpowers.com/main) |
 | [flightqueue.com](../../../../apis/openapi/flightqueue.com) | [main](../../../../apis/openapi/flightqueue.com/main) |
 | [flightradar24.com](../../../../apis/openapi/flightradar24.com) | [main](../../../../apis/openapi/flightradar24.com/main) |
 | [fliki.ai](../../../../apis/openapi/fliki.ai) | [main](../../../../apis/openapi/fliki.ai/main) |
