@@ -1,6 +1,6 @@
 # APIs — D
 
-Browsing 197 APIs starting with **D**.
+Browsing 198 APIs starting with **D**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · **D** · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -135,6 +135,7 @@ Browsing 197 APIs starting with **D**.
 | [disease.sh](../../../../apis/openapi/disease.sh) | [main](../../../../apis/openapi/disease.sh/main) |
 | [disify.com](../../../../apis/openapi/disify.com) | [main](../../../../apis/openapi/disify.com/main) |
 | [distancematrix-ai](../../../../apis/openapi/distancematrix-ai) | [main](../../../../apis/openapi/distancematrix-ai/main) |
+| [dittowords.com](../../../../apis/openapi/dittowords.com) | [main](../../../../apis/openapi/dittowords.com/main) |
 | [dnb.no](../../../../apis/openapi/dnb.no) | [main](../../../../apis/openapi/dnb.no/main) |
 | [dnd5eapi.co](../../../../apis/openapi/dnd5eapi.co) | [main](../../../../apis/openapi/dnd5eapi.co/main) |
 | [dntly.com](../../../../apis/openapi/dntly.com) | [donately-api](../../../../apis/openapi/dntly.com/donately-api) |
