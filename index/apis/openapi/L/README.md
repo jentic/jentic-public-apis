@@ -1,6 +1,6 @@
 # APIs — L
 
-Browsing 124 APIs starting with **L**.
+Browsing 125 APIs starting with **L**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · **L** · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -116,6 +116,7 @@ Browsing 124 APIs starting with **L**.
 | [lsarespond.com](../../../../apis/openapi/lsarespond.com) | [main](../../../../apis/openapi/lsarespond.com/main) |
 | [luadns.com](../../../../apis/openapi/luadns.com) | [main](../../../../apis/openapi/luadns.com/main) |
 | [lucca.fr](../../../../apis/openapi/lucca.fr) | [main](../../../../apis/openapi/lucca.fr/main) |
+| [lucis.life](../../../../apis/openapi/lucis.life) | [main](../../../../apis/openapi/lucis.life/main) |
 | [lufthansa.com](../../../../apis/openapi/lufthansa.com) | [partner](../../../../apis/openapi/lufthansa.com/partner) · [public](../../../../apis/openapi/lufthansa.com/public) |
 | [lula.com](../../../../apis/openapi/lula.com) | [gail](../../../../apis/openapi/lula.com/gail) · [gail-api](../../../../apis/openapi/lula.com/gail-api) |
 | [luma.com](../../../../apis/openapi/luma.com) | [main](../../../../apis/openapi/luma.com/main) |
