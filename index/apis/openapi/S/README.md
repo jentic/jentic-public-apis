@@ -1,6 +1,6 @@
 # APIs — S
 
-Browsing 729 APIs starting with **S**.
+Browsing 730 APIs starting with **S**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · **S** · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -342,6 +342,7 @@ Browsing 729 APIs starting with **S**.
 | [spacexdata.com](../../../../apis/openapi/spacexdata.com) | [spacex-api](../../../../apis/openapi/spacexdata.com/spacex-api) |
 | [spamcheck.ai](../../../../apis/openapi/spamcheck.ai) | [main](../../../../apis/openapi/spamcheck.ai/main) |
 | [sparkhire.com](../../../../apis/openapi/sparkhire.com) | [spark-hire-api](../../../../apis/openapi/sparkhire.com/spark-hire-api) |
+| [sparkles.dev](../../../../apis/openapi/sparkles.dev) | [main](../../../../apis/openapi/sparkles.dev/main) |
 | [sparkpost.com](../../../../apis/openapi/sparkpost.com) | [main](../../../../apis/openapi/sparkpost.com/main) |
 | [speakai.co](../../../../apis/openapi/speakai.co) | [main](../../../../apis/openapi/speakai.co/main) |
 | [speca.io](../../../../apis/openapi/speca.io) | [main](../../../../apis/openapi/speca.io/main) |
