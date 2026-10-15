@@ -1,6 +1,6 @@
 # APIs — R
 
-Browsing 257 APIs starting with **R**.
+Browsing 258 APIs starting with **R**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · **R** · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -95,6 +95,7 @@ Browsing 257 APIs starting with **R**.
 | [refugerestrooms.org](../../../../apis/openapi/refugerestrooms.org) | [main](../../../../apis/openapi/refugerestrooms.org/main) |
 | [regal.ai](../../../../apis/openapi/regal.ai) | [main](../../../../apis/openapi/regal.ai/main) |
 | [regal.io](../../../../apis/openapi/regal.io) | [main](../../../../apis/openapi/regal.io/main) |
+| [regbase.com](../../../../apis/openapi/regbase.com) | [main](../../../../apis/openapi/regbase.com/main) |
 | [regcheck.org.uk](../../../../apis/openapi/regcheck.org.uk) | [main](../../../../apis/openapi/regcheck.org.uk/main) |
 | [regiondo.com](../../../../apis/openapi/regiondo.com) | [main](../../../../apis/openapi/regiondo.com/main) |
 | [registrum.co.uk](../../../../apis/openapi/registrum.co.uk) | [main](../../../../apis/openapi/registrum.co.uk/main) |
