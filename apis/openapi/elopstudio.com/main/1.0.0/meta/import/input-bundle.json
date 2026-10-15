@@ -1,0 +1,747 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "AI Wave API",
+    "version": "1.0.0",
+    "description": "AI 모델의 변경을 한 피드로 받는다. 벤더 릴리스 노트, Hugging Face 업로드, OpenRouter 카탈로그, GitHub 를 정규화하고 같은 모델의 중복을 합쳤다. 가격과 컨텍스트 자체는 OpenRouter 공개 카탈로그에서 오므로, 그것만 필요하다면 원본을 직접 부르는 편이 낫다.",
+    "contact": {
+      "url": "https://aiwave.elopstudio.com/api-docs"
+    },
+    "license": {
+      "name": "Proprietary"
+    },
+    "x-jentic-source-url": "https://aiwave.elopstudio.com/api/openapi.json"
+  },
+  "servers": [
+    {
+      "url": "https://aiwave.elopstudio.com"
+    }
+  ],
+  "paths": {
+    "/api/v1/changes": {
+      "get": {
+        "summary": "변경 피드",
+        "description": "since 에 지난번 응답의 latest 를 넣으면 그 뒤에 바뀐 것만 오래된 순으로 온다. since 없이 부르면 최신순이다.",
+        "operationId": "listChanges",
+        "parameters": [
+          {
+            "name": "since",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "description": "unix 초. 0 도 유효하다(처음부터 전부). 지난번 응답의 latest 를 그대로 넣는다:항목의 detectedAt 을 커서로 쓰지 말 것. detectedAt 은 출처가 말하는 발생 시각이라 과거로 거슬러 갈 수 있고, 그것으로 커서를 올리면 나중에 들어온 항목을 놓친다."
+          },
+          {
+            "name": "before",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            },
+            "description": "과거로 넘길 때의 커서"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20
+            }
+          },
+          {
+            "name": "type",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "new_model",
+                "price_change",
+                "api_change",
+                "open_source_surge",
+                "deprecation"
+              ]
+            }
+          },
+          {
+            "name": "model",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "벤더 slug"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "변경 목록",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/ChangeEvent"
+                      }
+                    },
+                    "nextCursor": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ]
+                    },
+                    "latest": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ],
+                      "description": "다음 요청의 since 로 쓴다. 받은 것이 없으면 null."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "키 없음·잘못됨·폐기됨",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "하루 한도 초과. retry-after 헤더 참고.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/models": {
+      "get": {
+        "summary": "모델 목록",
+        "operationId": "listModels",
+        "parameters": [
+          {
+            "name": "vendor",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "OpenRouter 네임스페이스. 예: anthropic"
+          },
+          {
+            "name": "maxInputPrice",
+            "in": "query",
+            "schema": {
+              "type": "number"
+            },
+            "description": "USD / 1M 입력 토큰 상한"
+          },
+          {
+            "name": "minContext",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "주목도 순 모델 목록",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Model"
+                      }
+                    },
+                    "total": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "인증 실패"
+          },
+          "429": {
+            "description": "한도 초과"
+          }
+        }
+      }
+    },
+    "/api/v1/models/{slug}/history": {
+      "get": {
+        "summary": "단가 이력",
+        "description": "값이 바뀔 때만 한 줄이다. 한 줄은 그 시각부터 다음 줄 전까지 유지된 단가를 뜻한다. 기록은 AI Wave 가 남기기 시작한 시점부터다: 모델 출시 시점이 아니다.",
+        "operationId": "priceHistory",
+        "parameters": [
+          {
+            "name": "slug",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "모델 ID 의 슬래시를 밑줄로 바꾼 값. 예: anthropic_claude-opus-5"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "단가 이력",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "currency": {
+                      "type": "string",
+                      "example": "USD"
+                    },
+                    "unit": {
+                      "type": "string",
+                      "example": "1M tokens"
+                    },
+                    "since": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ],
+                      "description": "기록 시작 unix 초"
+                    },
+                    "points": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "inputPrice": {
+                            "type": [
+                              "number",
+                              "null"
+                            ]
+                          },
+                          "outputPrice": {
+                            "type": [
+                              "number",
+                              "null"
+                            ]
+                          },
+                          "observedAt": {
+                            "type": "integer"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "카탈로그에 없는 모델"
+          }
+        }
+      }
+    },
+    "/api/mcp": {
+      "post": {
+        "summary": "MCP (JSON-RPC over HTTP)",
+        "description": "MCP 클라이언트용. initialize / tools/list / tools/call 을 처리한다. 도구: list_model_changes, get_model, search_models.",
+        "operationId": "mcp",
+        "responses": {
+          "200": {
+            "description": "JSON-RPC 응답"
+          },
+          "401": {
+            "description": "인증 실패"
+          }
+        }
+      }
+    },
+    "/api/v1/digest": {
+      "get": {
+        "summary": "오늘의 다이제스트",
+        "description": "변경 피드를 받아 다시 추릴 필요 없이, 화면(/today)과 같은 결과를 그대로 준다. 가격 변경은 모델당 한 건으로 접고 접기 전 건수를 total 로 함께 준다. 가격 변경은 24시간, 신규 모델은 7일 창을 쓴다: 신규는 주 2건꼴이라 하루로 끊으면 대부분의 날이 빈다.",
+        "operationId": "getDigest",
+        "responses": {
+          "200": {
+            "description": "다이제스트"
+          },
+          "401": {
+            "description": "인증 실패"
+          },
+          "429": {
+            "description": "하루 한도 초과"
+          }
+        }
+      }
+    },
+    "/api/v1/estimate": {
+      "post": {
+        "summary": "토큰 견적",
+        "description": "쓰는 만큼 얼마인지 모델별로 계산한다. 단가표(/api/v1/models)만으로도 곱셈은 할 수 있지만, 토큰 세기가 남는다 — 벤더마다 토크나이저가 다르고 한국어는 영어 기준 계산기와 크게 어긋난다. input/output 에 tokens 를 주면 그 값으로 곱하고, text 를 주면 o200k 기준으로 어림잡는다 (문단 길이에서 토큰 가중 오차 7.6%). 둘 다 주면 tokens 가 이긴다. 보낸 글은 저장하지 않는다 — 세고 버린다. 보내고 싶지 않으면 tokens 로 숫자만 주면 된다. models 를 비우면 싼 순으로 다섯 개를 고른다. 캐시·배치 할인과 구간 요금은 반영하지 않는다. 결과마다 costSplit 으로 비용이 입력·출력 중 어디서 나오는지 함께 준다 — 출력 비중이 크면 총액의 불확실성은 토큰 세기가 아니라 답 길이에 있다. 출력은 아직 쓰이지 않은 글이라 아무도 못 센다.",
+        "operationId": "estimateCost",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "input": {
+                    "type": "object",
+                    "description": "한 번 호출할 때 보내는 양",
+                    "properties": {
+                      "tokens": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "text": {
+                        "type": "string",
+                        "description": "최대 200,000자"
+                      }
+                    }
+                  },
+                  "output": {
+                    "type": "object",
+                    "description": "한 번 호출할 때 받는 양",
+                    "properties": {
+                      "tokens": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "text": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "calls": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "default": 1,
+                    "description": "기간 내 호출 수"
+                  },
+                  "models": {
+                    "type": "array",
+                    "maxItems": 50,
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "카탈로그 ID. 비우면 싼 순 5개"
+                  }
+                }
+              },
+              "example": {
+                "input": {
+                  "text": "이 문서를 세 문장으로 요약해 주세요."
+                },
+                "output": {
+                  "tokens": 500
+                },
+                "calls": 1000,
+                "models": [
+                  "openai/gpt-5.2",
+                  "anthropic/claude-opus-4.6"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "모델별 견적. 싼 순으로 정렬한다."
+          },
+          "400": {
+            "description": "본문이 잘못됨"
+          },
+          "401": {
+            "description": "인증 실패"
+          },
+          "429": {
+            "description": "하루 한도 초과"
+          },
+          "503": {
+            "description": "카탈로그를 불러오지 못함"
+          }
+        }
+      }
+    },
+    "/api/webhooks": {
+      "get": {
+        "summary": "웹훅 주소 목록",
+        "description": "로그인 세션이 필요하다(API 키가 아니다). 비밀키는 돌려주지 않는다.",
+        "operationId": "listWebhooks",
+        "responses": {
+          "200": {
+            "description": "주소 목록"
+          },
+          "401": {
+            "description": "로그인 필요"
+          }
+        }
+      },
+      "post": {
+        "summary": "웹훅 주소 등록",
+        "description": "변경이 생기면 이 주소로 사건 하나당 한 번 POST 한다. 본문은 `{timestamp}.{body}` 를 비밀키로 HMAC-SHA256 서명해 `x-aiwave-signature: sha256=<hex>` 로 보낸다. 300초가 지난 요청은 받는 쪽이 버려야 한다. 비밀키는 **이 응답에서만** 나간다.",
+        "operationId": "createWebhook",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "url"
+                ],
+                "properties": {
+                  "url": {
+                    "type": "string",
+                    "format": "uri",
+                    "description": "https 공개 주소만 받는다."
+                  },
+                  "eventTypes": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "new_model",
+                        "price_change",
+                        "api_change",
+                        "open_source_surge",
+                        "deprecation"
+                      ]
+                    },
+                    "description": "생략하면 전부."
+                  },
+                  "vendor": {
+                    "type": "string",
+                    "nullable": true,
+                    "description": "벤더 슬러그로 거른다. 생략하면 전부."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "등록됨. secret 이 함께 온다."
+          },
+          "400": {
+            "description": "주소가 https 가 아니거나 사설 대역이다."
+          },
+          "401": {
+            "description": "로그인 필요"
+          }
+        }
+      }
+    },
+    "/api/webhooks/{id}": {
+      "delete": {
+        "summary": "웹훅 주소 삭제",
+        "operationId": "deleteWebhook",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "삭제됨"
+          },
+          "404": {
+            "description": "없음"
+          }
+        }
+      },
+      "post": {
+        "summary": "꺼진 웹훅 다시 켜기",
+        "description": "연속 10회 실패하면 자동으로 꺼진다. 받는 쪽이 복구되면 이걸로 켠다.",
+        "operationId": "enableWebhook",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "켜짐"
+          },
+          "404": {
+            "description": "없음"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "API 키. https://aiwave.elopstudio.com/member 에서 발급한다."
+      }
+    },
+    "schemas": {
+      "ChangeEvent": {
+        "type": "object",
+        "required": [
+          "id",
+          "eventType",
+          "title",
+          "detectedAt",
+          "model"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "eventType": {
+            "type": "string",
+            "enum": [
+              "new_model",
+              "price_change",
+              "api_change",
+              "open_source_surge",
+              "deprecation"
+            ]
+          },
+          "title": {
+            "type": "string"
+          },
+          "summary": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "beforeValue": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "가격 변경 전 값 등"
+          },
+          "afterValue": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "신규 모델이면 카탈로그 ID 또는 Hugging Face 저장소 ID. 발견한 출처에 따라 형태가 다르다."
+          },
+          "sourceUrl": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uri"
+          },
+          "sourceName": {
+            "type": "string",
+            "example": "Hugging Face"
+          },
+          "verificationStatus": {
+            "type": "string",
+            "enum": [
+              "official",
+              "pending",
+              "reported",
+              "rejected"
+            ],
+            "description": "official 은 벤더 자신의 채널에서 확인한 것. pending 은 중개 카탈로그 등 간접 근거라 검수 대기. reported 는 제3자 매체나 커뮤니티가 전한 것으로, 출처에 그렇게 실렸다는 사실까지만 확인했다. 알림과 웹훅은 official·pending 만 내보낸다."
+          },
+          "official": {
+            "type": "boolean",
+            "description": "verificationStatus 가 official 인지"
+          },
+          "detectedAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "변화가 일어난 시각(출처 기준). 표시용이다: 폴링 커서로 쓰면 안 된다. 커서는 응답의 latest."
+          },
+          "publishedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "model": {
+            "type": "object",
+            "properties": {
+              "slug": {
+                "type": "string",
+                "example": "claude"
+              },
+              "name": {
+                "type": "string",
+                "example": "Claude"
+              },
+              "company": {
+                "type": "string",
+                "example": "Anthropic"
+              },
+              "accentColor": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "Model": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "example": "anthropic/claude-opus-5"
+          },
+          "name": {
+            "type": "string",
+            "example": "claude-opus-5"
+          },
+          "displayName": {
+            "type": "string"
+          },
+          "vendor": {
+            "type": "string",
+            "example": "Anthropic"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "commercial",
+              "open_source"
+            ]
+          },
+          "pricing": {
+            "type": "object",
+            "properties": {
+              "inputPerMillion": {
+                "type": [
+                  "number",
+                  "null"
+                ],
+                "description": "USD / 1M 토큰"
+              },
+              "outputPerMillion": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              }
+            }
+          },
+          "contextLength": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "listedAt": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "카탈로그 등록 unix 초"
+          },
+          "huggingfaceId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "attention": {
+            "type": "object",
+            "description": "품질이 아니라 지금 얼마나 주목받는지. 등록 신규성·소식·의견·벤더 활동을 합쳤다.",
+            "properties": {
+              "rank": {
+                "type": "integer"
+              },
+              "score": {
+                "type": "number"
+              },
+              "newsCount": {
+                "type": "integer"
+              },
+              "opinions": {
+                "type": "integer"
+              }
+            }
+          },
+          "url": {
+            "type": "string",
+            "format": "uri"
+          }
+        }
+      },
+      "Error": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "headers": {
+      "x-ratelimit-limit": {
+        "schema": {
+          "type": "integer"
+        },
+        "description": "하루 한도"
+      },
+      "x-ratelimit-remaining": {
+        "schema": {
+          "type": "integer"
+        }
+      },
+      "x-aiwave-tier": {
+        "schema": {
+          "type": "string",
+          "enum": [
+            "free",
+            "pro"
+          ]
+        }
+      }
+    }
+  },
+  "security": [
+    {
+      "bearerAuth": []
+    }
+  ]
+}
