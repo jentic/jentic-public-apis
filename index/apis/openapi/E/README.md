@@ -1,6 +1,6 @@
 # APIs — E
 
-Browsing 177 APIs starting with **E**.
+Browsing 178 APIs starting with **E**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · **E** · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -67,6 +67,7 @@ Browsing 177 APIs starting with **E**.
 | [emailoctopus.com](../../../../apis/openapi/emailoctopus.com) | [email-marketing-api](../../../../apis/openapi/emailoctopus.com/email-marketing-api) |
 | [emailonacid.com](../../../../apis/openapi/emailonacid.com) | [main](../../../../apis/openapi/emailonacid.com/main) |
 | [emailverifierapi.com](../../../../apis/openapi/emailverifierapi.com) | [main](../../../../apis/openapi/emailverifierapi.com/main) |
+| [embeddables.com](../../../../apis/openapi/embeddables.com) | [main](../../../../apis/openapi/embeddables.com/main) |
 | [embedery.com](../../../../apis/openapi/embedery.com) | [Embedery](../../../../apis/openapi/embedery.com/Embedery) |
 | [ember-energy.org](../../../../apis/openapi/ember-energy.org) | [main](../../../../apis/openapi/ember-energy.org/main) |
 | [emnify.net](../../../../apis/openapi/emnify.net) | [emnify](../../../../apis/openapi/emnify.net/emnify) · [emnify-api](../../../../apis/openapi/emnify.net/emnify-api) |
