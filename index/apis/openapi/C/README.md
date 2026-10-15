@@ -1,6 +1,6 @@
 # APIs — C
 
-Browsing 469 APIs starting with **C**.
+Browsing 470 APIs starting with **C**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · **C** · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -288,6 +288,7 @@ Browsing 469 APIs starting with **C**.
 | [coldstate.ai](../../../../apis/openapi/coldstate.ai) | [main](../../../../apis/openapi/coldstate.ai/main) |
 | [collectednotes.com](../../../../apis/openapi/collectednotes.com) | [main](../../../../apis/openapi/collectednotes.com/main) |
 | [collectiveaccess.org](../../../../apis/openapi/collectiveaccess.org) | [main](../../../../apis/openapi/collectiveaccess.org/main) |
+| [collectpure.com](../../../../apis/openapi/collectpure.com) | [main](../../../../apis/openapi/collectpure.com/main) |
 | [collegefootballdata.com](../../../../apis/openapi/collegefootballdata.com) | [main](../../../../apis/openapi/collegefootballdata.com/main) |
 | [collinsdictionary.com](../../../../apis/openapi/collinsdictionary.com) | [main](../../../../apis/openapi/collinsdictionary.com/main) |
 | [color.pizza](../../../../apis/openapi/color.pizza) | [main](../../../../apis/openapi/color.pizza/main) |
