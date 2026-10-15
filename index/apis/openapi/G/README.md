@@ -1,6 +1,6 @@
 # APIs — G
 
-Browsing 197 APIs starting with **G**.
+Browsing 198 APIs starting with **G**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · **G** · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -100,6 +100,7 @@ Browsing 197 APIs starting with **G**.
 | [github.com](../../../../apis/openapi/github.com) | [api.github.com](../../../../apis/openapi/github.com/api.github.com) · [ghec](../../../../apis/openapi/github.com/ghec) |
 | [gitlab.com](../../../../apis/openapi/gitlab.com) | [main](../../../../apis/openapi/gitlab.com/main) |
 | [gitter.im](../../../../apis/openapi/gitter.im) | [main](../../../../apis/openapi/gitter.im/main) |
+| [gladeapi.com](../../../../apis/openapi/gladeapi.com) | [main](../../../../apis/openapi/gladeapi.com/main) |
 | [gladia.io](../../../../apis/openapi/gladia.io) | [main](../../../../apis/openapi/gladia.io/main) |
 | [glasser.ai](../../../../apis/openapi/glasser.ai) | [main](../../../../apis/openapi/glasser.ai/main) |
 | [glean.ly](../../../../apis/openapi/glean.ly) | [main](../../../../apis/openapi/glean.ly/main) |
