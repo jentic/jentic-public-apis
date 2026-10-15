@@ -1,6 +1,6 @@
 # APIs — D
 
-Browsing 188 APIs starting with **D**.
+Browsing 189 APIs starting with **D**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · **D** · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -35,6 +35,7 @@ Browsing 188 APIs starting with **D**.
 | [databyte.de](../../../../apis/openapi/databyte.de) | [main](../../../../apis/openapi/databyte.de/main) |
 | [datacite.org](../../../../apis/openapi/datacite.org) | [datacite-rest-api](../../../../apis/openapi/datacite.org/datacite-rest-api) |
 | [dataflowkit.com](../../../../apis/openapi/dataflowkit.com) | [main](../../../../apis/openapi/dataflowkit.com/main) |
+| [datahyena.com](../../../../apis/openapi/datahyena.com) | [main](../../../../apis/openapi/datahyena.com/main) |
 | [dataimporter.io](../../../../apis/openapi/dataimporter.io) | [main](../../../../apis/openapi/dataimporter.io/main) |
 | [datananas.com](../../../../apis/openapi/datananas.com) | [sarbacane-engage-api](../../../../apis/openapi/datananas.com/sarbacane-engage-api) |
 | [dataplatform.knmi.nl](../../../../apis/openapi/dataplatform.knmi.nl) | [main](../../../../apis/openapi/dataplatform.knmi.nl/main) |
