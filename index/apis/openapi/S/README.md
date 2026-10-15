@@ -1,6 +1,6 @@
 # APIs — S
 
-Browsing 726 APIs starting with **S**.
+Browsing 727 APIs starting with **S**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · **S** · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -471,6 +471,7 @@ Browsing 726 APIs starting with **S**.
 | [superforms.co](../../../../apis/openapi/superforms.co) | [main](../../../../apis/openapi/superforms.co/main) |
 | [supergood.ai](../../../../apis/openapi/supergood.ai) | [main](../../../../apis/openapi/supergood.ai/main) |
 | [superheroapi.com](../../../../apis/openapi/superheroapi.com) | [main](../../../../apis/openapi/superheroapi.com/main) · [superheroes](../../../../apis/openapi/superheroapi.com/superheroes) |
+| [superset.sh](../../../../apis/openapi/superset.sh) | [main](../../../../apis/openapi/superset.sh/main) |
 | [supportbox.cz](../../../../apis/openapi/supportbox.cz) | [supportbox](../../../../apis/openapi/supportbox.cz/supportbox) · [supportbox-2](../../../../apis/openapi/supportbox.cz/supportbox-2) |
 | [supportivekoala.com](../../../../apis/openapi/supportivekoala.com) | [main](../../../../apis/openapi/supportivekoala.com/main) |
 | [suqoof.com](../../../../apis/openapi/suqoof.com) | [main](../../../../apis/openapi/suqoof.com/main) |
