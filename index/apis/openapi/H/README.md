@@ -1,6 +1,6 @@
 # APIs — H
 
-Browsing 130 APIs starting with **H**.
+Browsing 131 APIs starting with **H**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · **H** · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -75,6 +75,7 @@ Browsing 130 APIs starting with **H**.
 | [hillbillysoftware.com](../../../../apis/openapi/hillbillysoftware.com) | [main](../../../../apis/openapi/hillbillysoftware.com/main) |
 | [hilos.io](../../../../apis/openapi/hilos.io) | [main](../../../../apis/openapi/hilos.io/main) |
 | [hirak.site](../../../../apis/openapi/hirak.site) | [exchange-rates-api](../../../../apis/openapi/hirak.site/exchange-rates-api) · [hirak-faceapi](../../../../apis/openapi/hirak.site/hirak-faceapi) · [hirak-ip-to-country](../../../../apis/openapi/hirak.site/hirak-ip-to-country) · [hirak-ocr](../../../../apis/openapi/hirak.site/hirak-ocr) · [hirak-translation](../../../../apis/openapi/hirak.site/hirak-translation) |
+| [hireart.com](../../../../apis/openapi/hireart.com) | [main](../../../../apis/openapi/hireart.com/main) |
 | [hirefire.io](../../../../apis/openapi/hirefire.io) | [main](../../../../apis/openapi/hirefire.io/main) |
 | [hireinc.com](../../../../apis/openapi/hireinc.com) | [main](../../../../apis/openapi/hireinc.com/main) |
 | [hirelayer.co](../../../../apis/openapi/hirelayer.co) | [main](../../../../apis/openapi/hirelayer.co/main) |
