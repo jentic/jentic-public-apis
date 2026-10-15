@@ -1,6 +1,6 @@
 # APIs — D
 
-Browsing 198 APIs starting with **D**.
+Browsing 199 APIs starting with **D**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · **D** · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -70,6 +70,7 @@ Browsing 198 APIs starting with **D**.
 | [deliveryhero.com](../../../../apis/openapi/deliveryhero.com) | [pos-plugin-api](../../../../apis/openapi/deliveryhero.com/pos-plugin-api) |
 | [demo.jobsoid.com](../../../../apis/openapi/demo.jobsoid.com) | [main](../../../../apis/openapi/demo.jobsoid.com/main) |
 | [deno.com](../../../../apis/openapi/deno.com) | [main](../../../../apis/openapi/deno.com/main) |
+| [denta.com](../../../../apis/openapi/denta.com) | [main](../../../../apis/openapi/denta.com/main) |
 | [dentally.co](../../../../apis/openapi/dentally.co) | [main](../../../../apis/openapi/dentally.co/main) |
 | [dentimax.com](../../../../apis/openapi/dentimax.com) | [main](../../../../apis/openapi/dentimax.com/main) |
 | [departureboard.io](../../../../apis/openapi/departureboard.io) | [main](../../../../apis/openapi/departureboard.io/main) |
