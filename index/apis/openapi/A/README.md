@@ -1,6 +1,6 @@
 # APIs — A
 
-Browsing 469 APIs starting with **A**.
+Browsing 470 APIs starting with **A**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · **A** · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -330,6 +330,7 @@ Browsing 469 APIs starting with **A**.
 | [apicurio.local](../../../../apis/openapi/apicurio.local) | [registry](../../../../apis/openapi/apicurio.local/registry) |
 | [apidapp.com](../../../../apis/openapi/apidapp.com) | [apidapp](../../../../apis/openapi/apidapp.com/apidapp) · [apidapp.com](../../../../apis/openapi/apidapp.com/apidapp.com) |
 | [apideck.com](../../../../apis/openapi/apideck.com) | [16 APIs](../../../../apis/openapi/apideck.com) |
+| [apidirect.io](../../../../apis/openapi/apidirect.io) | [main](../../../../apis/openapi/apidirect.io/main) |
 | [apiflash.com](../../../../apis/openapi/apiflash.com) | [main](../../../../apis/openapi/apiflash.com/main) |
 | [apify.com](../../../../apis/openapi/apify.com) | [main](../../../../apis/openapi/apify.com/main) |
 | [apigee.local](../../../../apis/openapi/apigee.local) | [registry](../../../../apis/openapi/apigee.local/registry) |
