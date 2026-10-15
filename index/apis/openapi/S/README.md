@@ -1,6 +1,6 @@
 # APIs — S
 
-Browsing 728 APIs starting with **S**.
+Browsing 729 APIs starting with **S**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · **S** · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -326,6 +326,7 @@ Browsing 728 APIs starting with **S**.
 | [sonix.ai](../../../../apis/openapi/sonix.ai) | [sonix](../../../../apis/openapi/sonix.ai/sonix) · [sonix-api](../../../../apis/openapi/sonix.ai/sonix-api) |
 | [sonos.com](../../../../apis/openapi/sonos.com) | [main](../../../../apis/openapi/sonos.com/main) |
 | [sophos.com](../../../../apis/openapi/sophos.com) | [sophos-siem-api](../../../../apis/openapi/sophos.com/sophos-siem-api) |
+| [soriaanalytics.com](../../../../apis/openapi/soriaanalytics.com) | [main](../../../../apis/openapi/soriaanalytics.com/main) |
 | [sortscape.com](../../../../apis/openapi/sortscape.com) | [main](../../../../apis/openapi/sortscape.com/main) |
 | [sosinventory.com](../../../../apis/openapi/sosinventory.com) | [main](../../../../apis/openapi/sosinventory.com/main) |
 | [soulmachines.cloud](../../../../apis/openapi/soulmachines.cloud) | [main](../../../../apis/openapi/soulmachines.cloud/main) |
