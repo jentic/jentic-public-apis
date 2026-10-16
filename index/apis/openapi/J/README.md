@@ -1,6 +1,6 @@
 # APIs — J
 
-Browsing 46 APIs starting with **J**.
+Browsing 47 APIs starting with **J**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · **J** · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -51,5 +51,6 @@ Browsing 46 APIs starting with **J**.
 | [just-trade.co.uk](../../../../apis/openapi/just-trade.co.uk) | [main](../../../../apis/openapi/just-trade.co.uk/main) |
 | [justautomate.ai](../../../../apis/openapi/justautomate.ai) | [main](../../../../apis/openapi/justautomate.ai/main) |
 | [justbacked.com](../../../../apis/openapi/justbacked.com) | [main](../../../../apis/openapi/justbacked.com/main) |
+| [justidea.agency](../../../../apis/openapi/justidea.agency) | [main](../../../../apis/openapi/justidea.agency/main) |
 | [jvzoo.com](../../../../apis/openapi/jvzoo.com) | [main](../../../../apis/openapi/jvzoo.com/main) |
 
