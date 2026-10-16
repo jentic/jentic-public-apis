@@ -1,6 +1,6 @@
 # APIs — F
 
-Browsing 152 APIs starting with **F**.
+Browsing 153 APIs starting with **F**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · **F** · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -44,6 +44,7 @@ Browsing 152 APIs starting with **F**.
 | [feefo.com](../../../../apis/openapi/feefo.com) | [main](../../../../apis/openapi/feefo.com/main) |
 | [fera.ai](../../../../apis/openapi/fera.ai) | [fera-api](../../../../apis/openapi/fera.ai/fera-api) |
 | [fergus.com](../../../../apis/openapi/fergus.com) | [fergus-api](../../../../apis/openapi/fergus.com/fergus-api) |
+| [feriadosapi.com](../../../../apis/openapi/feriadosapi.com) | [main](../../../../apis/openapi/feriadosapi.com/main) |
 | [fess.codelibs.org](../../../../apis/openapi/fess.codelibs.org) | [main](../../../../apis/openapi/fess.codelibs.org/main) |
 | [fieldaware.com](../../../../apis/openapi/fieldaware.com) | [main](../../../../apis/openapi/fieldaware.com/main) |
 | [fieldstub.com](../../../../apis/openapi/fieldstub.com) | [main](../../../../apis/openapi/fieldstub.com/main) |
