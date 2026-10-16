@@ -1,0 +1,1390 @@
+openapi: 3.1.0
+info:
+  title: Topicary REST API
+  version: "1.0.0"
+  summary: Programmatic access to topics, components, maps, publication targets, and webhooks.
+  description: |
+    The Topicary REST API lets you manage a single project's content
+    programmatically: create and edit topics and reusable components, organize
+    maps, inspect publication targets, and register webhooks.
+
+    ## Base URL
+
+    ```
+    https://topicary.com/api/v1
+    ```
+
+    ## Authentication
+
+    Every request must include an API key as a bearer token:
+
+    ```
+    Authorization: Bearer tk_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+    ```
+
+    Generate keys in **Project Settings → API Keys**. A key is scoped to the
+    project it was created in and inherits that project's plan. The plaintext
+    key is shown only once at creation; Topicary stores only a SHA-256 hash.
+
+    ## Response envelope
+
+    Authoring endpoints use `data` on success, `error` on failure,
+    and a `meta` block on list endpoints:
+
+    ```
+    Success (one)    { "data": { ... } }
+    Success (list)   { "data": [ ... ], "meta": { "total", "offset", "limit" } }
+    Error (4xx/5xx)  { "error": "message" }
+    DELETE           204 No Content (empty body)
+    ```
+
+    `GET /targets/{targetId}/pages` returns its published-page DTO directly:
+    `{ "generationId", "pages", "nextCursor", "site"? }`, with no `data` or
+    `meta` wrapper. Failures use `error` and an optional machine-readable `code`.
+
+    ## Pagination
+
+    Authoring list endpoints accept `offset` (default `0`) and `limit` (default `50`,
+    maximum `100`) query parameters and report `meta.total` for the full count.
+    Published pages instead use an opaque, generation-bound `cursor` and
+    `nextCursor`; restart from the first page if the served generation changes.
+
+    ## Rate limits
+
+    Authoring requests are limited to **1000 requests per minute per API
+    key**. Unauthenticated requests (bad or missing keys) are limited to 100
+    per minute per IP. Published pages have a separate **300 requests per minute
+    per validated API key** limit. Exceeding a limit returns `429 Too Many Requests`.
+
+    ## Request bodies
+
+    Send `Content-Type: application/json`. JSON request bodies are capped at
+    **1 MB** by default; topic creation and updates allow **3 MiB**. Document content is TipTap/ProseMirror JSON — a `content_json`
+    object with `type: "doc"` and a `content` array.
+  contact:
+    name: Topicary Support
+    email: support@topicary.com
+  license:
+    name: Proprietary
+    identifier: LicenseRef-Proprietary
+
+servers:
+  - url: https://topicary.com/api/v1
+    description: Production
+
+security:
+  - ApiKeyAuth: []
+
+tags:
+  - name: Topics
+    description: Authoring units. Content is stored as TipTap/ProseMirror JSON.
+  - name: Components
+    description: Reusable content snippets referenced by topics.
+  - name: Maps
+    description: Hierarchical tables of contents that order topics for publishing.
+  - name: Targets
+    description: Publication targets (read-only). One map can publish to many targets.
+  - name: Webhooks
+    description: Outbound event subscriptions delivered with an HMAC signature.
+
+paths:
+  # ----------------------------------------------------------------- Topics ---
+  /topics:
+    get:
+      tags: [Topics]
+      operationId: listTopics
+      summary: List topics
+      description: |
+        Returns the project's topics, newest first, with an exact matching count.
+        Requires `topics:read`, `topics:write`, or a legacy key. API access
+        requires the project's current Business plan.
+      parameters:
+        - $ref: "#/components/parameters/Offset"
+        - $ref: "#/components/parameters/Limit"
+        - name: status
+          in: query
+          schema: { type: string, enum: [draft, review, published] }
+        - name: type
+          in: query
+          description: Filter by topic_type.
+          schema: { type: string, maxLength: 100 }
+      responses:
+        "200":
+          description: A private, uncached paginated list of topic summaries.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/TopicSummary" }
+                  meta: { $ref: "#/components/schemas/PaginationMeta" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/TopicForbidden" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+        "503": { $ref: "#/components/responses/Unavailable" }
+    post:
+      tags: [Topics]
+      operationId: createTopic
+      summary: Create a topic
+      description: |
+        Requires `topics:write` or a legacy key and the project's current Business
+        plan. Atomically creates a draft topic, initial version, default workflow,
+        same-project reference indexes, mutation receipt, and webhook intent.
+        Topic JSON request bodies are capped at 3 MiB; canonical content is
+        independently capped at 2 MiB and metadata at 256 KiB in storage.
+        Reuse the same Idempotency-Key and exact body after an uncertain response
+        to recover the original result. A changed request with the same identity
+        returns 409. Without a caller identity, each request is a new operation.
+      parameters:
+        - $ref: "#/components/parameters/TopicIdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/TopicCreate" }
+      responses:
+        "201":
+          description: The created topic or its exact saved receipt replay.
+          headers:
+            ETag: { $ref: "#/components/headers/TopicETag" }
+            X-Operation-Id: { $ref: "#/components/headers/TopicOperationId" }
+            Idempotency-Replayed: { $ref: "#/components/headers/TopicReplayed" }
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: "#/components/schemas/TopicMutationResult" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/TopicForbidden" }
+        "409": { $ref: "#/components/responses/TopicConflict" }
+        "422": { $ref: "#/components/responses/TopicInvalidInput" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+        "503": { $ref: "#/components/responses/Unavailable" }
+
+  /topics/{topicId}:
+    parameters:
+      - $ref: "#/components/parameters/TopicId"
+    get:
+      tags: [Topics]
+      operationId: getTopic
+      summary: Get a topic
+      description: |
+        Returns main content and its current document/metadata revisions, never
+        an editor's active branch. Requires topics:read, topics:write, or a legacy
+        key and the project's current Business plan. Does not expose CRDT state.
+      responses:
+        "200":
+          description: The private, uncached topic.
+          headers:
+            ETag: { $ref: "#/components/headers/TopicETag" }
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: "#/components/schemas/Topic" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/TopicForbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+        "503": { $ref: "#/components/responses/Unavailable" }
+    patch:
+      tags: [Topics]
+      operationId: updateTopic
+      summary: Update a topic
+      description: |
+        Requires topics:write or a legacy key and the current Business plan.
+        Writes MAIN content unless branch_id explicitly selects a branch of this
+        topic. Main body replacement atomically advances its document revision
+        and collaboration epoch, records version history, updates references,
+        marks translated content stale, and records the receipt/webhook intent.
+        It refuses accepted collaborative updates that are not yet materialized.
+        Branch bodies have independent revisions and reference indexes; a pure
+        branch write leaves main body, history, translations, and webhook intent
+        unchanged. A mixed branch/title patch also changes shared topic metadata
+        and marks translations stale for that title change.
+        Use the strong ETag from GET as If-Match to protect both revisions, or
+        supply expected_document_revision/expected_metadata_revision in the body.
+        For branch content, use that branch's document revision and the shared
+        topic metadata revision. Without explicit preconditions, the handler
+        reads a current basis and SQL still checks it atomically against races.
+        Exact retries retain their original basis; they do not become new edits.
+        Body limits are the same as topic creation.
+      parameters:
+        - $ref: "#/components/parameters/TopicIdempotencyKey"
+        - $ref: "#/components/parameters/TopicIfMatch"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/TopicUpdate" }
+      responses:
+        "200":
+          description: The committed topic summary or its exact saved receipt replay.
+          headers:
+            ETag: { $ref: "#/components/headers/TopicETag" }
+            X-Operation-Id: { $ref: "#/components/headers/TopicOperationId" }
+            Idempotency-Replayed: { $ref: "#/components/headers/TopicReplayed" }
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: "#/components/schemas/TopicMutationResult" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/TopicForbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/TopicConflict" }
+        "422": { $ref: "#/components/responses/TopicInvalidInput" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+        "503": { $ref: "#/components/responses/Unavailable" }
+    delete:
+      tags: [Topics]
+      operationId: deleteTopic
+      summary: Delete a topic
+      description: |
+        Requires topics:write or a legacy key and the current Business plan.
+        Checks both main revisions, current workflow, and accepted collaborative
+        updates before atomically deleting the topic and dependent artifacts.
+        Referencing maps retain a deleted-topic marker and version history.
+        Exact retries return the original deletion receipt after the row is gone.
+        Supply Idempotency-Key to retain that identity across an uncertain response.
+      parameters:
+        - $ref: "#/components/parameters/TopicIdempotencyKey"
+        - $ref: "#/components/parameters/TopicIfMatch"
+      responses:
+        "204":
+          description: Deleted, or the exact saved deletion receipt replayed. Empty body.
+          headers:
+            ETag: { $ref: "#/components/headers/TopicETag" }
+            X-Operation-Id: { $ref: "#/components/headers/TopicOperationId" }
+            Idempotency-Replayed: { $ref: "#/components/headers/TopicReplayed" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/TopicForbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/TopicConflict" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+        "503": { $ref: "#/components/responses/Unavailable" }
+
+  # ------------------------------------------------------------- Components ---
+  /components:
+    get:
+      tags: [Components]
+      operationId: listComponents
+      summary: List components
+      parameters:
+        - $ref: "#/components/parameters/Offset"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: A paginated list of component summaries.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/ComponentSummary" }
+                  meta: { $ref: "#/components/schemas/PaginationMeta" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+    post:
+      tags: [Components]
+      operationId: createComponent
+      summary: Create a component
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ComponentCreate" }
+      responses:
+        "201":
+          description: The created component.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      id: { type: string, format: uuid }
+                      title: { type: string }
+                      created_at: { type: string, format: date-time }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+
+  /components/{componentId}:
+    parameters:
+      - $ref: "#/components/parameters/ComponentId"
+    get:
+      tags: [Components]
+      operationId: getComponent
+      summary: Get a component
+      responses:
+        "200":
+          description: The component, including its `content_json`.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: "#/components/schemas/Component" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+    patch:
+      tags: [Components]
+      operationId: updateComponent
+      summary: Update a component
+      description: Supply at least one of `title` or `content_json`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ComponentUpdate" }
+      responses:
+        "200":
+          description: The updated component summary.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      id: { type: string, format: uuid }
+                      title: { type: string }
+                      updated_at: { type: string, format: date-time }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+    delete:
+      tags: [Components]
+      operationId: deleteComponent
+      summary: Delete a component
+      responses:
+        "204": { $ref: "#/components/responses/NoContent" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+
+  # -------------------------------------------------------------------- Maps ---
+  /maps:
+    get:
+      tags: [Maps]
+      operationId: listMaps
+      summary: List maps
+      parameters:
+        - $ref: "#/components/parameters/Offset"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: A paginated list of map summaries.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/MapSummary" }
+                  meta: { $ref: "#/components/schemas/PaginationMeta" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+    post:
+      tags: [Maps]
+      operationId: createMap
+      summary: Create a map
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/MapCreate" }
+      responses:
+        "201":
+          description: The created map.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      id: { type: string, format: uuid }
+                      title: { type: string }
+                      description: { type: string }
+                      created_at: { type: string, format: date-time }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+
+  /maps/{mapId}:
+    parameters:
+      - $ref: "#/components/parameters/MapId"
+    get:
+      tags: [Maps]
+      operationId: getMap
+      summary: Get a map
+      description: Returns the map plus its ordered `items` (the table of contents).
+      responses:
+        "200":
+          description: The map with its items.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: "#/components/schemas/Map" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+    patch:
+      tags: [Maps]
+      operationId: updateMap
+      summary: Update a map
+      description: Supply at least one of `title` or `description`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/MapUpdate" }
+      responses:
+        "200":
+          description: The updated map summary.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      id: { type: string, format: uuid }
+                      title: { type: string }
+                      description: { type: string }
+                      updated_at: { type: string, format: date-time }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+    delete:
+      tags: [Maps]
+      operationId: deleteMap
+      summary: Delete a map
+      description: |
+        Deleting a map also removes its publication targets and unpublishes any
+        sites served from them.
+      responses:
+        "204": { $ref: "#/components/responses/NoContent" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+
+  # ----------------------------------------------------------------- Targets ---
+  /targets:
+    get:
+      tags: [Targets]
+      operationId: listTargets
+      summary: List publication targets
+      description: Returns every publication target across all of the project's maps.
+      parameters:
+        - $ref: "#/components/parameters/Offset"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: A paginated list of target summaries.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/TargetSummary" }
+                  meta: { $ref: "#/components/schemas/PaginationMeta" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+
+  /targets/{targetId}:
+    parameters:
+      - $ref: "#/components/parameters/TargetId"
+    get:
+      tags: [Targets]
+      operationId: getTarget
+      summary: Get a publication target
+      responses:
+        "200":
+          description: The target, including its SEO, variable-override, and output configuration.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: "#/components/schemas/Target" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+
+  /targets/{targetId}/pages:
+    parameters:
+      - $ref: "#/components/parameters/TargetId"
+    get:
+      tags: [Targets]
+      operationId: listPublishedPages
+      summary: Read pages from the currently served publication generation
+      description: |
+        Returns pages from the target's immutable served generation, in published
+        order. Requires `published:read`, `targets:read`, `export:read`, or a
+        legacy API key, and the project's current Business API capability. The
+        target must belong to the key's project and have a served publication.
+        This is API-key access, not the separate reader-cookie endpoint.
+
+        The response is a direct PublishedPages object, without a data/meta
+        envelope. Pages contain captured page IDs, slugs, titles, Markdown/text,
+        canonical URLs and headings. The projection omits the separate topicId,
+        metadata, resolvedJson and collaboration-state fields.
+
+        Omit cursor (or pass an empty cursor) for the first page. Follow nextCursor
+        unchanged until it is null. Nonempty cursors are base64url-encoded
+        generation/offset objects, at most 512 characters, with a UUID generation
+        and a nonnegative safe-integer offset. A cursor for another served
+        generation returns 409 generation_changed; restart without the cursor.
+        This endpoint uses cursor instead of offset and reports no total count.
+        An offset beyond the captured page list returns an empty pages array and
+        null nextCursor.
+
+        `include=site` adds captured site/project display names and navigation on
+        that response. Other include values are ignored. Navigation is bounded
+        by a traversal-depth budget of 32, 1,000 entries and 64 KiB of JSON. If that
+        projection exceeds a budget, site.navigationState is unavailable and
+        site.navigation is empty; published pages are still returned.
+
+        Responses, including failures, are private, no-store. The separate rate
+        limit is 300 requests per minute per validated API key. A failed lookup
+        or unavailable generation is an error, not an empty successful page list.
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - name: cursor
+          in: query
+          description: Opaque nextCursor from the preceding response; omit or pass empty to start pagination.
+          schema: { type: string, maxLength: 512, pattern: '^[A-Za-z0-9_-]*$' }
+        - name: include
+          in: query
+          description: Exactly site includes captured site metadata; other values have no effect.
+          schema: { type: string }
+          example: site
+      responses:
+        "200":
+          description: A page of the current served generation, with an optional site projection.
+          headers:
+            Cache-Control: { $ref: "#/components/headers/PublishedPagesCacheControl" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PublishedPages" }
+        "400":
+          description: Invalid target UUID, limit outside 1–100, or malformed/oversized/unsafe cursor.
+          headers:
+            Cache-Control: { $ref: "#/components/headers/PublishedPagesCacheControl" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+              examples:
+                invalidTarget:
+                  summary: The target ID is not a UUID
+                  value: { error: "Invalid target ID" }
+                invalidPagination:
+                  summary: The limit or cursor is invalid
+                  value: { error: "Invalid limit or cursor" }
+        "401":
+          description: Invalid/missing/revoked key or unavailable API plan (invalid_api_key), or expired key (api_key_expired).
+          headers:
+            Cache-Control: { $ref: "#/components/headers/PublishedPagesCacheControl" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+              examples:
+                invalidKey:
+                  summary: The key is missing, invalid, revoked or not eligible for API access
+                  value: { error: "Invalid or missing API key", code: invalid_api_key }
+                expiredKey:
+                  summary: The key has expired
+                  value: { error: "API key expired", code: api_key_expired }
+        "403":
+          description: The key grants none of the accepted published-page scopes.
+          headers:
+            Cache-Control: { $ref: "#/components/headers/PublishedPagesCacheControl" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+              example: { error: "API key does not grant published page access" }
+        "404":
+          description: The target does not exist or belongs to a different project.
+          headers:
+            Cache-Control: { $ref: "#/components/headers/PublishedPagesCacheControl" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+              example: { error: "Target not found" }
+        "409":
+          description: The target has no served publication (generation_unavailable), or pagination's served generation changed (generation_changed).
+          headers:
+            Cache-Control: { $ref: "#/components/headers/PublishedPagesCacheControl" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+              examples:
+                noServedGeneration:
+                  summary: The target has no served publication
+                  value: { error: "Target has no served generation", code: generation_unavailable }
+                generationChanged:
+                  summary: Restart pagination without the previous cursor
+                  value: { error: "Published generation changed; restart pagination", code: generation_changed }
+        "429":
+          description: The published-page limit of 300 requests per minute per validated key was exceeded.
+          headers:
+            Cache-Control: { $ref: "#/components/headers/PublishedPagesCacheControl" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+              example: { error: "Rate limit exceeded" }
+        "503":
+          description: API-key validation (api_key_unavailable), target lookup, generation loading (generation_unavailable), or page projection is unavailable.
+          headers:
+            Cache-Control: { $ref: "#/components/headers/PublishedPagesCacheControl" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+              examples:
+                keyValidationUnavailable:
+                  summary: API key validation could not complete
+                  value: { error: "API key validation is unavailable", code: api_key_unavailable }
+                lookupUnavailable:
+                  summary: The target lookup could not complete
+                  value: { error: "Published page lookup is unavailable" }
+                generationUnavailable:
+                  summary: The served generation could not be loaded
+                  value: { error: "Published generation is unavailable", code: generation_unavailable }
+                pagesUnavailable:
+                  summary: The published-page request could not complete
+                  value: { error: "Published pages are unavailable" }
+
+  # ---------------------------------------------------------------- Webhooks ---
+  /webhooks:
+    get:
+      tags: [Webhooks]
+      operationId: listWebhooks
+      summary: List webhooks
+      parameters:
+        - $ref: "#/components/parameters/Offset"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: A paginated list of webhooks.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/Webhook" }
+                  meta: { $ref: "#/components/schemas/PaginationMeta" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+    post:
+      tags: [Webhooks]
+      operationId: createWebhook
+      summary: Register a webhook
+      description: |
+        Registers an outbound webhook. The `url` must be a public HTTPS
+        endpoint. The response includes a `secret` (prefixed `whsec_`) used to
+        verify the `X-Topicary-Signature` HMAC header on each delivery — it is
+        returned only once, at creation.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/WebhookCreate" }
+      responses:
+        "201":
+          description: The created webhook, including its signing secret.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: "#/components/schemas/WebhookWithSecret" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+
+  /webhooks/{webhookId}:
+    parameters:
+      - $ref: "#/components/parameters/WebhookId"
+    get:
+      tags: [Webhooks]
+      operationId: getWebhook
+      summary: Get a webhook
+      description: Returns the webhook plus its 10 most recent delivery attempts.
+      responses:
+        "200":
+          description: The webhook with recent deliveries.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    allOf:
+                      - $ref: "#/components/schemas/Webhook"
+                      - type: object
+                        properties:
+                          recent_deliveries:
+                            type: array
+                            items: { $ref: "#/components/schemas/WebhookDelivery" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+    patch:
+      tags: [Webhooks]
+      operationId: updateWebhook
+      summary: Update a webhook
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/WebhookUpdate" }
+      responses:
+        "200":
+          description: The updated webhook.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: "#/components/schemas/Webhook" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+    delete:
+      tags: [Webhooks]
+      operationId: deleteWebhook
+      summary: Delete a webhook
+      responses:
+        "204": { $ref: "#/components/responses/NoContent" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: tk_*
+      description: "A project-scoped API key, sent as `Authorization: Bearer tk_...`."
+
+  parameters:
+    Offset:
+      name: offset
+      in: query
+      required: false
+      description: Number of records to skip.
+      schema: { type: integer, minimum: 0, default: 0 }
+    Limit:
+      name: limit
+      in: query
+      required: false
+      description: Maximum number of records to return.
+      schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+    TopicId:
+      name: topicId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    TopicIdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      description: |
+        A 1–255 character caller key. Identity is bound to the credential, method,
+        route and topic family. It takes precedence over body mutation_id.
+        Retry with the same request; changed input returns 409.
+      schema: { type: string, minLength: 1, maxLength: 255 }
+    TopicIfMatch:
+      name: If-Match
+      in: header
+      description: |
+        Strong revision pair, e.g. "c2-m3". Wildcards, weak ETags and lists are
+        refused. Explicit body revisions must agree with this pair. Protects
+        both stated revision families, even for a title-only patch.
+      schema: { type: string, pattern: '^"c[1-9][0-9]*-m[1-9][0-9]*"$' }
+    ComponentId:
+      name: componentId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    MapId:
+      name: mapId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    TargetId:
+      name: targetId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    WebhookId:
+      name: webhookId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+
+  headers:
+    PublishedPagesCacheControl:
+      description: Published-page responses and errors direct HTTP caches not to store them.
+      schema: { type: string, const: "private, no-store" }
+    TopicETag:
+      description: Strong document/metadata revision pair for this main or branch destination.
+      schema: { type: string }
+      example: '"c2-m3"'
+    TopicOperationId:
+      description: Exact durable mutation UUID.
+      schema: { type: string, format: uuid }
+    TopicReplayed:
+      description: Whether this response recovered an existing committed receipt.
+      schema: { type: string, enum: ["true", "false"] }
+
+  responses:
+    NoContent:
+      description: Success, no body returned.
+    BadRequest:
+      description: The request was malformed (invalid ID, missing field, or invalid JSON).
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    Unauthorized:
+      description: The API key is missing, malformed, expired, or not permitted on this plan.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+          example: { error: "Invalid or missing API key" }
+    NotFound:
+      description: The requested resource does not exist in this project.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    TooManyRequests:
+      description: The rate limit (1000/min per key) was exceeded.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+          example: { error: "Rate limit exceeded" }
+
+    TopicForbidden:
+      description: Insufficient topic scope, revoked authority, or a read-only/unknown workflow stage.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    TopicConflict:
+      description: |
+        Revision conflict, changed input for an existing identity, or accepted
+        collaborative updates awaiting materialization. The code distinguishes
+        revision_conflict, idempotency_conflict and collaboration_pending.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    TopicInvalidInput:
+      description: Canonical document, metadata, or same-project reference validation failed; no mutation committed.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    Unavailable:
+      description: Authentication, database, or verified receipt is unavailable; do not infer an empty result or completed mutation.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+          description: A human-readable error message.
+        code: { type: string }
+        operation_id: { type: string, format: uuid }
+        conflict:
+          type: object
+          properties:
+            current_document_revision: { type: [integer, "null"] }
+            current_metadata_revision: { type: [integer, "null"] }
+      example: { error: "title is required" }
+
+    PaginationMeta:
+      type: object
+      required: [total, offset, limit]
+      properties:
+        total:
+          type: integer
+          description: Total number of records matching the query.
+        offset:
+          type: integer
+        limit:
+          type: integer
+
+    ContentJson:
+      type: object
+      description: |
+        A TipTap/ProseMirror document. Must have `type: "doc"` and a `content`
+        array of nodes. The node vocabulary mirrors the editor (paragraphs,
+        headings, lists, tables, callouts, code blocks, images, and Topicary's
+        custom nodes: componentRef, conditionalBlock, variableToken, topicLink).
+      required: [type, content]
+      properties:
+        type:
+          type: string
+          const: doc
+        content:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+      additionalProperties: true
+      example:
+        type: doc
+        content:
+          - type: paragraph
+            content:
+              - type: text
+                text: "Hello, world."
+
+    # ------------------------------------------------------------ Topics ---
+    TopicSummary:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        title: { type: string }
+        topic_type:
+          type: [string, "null"]
+          description: A topic-type key (e.g. "concept", "task", "reference") or null.
+        status:
+          type: string
+          enum: [draft, review, published]
+        metadata_json:
+          type: object
+          additionalProperties: true
+        created_by: { type: [string, "null"], format: uuid }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        content_revision: { type: integer, minimum: 1 }
+        metadata_revision: { type: integer, minimum: 1 }
+
+    Topic:
+      allOf:
+        - $ref: "#/components/schemas/TopicSummary"
+        - type: object
+          properties:
+            project_id: { type: string, format: uuid }
+            content_json: { $ref: "#/components/schemas/ContentJson" }
+            source_locale: { type: [string, "null"] }
+            active_branch_id: { type: [string, "null"], format: uuid }
+            content_version: { type: [integer, "null"] }
+            verified_at: { type: [string, "null"], format: date-time }
+            verified_by: { type: [string, "null"], format: uuid }
+            word_count: { type: [integer, "null"] }
+            updated_by: { type: [string, "null"], format: uuid }
+
+    TopicCreate:
+      type: object
+      required: [title]
+      properties:
+        title:
+          type: string
+          description: The topic title (required, trimmed; must be non-empty).
+          minLength: 1
+          maxLength: 500
+        topic_type:
+          type: [string, "null"]
+          maxLength: 100
+        mutation_id:
+          type: string
+          format: uuid
+          description: Caller mutation UUID, used when Idempotency-Key is absent.
+        content_json:
+          $ref: "#/components/schemas/ContentJson"
+        metadata_json:
+          type: object
+          additionalProperties: true
+      example:
+        title: "Configure SSO"
+        topic_type: "task"
+
+    TopicUpdate:
+      type: object
+      description: Supply at least one editable field.
+      minProperties: 1
+      properties:
+        title: { type: string, minLength: 1, maxLength: 500 }
+        topic_type: { type: [string, "null"], maxLength: 100 }
+        mutation_id:
+          type: string
+          format: uuid
+          description: Caller mutation UUID, used when Idempotency-Key is absent.
+        expected_document_revision: { type: integer, minimum: 1 }
+        expected_metadata_revision: { type: integer, minimum: 1 }
+        status:
+          type: string
+          enum: [draft, review, published]
+        content_json: { $ref: "#/components/schemas/ContentJson" }
+        metadata_json:
+          type: object
+          additionalProperties: true
+        branch_id:
+          type: [string, "null"]
+          format: uuid
+          description: |
+            Destination of the content write. Omit it (the default) to write the
+            topic's main content. Supply a branch of this topic to write that
+            branch instead; requires `content_json` in the same request, and a
+            branch that does not exist or cannot be written returns `404`. The
+            branch a person has open in the editor never affects this endpoint.
+
+    TopicOperation:
+      type: object
+      required: [mutation_id, committed_at, branch_id, changed_fields, document_revision, metadata_revision, replayed]
+      properties:
+        mutation_id: { type: string, format: uuid }
+        committed_at: { type: string, format: date-time }
+        branch_id: { type: [string, "null"], format: uuid }
+        changed_fields:
+          type: array
+          items:
+            type: string
+            enum: [created, deleted, content_json, title, status, topic_type, metadata_json]
+        document_revision: { type: integer, minimum: 1 }
+        metadata_revision: { type: integer, minimum: 1 }
+        replayed: { type: boolean }
+    TopicMutationResult:
+      allOf:
+        - $ref: "#/components/schemas/TopicSummary"
+        - type: object
+          required: [operation]
+          properties:
+            operation: { $ref: "#/components/schemas/TopicOperation" }
+
+    # -------------------------------------------------------- Components ---
+    ComponentSummary:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        title: { type: string }
+        created_by: { type: [string, "null"], format: uuid }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    Component:
+      allOf:
+        - $ref: "#/components/schemas/ComponentSummary"
+        - type: object
+          properties:
+            project_id: { type: string, format: uuid }
+            content_json: { $ref: "#/components/schemas/ContentJson" }
+            metadata_json:
+              type: object
+              additionalProperties: true
+
+    ComponentCreate:
+      type: object
+      required: [title]
+      properties:
+        title: { type: string }
+        content_json: { $ref: "#/components/schemas/ContentJson" }
+      example:
+        title: "API key prerequisite"
+
+    ComponentUpdate:
+      type: object
+      description: Supply at least one field.
+      minProperties: 1
+      properties:
+        title: { type: string }
+        content_json: { $ref: "#/components/schemas/ContentJson" }
+
+    # -------------------------------------------------------------- Maps ---
+    MapItem:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        topic_id:
+          type: [string, "null"]
+          format: uuid
+          description: The topic at this position, or null for a label-only heading.
+        parent_item_id:
+          type: [string, "null"]
+          format: uuid
+        sort_order: { type: integer }
+        title_override:
+          type: [string, "null"]
+          description: Display label used when topic_id is null, or to override the topic title.
+
+    MapSummary:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        title: { type: string }
+        description: { type: string }
+        parent_map_id: { type: [string, "null"], format: uuid }
+        version_label: { type: [string, "null"] }
+        version_number: { type: [integer, "null"] }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    Map:
+      allOf:
+        - $ref: "#/components/schemas/MapSummary"
+        - type: object
+          properties:
+            project_id: { type: string, format: uuid }
+            items:
+              type: array
+              items: { $ref: "#/components/schemas/MapItem" }
+
+    MapCreate:
+      type: object
+      required: [title]
+      properties:
+        title: { type: string }
+        description: { type: string }
+      example:
+        title: "Developer Guide"
+        description: "Everything an integrator needs."
+
+    MapUpdate:
+      type: object
+      description: Supply at least one field.
+      minProperties: 1
+      properties:
+        title: { type: string }
+        description: { type: string }
+
+    # ----------------------------------------------------------- Targets ---
+    TargetSummary:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        map_id: { type: string, format: uuid }
+        name: { type: string }
+        output_format:
+          type: string
+          description: The output channel for this target.
+          enum: [web, pdf]
+        subdomain: { type: [string, "null"] }
+        custom_domain: { type: [string, "null"] }
+        is_published: { type: boolean }
+        published_at: { type: [string, "null"], format: date-time }
+        access_mode:
+          type: string
+          enum: [public, password]
+        created_at: { type: string, format: date-time }
+
+    Target:
+      allOf:
+        - $ref: "#/components/schemas/TargetSummary"
+        - type: object
+          properties:
+            seo_json:
+              type: object
+              additionalProperties: true
+            variable_overrides_json:
+              type: object
+              additionalProperties: true
+            locale: { type: [string, "null"] }
+            search_config_json:
+              type: object
+              additionalProperties: true
+            pdf_config_json:
+              type: object
+              additionalProperties: true
+            updated_at: { type: string, format: date-time }
+
+    PublishedPages:
+      type: object
+      required: [generationId, pages, nextCursor]
+      additionalProperties: false
+      properties:
+        generationId: { type: string, format: uuid }
+        pages:
+          type: array
+          maxItems: 100
+          items: { $ref: "#/components/schemas/PublishedPage" }
+        nextCursor:
+          type: [string, "null"]
+          description: Opaque generation-bound cursor for the next page, or null when there are no more pages.
+          maxLength: 512
+        site: { $ref: "#/components/schemas/PublishedSiteMetadata" }
+
+    PublishedPage:
+      type: object
+      required: [id, slug, title, contentMarkdown, contentText, url, headings]
+      additionalProperties: false
+      properties:
+        id:
+          type: string
+          description: |
+            Copied captured page ID. Current map publication builders use
+            map-item occurrence IDs; legacy artifacts without an ID use
+            generationId:slug. This field is not restricted to a UUID.
+        slug: { type: string }
+        title: { type: string }
+        contentMarkdown:
+          type: string
+          description: Published resolved Markdown, with an HTML-stripped fallback for legacy artifacts.
+        contentText:
+          type: string
+          description: Plain text from published resolved content, with an HTML-stripped fallback.
+        url:
+          type: string
+          description: Canonical custom-domain or subdomain URL, otherwise the request origin plus /sites/targetId; the slug is percent-encoded.
+        headings:
+          type: array
+          items:
+            type: object
+            required: [id, text, level]
+            additionalProperties: false
+            properties:
+              id: { type: string }
+              text: { type: string }
+              level: { type: number }
+
+    PublishedSiteMetadata:
+      type: object
+      required: [name, project, navigation, navigationState]
+      additionalProperties: false
+      properties:
+        name: { type: string, description: Captured target display name. }
+        project: { type: string, description: "Captured project display name, not its ID." }
+        navigation:
+          type: array
+          items: { $ref: "#/components/schemas/PublishedNavigationItem" }
+        navigationState:
+          type: string
+          enum: [complete, unavailable]
+          description: Unavailable means navigation is an empty array rather than a partial projection.
+
+    PublishedNavigationItem:
+      type: object
+      required: [slug, title, children]
+      additionalProperties: false
+      properties:
+        slug: { type: string }
+        title: { type: string }
+        children:
+          type: array
+          items: { $ref: "#/components/schemas/PublishedNavigationItem" }
+
+    # ---------------------------------------------------------- Webhooks ---
+    WebhookEvent:
+      type: string
+      description: A subscribable event type. Use `*` to subscribe to all events.
+      enum:
+        - "*"
+        - topic.created
+        - topic.updated
+        - topic.published
+        - topic.deleted
+        - topic.status_changed
+        - component.created
+        - component.updated
+        - component.deleted
+        - map.published
+        - map.unpublished
+
+    Webhook:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        url: { type: string, format: uri }
+        events:
+          type: array
+          items: { $ref: "#/components/schemas/WebhookEvent" }
+        is_active: { type: boolean }
+        description: { type: [string, "null"] }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    WebhookWithSecret:
+      allOf:
+        - $ref: "#/components/schemas/Webhook"
+        - type: object
+          properties:
+            secret:
+              type: string
+              description: HMAC signing secret (prefix `whsec_`). Returned only at creation.
+
+    WebhookDelivery:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        event_type: { type: string }
+        response_status: { type: [integer, "null"] }
+        attempts: { type: integer }
+        succeeded: { type: boolean }
+        created_at: { type: string, format: date-time }
+
+    WebhookCreate:
+      type: object
+      required: [url, events]
+      properties:
+        url:
+          type: string
+          format: uri
+          description: A public HTTPS endpoint. Private/loopback addresses are rejected.
+        events:
+          type: array
+          minItems: 1
+          items: { $ref: "#/components/schemas/WebhookEvent" }
+        description: { type: string }
+      example:
+        url: "https://example.com/hooks/topicary"
+        events: ["topic.published", "map.published"]
+        description: "Notify CI on publish"
+
+    WebhookUpdate:
+      type: object
+      description: Supply at least one field.
+      minProperties: 1
+      properties:
+        url:
+          type: string
+          format: uri
+        events:
+          type: array
+          minItems: 1
+          items: { $ref: "#/components/schemas/WebhookEvent" }
+        is_active: { type: boolean }
+        description: { type: string }
