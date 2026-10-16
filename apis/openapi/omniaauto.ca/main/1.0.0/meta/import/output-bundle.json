@@ -1,0 +1,1076 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "OmniaAuto — Canadian Vehicle Listings API",
+    "version": "1.0.0",
+    "description": "Live Canadian Market vehicle listings, VIN lookup, valuation and market statistics\n\n**Response schema:** every listing surface (listings, vin, feed, downloads) returns one fixed column set: vin, MY, Make, model, Trim, Condition, Demo, Certified, mileage, price, InitialPrice, DaysOnMarket, exterior_color, interior_color, body_type, doors, passengers, Size Class, Powertrain, drivetrain, Engine_size, transmission, fuel_type, Seller Name, Address, City, Province, PostalCode, Country, Latitude, Longitude, Is_Cross_Listed, Phone. Demo, Certified and Is_Cross_Listed are Yes/No; price and InitialPrice are whole dollar amounts (no cents); InitialPrice is the first price observed for the listing and DaysOnMarket is how many whole days it has been live. Colours/body style are always English; Condition is New/Used (Demo & Certified count as Used).\n\n**Agent-native:** the same data is available as a hosted MCP server at `https://mcp.omniaauto.ca/mcp` (Authorization: Bearer <API key>) — connect it straight into Claude, ChatGPT, or any MCP client. An MCP tool call returns at most **20 listings** (10 on the Personal and Pro plans), and every plan carries a monthly ceiling on how many distinct vehicles it may disclose over MCP. Two MCP-only plans are sold direct, both flat monthly subscriptions (cancel anytime) with three **independent** monthly allowances, each a hard stop with no overage: **Personal** — CA$19.99/month: 100 car listings, 100 price checks and 1,000 market questions — and **Pro** — CA$49/month: 300 car listings, 500 price checks and 5,000 market questions. *Car listings* = distinct vehicles shown by `search_listings` / `get_vin` (a vehicle already shown this month does not count again); *price checks* = `valuation` calls; *market questions* = every other tool call (search and VIN lookups count one each, as well as using car listings for new vehicles). Running out of one allowance leaves the other two working: the tool returns `allowance_exhausted` with a note naming which allowance ran out and what still works.\n\n**Statistics cover all of Canada on every MCP plan.** Counts, averages, medians, distributions, breakdowns and valuations may scan any slice up to and including the entire dataset — prices, trends and supply across all of Canada — and never use the car-listings allowance, because a statistic discloses no individual vehicle (each call is still one market question or one price check). The per-call listing cap and the monthly distinct-vehicle ceiling apply **only to row-level records actually returned**: a result count (\"39,842 vehicles match\") is not a disclosure and is always exact. The billed unit is the distinct **vehicle**, not the VIN string — row-level detail describing one vehicle counts as one vehicle disclosed whether or not the VIN field is present in the response, and two listings of the same vehicle at different sellers count once.\n\n**Errors** follow RFC 9457 (`application/problem+json`): `type`, `title`, `status`, plus the `error` code you branch on and a human `detail`.\n\n**What one call costs.** A call is a request returning up to **25 records**. A larger page counts proportionally — a 100-record page is 4 calls, a 500-record page is 20 — because the plan is sized around records returned, not requests made. A request returning no record set (a decode, a market summary, a lookup that finds nothing) is always exactly one call.\n\n**Quota headers** on every authenticated response: `X-RateLimit-*` for the per-second bucket, `X-Quota-Limit`/`-Remaining`/`-Reset` for the monthly call allowance with `X-Quota-Policy` saying whether passing it is a hard stop (plans that publish a fixed monthly call allowance and carry no overage) or bills as overage (every other plan), and `X-Record-Limit`/`-Remaining` for the monthly record allowance (`X-Record-Cost` is the records-per-call divisor). Past the record allowance we do not cut you off: your page size drops to 5 records per call for the rest of the month (`X-Record-Policy: page-limited`), so search keeps working while bulk export does not. Past **twice** the record allowance, row-returning endpoints refuse with **402** `record_cap_exhausted` until the 1st — aggregates and VIN lookups still work. `/v1/feed` and the uncapped Feed and Enterprise tiers are exempt from both. Continuous full-dataset access is what a Feed plan licenses. `GET /v1/usage` returns both allowances.\n\n**Conditional requests.** Every response on the data endpoints carries an `ETag`. Send it back as `If-None-Match` and an unchanged answer returns **304 Not Modified** with no body — and, because the validator is derived from the serving-layer version rather than from hashing a response we would have had to build anyway, the query never runs. **A 304 does not count against your quota.** Pair it with `listed_since` and a poller costs almost nothing on either side.\n\n**REST counts listings; MCP counts vehicles.** The same corpus is served two ways ON PURPOSE, and the two surfaces will report different totals for the identical filter. REST is a LISTING API: `/v1/listings`, `/v1/feed`, `/v1/market` and `/v1/health` return and count every listing instance, so a vehicle a dealer group has posted at six of its locations is six rows and counts six times — that is what a developer building their own UI needs, since each instance has its own seller, price and URL. The hosted MCP server is a VEHICLE API: `search_listings`, `market_stats` and `coverage` return and count one row per physical vehicle (per VIN), cross-listings already collapsed. Across the live corpus that is 856,200 listings versus 618,078 vehicles — about 28% — and inside a single city it is typically 11–15%. Neither number is wrong and neither is a bug: an LLM reasons over rows and would otherwise report the same car repeatedly as separate options and double-count every summary, while a REST client that wants one row per vehicle can deduplicate on `vin` itself. MCP responses carry `\"unit\": \"vehicle\"`, and `coverage` returns the listing count alongside the vehicle count so the two can always be reconciled. On MCP the representative listing kept for a vehicle is the one that ranks first under the sort you asked for (cheapest when you sort by price, nearest when you sort by distance), tie-broken by lowest price, then the originating seller, then most recently seen — a total order, so the same query always returns the same rows.",
+    "contact": {
+      "name": "OmniaAuto",
+      "url": "https://omniaauto.ca/contact",
+      "email": "support@omniaauto.ca"
+    },
+    "x-jentic-source-url": "https://omniaauto.ca/openapi.json"
+  },
+  "servers": [
+    {
+      "url": "https://api.omniaauto.ca",
+      "description": "production"
+    }
+  ],
+  "paths": {
+    "/v1/health": {
+      "get": {
+        "summary": "Service health + top-line coverage",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "example": {
+                  "status": "ok",
+                  "coverage": {
+                    "listings": 825097,
+                    "unique_vins": 601814,
+                    "latest_update": "2026-08-12"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/status": {
+      "get": {
+        "summary": "Public service status + measured uptime — no API key required",
+        "description": "Returns `status`: `operational` or `maintenance` (set from the operator maintenance flag), plus `uptime` measured by an independent minutely probe of the full public path: `uptime_30d_pct`, `uptime_7d_pct`, `checks_30d`, `monitoring_since`. Poll this to drive a status badge; it is the same source the omniaauto.ca landing page uses.",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "example": {
+                  "status": "operational",
+                  "uptime": {
+                    "uptime_30d_pct": 98.4,
+                    "uptime_7d_pct": 97.9,
+                    "checks_30d": 29182,
+                    "monitoring_since": "2026-07-23"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/quality": {
+      "get": {
+        "summary": "Public data-quality report: live fill rate for EVERY output attribute, measured across every active listing — no API key required",
+        "description": "Returns `attributes`: an ordered list of `{label, field, fill_pct}` for all 33 output attributes (VIN, Model year, Make, Model, Trim, Condition, Demo, Certified, Mileage, Price, Initial price, Days on market, Exterior/Interior color, Body type, Doors, Passengers, Size class, Powertrain, Drivetrain, Engine size, Transmission, Fuel type, seller name/address/city/province/postal/country/lat/lng, Is cross-listed, Phone). Also `fill_rates_pct` (flat slug→pct map), `listings_measured`, `data_refreshed_at`, and `methodology`. Condition, Demo, Certified, Is cross-listed and Country are 100% by derivation.",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/v1/listings": {
+      "get": {
+        "summary": "Search listings",
+        "parameters": [
+          {
+            "name": "make",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "model",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "trim",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "trim_standard",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Canadian standardized trim (from trim_canada); more reliable than raw trim for filtering."
+          },
+          {
+            "name": "year",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "year_min",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "year_max",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "condition",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "New",
+                "Used",
+                "Certified",
+                "Demo"
+              ]
+            }
+          },
+          {
+            "name": "body_type",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "drivetrain",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "fuel_type",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "province",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "city",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "near",
+            "in": "query",
+            "description": "Proximity anchor: a Canadian city (\"Edmonton\"), a postal code or FSA (\"T5J 0N3\", \"T5J\"), or explicit coordinates (\"53.5461,-113.4938\"). Use this for any distance question instead of guessing which towns surround a city — one call covers the whole circle. Pair with radius_km. Every result carries distance_km, and the response's `geo` block reports the anchor actually used and the share of the corpus that has dealer coordinates at all (~99.2%); listings without them cannot match a radius and are excluded.",
+            "schema": {
+              "type": "string"
+            },
+            "example": "Edmonton"
+          },
+          {
+            "name": "radius_km",
+            "in": "query",
+            "description": "Search radius in kilometres around `near`. Default 25, maximum 500 — past that use province=. Requires `near`.",
+            "schema": {
+              "type": "number",
+              "default": 25,
+              "minimum": 0.1,
+              "maximum": 500
+            },
+            "example": 40
+          },
+          {
+            "name": "oem",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "price_min",
+            "in": "query",
+            "schema": {
+              "type": "number"
+            }
+          },
+          {
+            "name": "price_max",
+            "in": "query",
+            "schema": {
+              "type": "number"
+            }
+          },
+          {
+            "name": "mileage_min",
+            "in": "query",
+            "schema": {
+              "type": "number"
+            }
+          },
+          {
+            "name": "mileage_max",
+            "in": "query",
+            "schema": {
+              "type": "number"
+            }
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "price",
+                "mileage",
+                "year",
+                "last_seen",
+                "first_seen",
+                "distance"
+              ]
+            },
+            "description": "Each column carries its own default direction, which `order` overrides: `price` and `mileage` return the LOWEST first, `year`/`last_seen`/`first_seen` the NEWEST first, `distance` the NEAREST first. `distance` requires `near`. CHANGED 2026-09-23: `price` and `mileage` previously defaulted to descending, which contradicted both this endpoint's documented cross-listing behaviour and the MCP tool's description. `order` was, and remains, authoritative whenever it is supplied."
+          },
+          {
+            "name": "order",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "asc",
+                "desc"
+              ]
+            },
+            "description": "Overrides the sort column's default direction. This parameter has never declared a `default` in this spec and still does not — the direction you get when you omit it is the one documented on `sort`."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 25,
+              "maximum": 100
+            },
+            "description": "Page size. Defaults to 25 when omitted, or your plan's max if that is lower. Plan maximums: Starter 10, Team 50, Growth 100; the MCP-only plans (Personal, Pro) return at most 10 listings per tool call. Pages larger than 25 records cost proportionally more (a 100-record page is 4 calls). Only row-level records count — an aggregate or a result count is not limited."
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 0,
+              "maximum": 1000
+            },
+            "description": "Row offset for shallow paging. Capped at 1000 — past that use `cursor`, which is faster and has no depth limit. Ignored when `cursor` is supplied."
+          },
+          {
+            "name": "expand",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Comma-separated enrichments: decode, valuation, recalls, payment. decode/valuation/recalls are billed per expanded row; payment is arithmetic on fields already in the row and is not billed separately. recalls is capped at the first 25 rows of a page, valuation likewise. payment requires a rate — pass `apr` or `rate_source` alongside."
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Keyset pagination token. Pass the `next_cursor` from the previous response to get the next page. Pages at any depth in constant time and never skips or repeats a row when inventory changes mid-walk — unlike `offset`, which stops at 1000. Keep `sort` and `order` identical for the whole walk; a cursor replayed under a different sort is rejected. `next_cursor` is null on the last page."
+          },
+          {
+            "name": "listed_since",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date"
+            },
+            "description": "Only listings first seen on or after this ISO date (YYYY-MM-DD). This is the delta-sync filter: poll it with your last sync date to pull just what is new."
+          },
+          {
+            "name": "listed_before",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date"
+            },
+            "description": "Only listings first seen on or before this ISO date (YYYY-MM-DD)."
+          },
+          {
+            "name": "fields",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Comma-separated subset of listing columns to return, e.g. `fields=vin,price,Make,model`. Case-insensitive. Trims the payload to what you actually read; `decode`/`valuation` expansion blocks are always kept. An unknown field returns 400 naming it."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Matching listings + total count"
+          },
+          "400": {
+            "description": "offset_too_large — offset exceeded the 1000-row deep-pagination cap"
+          },
+          "401": {
+            "description": "Missing/invalid key"
+          },
+          "429": {
+            "description": "Rate limited"
+          }
+        },
+        "description": "**One row per LISTING — cross-listings included.** A vehicle listed by several locations of one dealer group returns once per location, and `total` counts listings, not vehicles (856,200 listings describe 618,078 vehicles). This is deliberate and unchanged: deduplicate on `vin` if you want one row per vehicle, or use the MCP server's `search_listings` tool, which is deduplicated for you.\n\n**Paging:** follow `next_cursor` until it is null. Offset paging is supported for shallow pages only.\n\n**Rate limits:** every authenticated response carries `X-RateLimit-Limit`, `X-RateLimit-Remaining` and `X-RateLimit-Reset` (seconds until the bucket refills), so you can self-throttle instead of discovering the ceiling as a 429."
+      }
+    },
+    "/v1/vin/{vin}": {
+      "get": {
+        "summary": "VIN Market Lookup (with optional inline decode/valuation)",
+        "parameters": [
+          {
+            "name": "vin",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "expand",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Comma-separated inline enrichments: decode, valuation. Each billed separately. e.g. expand=decode,valuation"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Latest active listing for the VIN"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        }
+      }
+    },
+    "/v1/market": {
+      "get": {
+        "summary": "Market statistics for a slice",
+        "parameters": [
+          {
+            "name": "make",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "model",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "province",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "year_min",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "year_max",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "near",
+            "in": "query",
+            "description": "Proximity anchor: a Canadian city (\"Edmonton\"), a postal code or FSA (\"T5J 0N3\", \"T5J\"), or explicit coordinates (\"53.5461,-113.4938\"). Use this for any distance question instead of guessing which towns surround a city — one call covers the whole circle. Pair with radius_km. Every result carries distance_km, and the response's `geo` block reports the anchor actually used and the share of the corpus that has dealer coordinates at all (~99.2%); listings without them cannot match a radius and are excluded.",
+            "schema": {
+              "type": "string"
+            },
+            "example": "Edmonton"
+          },
+          {
+            "name": "radius_km",
+            "in": "query",
+            "description": "Search radius in kilometres around `near`. Default 25, maximum 500 — past that use province=. Requires `near`.",
+            "schema": {
+              "type": "number",
+              "default": 25,
+              "minimum": 0.1,
+              "maximum": 500
+            },
+            "example": 40
+          },
+          {
+            "name": "condition",
+            "in": "query",
+            "description": "New, Used, Certified or Demo. Never quote a typical price for a slice that mixes New and Used: when it does and no condition is given, the response carries `condition_note`.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "New",
+                "Used",
+                "Certified",
+                "Demo"
+              ]
+            },
+            "example": "Used"
+          },
+          {
+            "name": "group_by",
+            "in": "query",
+            "description": "Break the answer down in THIS call by one or two of `city`, `trim`, `year`, `condition`, comma-separated (`group_by=city,trim`). Each group returns n (LISTINGS on this endpoint), priced/unpriced, avg/median/min/max price, avg mileage and `low_sample` (n < 5); groups without a condition dimension also carry new_n/used_n, and with `near` set `approx_location_n` counts listings at rooftops placed at their city's centre point. Groups are sorted by n; the top 25 are listed and the rest are re-aggregated into one `Other` group, so every breakdown sums exactly to summary.n (see `sum_check`). `city` needs `province` or `near`; `trim` needs `make` and `model` and uses the canonical trim confirmed by the dealer or the VIN (`Unknown trim` otherwise; `trim_coverage_pct` reports the confirmed share). City names are folded per province (accents, St./Saint, punctuation); suburbs stay their own municipality. No extra charge.",
+            "schema": {
+              "type": "string"
+            },
+            "example": "city,trim"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Counts, avg/median price, avg mileage, condition + province breakdowns; with group_by, `groups` (+ groups_total, other_n, sum_check, trim_coverage_pct)"
+          }
+        },
+        "description": "**Counted over LISTINGS.** `n`, the breakdown counts and the price/mileage averages weight a vehicle once per listing, so a car posted at six locations weighs six times. The MCP `market_stats` tool answers the same question per VEHICLE and its averages sit slightly lower as a result. Both are correct for what they count. Supports proximity: `near` + `radius_km` answer \"median price of a Civic within 50 km of Calgary\" in one call. Aggregates return no individual vehicle, so this endpoint discloses nothing and is the cheapest way to ask a radius question."
+      }
+    },
+    "/v1/decode/{vin}": {
+      "get": {
+        "summary": "VIN Decode (full spec)",
+        "parameters": [
+          {
+            "name": "vin",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Full decoded specs: year, make, manufacturer, model, trim/series, body class, vehicle type, doors, seats/rows, drive/cab/bed type, engine (model, cylinders, displacement L/CC, hp, turbo), transmission + speeds, fuel, GVWR, curb weight, wheelbase, track width, bed length, plant. Fields absent for a given VIN are omitted."
+          },
+          "400": {
+            "description": "Invalid VIN"
+          },
+          "404": {
+            "description": "Undecodable"
+          }
+        }
+      }
+    },
+    "/v1/valuation": {
+      "get": {
+        "summary": "Market valuation (low/avg/median/high) from 30-day Canadian comps",
+        "parameters": [
+          {
+            "name": "year",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "make",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "model",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Canonical model name (e.g. `3 Series`, `RX`, `Civic`). A dealer spelling or a trim-as-model (`RX 350`, `Civic Sedan`, `330i`) is resolved to its canonical model and the rewrite is disclosed in `query.resolved_from` (`{\"model\": <as asked>, \"rule\": \"model_alias\" | \"model_spelling\" | \"trim_of_model\"}`); for `trim_of_model` the asked value also becomes `trim` unless `trim` was given."
+          },
+          {
+            "name": "condition",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "New",
+                "Used",
+                "Certified",
+                "Demo"
+              ]
+            }
+          },
+          {
+            "name": "province",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "optional; narrows the valuation to one province (e.g. ON)"
+          },
+          {
+            "name": "trim",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Canonical trim, matched exactly. Never overridden by model resolution."
+          },
+          {
+            "name": "mileage",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            },
+            "description": "narrows to a mileage band; auto-widens if thin"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "low/average/median/high + sample size + confidence; by_province (n, avg price, avg mileage); by_mileage_band (mileage strata: n, low/avg/median/high, avg mileage); by_province_mileage_band (mileage strata within each province)"
+          },
+          "400": {
+            "description": "Missing/invalid required param (year/make/model/condition)"
+          },
+          "403": {
+            "description": "`upgrade_required` — not included on this key's plan; or `mcp_only_plan` — Agent and Analyst keys are MCP-only and have no REST access"
+          }
+        }
+      }
+    },
+    "/v1/feed": {
+      "get": {
+        "summary": "Bulk syndication export",
+        "description": "Bulk export for mirroring the dataset is available either per province or Canada Wide.",
+        "parameters": [
+          {
+            "name": "province",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "oem",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "condition",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "make",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "opaque next_cursor from the previous page (Feed/Enterprise only)"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 1000,
+              "maximum": 1500
+            },
+            "description": "Feed/Enterprise: up to 1,500/page. Other plans: capped at 10."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "count, limit, next_cursor, results[]; trial+upgrade fields on non-Feed plans"
+          }
+        }
+      }
+    },
+    "/v1/usage": {
+      "get": {
+        "summary": "Your account: this billing period's usage + expected next charge",
+        "description": "Returns this calendar month's call count and per-endpoint breakdown (real-time, from the usage meter), `call_allowance` — the hard-stop monthly call allowance and what is left of it, on the plans that have one (on Personal and Pro it is the market-question meter) — an `mcp` object, and the upcoming invoice amount + date from Stripe (metered/subscription plans).\n\nThe `mcp` object carries `unique_vehicles_per_month` and `unique_vehicles_disclosed` (the monthly distinct-vehicle ceiling and how much of it you have used), `billed_metric` — `calls` or `vehicles`, i.e. what the plan actually meters — `rows_per_call` (10 on Personal and Pro) and `stats_scope`. On Personal and Pro, `mcp.meters` reports the three independent allowances — `listings`, `price_checks`, `market_questions` — each as `{cap, used, remaining}`. Statistics may scan the whole dataset, so only row-level records returned move `unique_vehicles_disclosed`. `unique_vins_per_month` / `unique_vins_disclosed` are kept as legacy aliases of the two vehicle counters. `free_quota` is likewise a legacy alias of the `call_allowance` block for the retired free keys still in circulation.\n\nOn the prepaid **Starter** plan a `credits` object is also returned: `remaining` (call credits left), `expires_next` (the date the soonest-expiring credits are forfeited), `burn_per_day_30d`, `projected_exhaustion`, `runs_out_on` (whichever of those two comes first) and a `lots` array with one entry per purchase or grant, each carrying its own expiry date. Every billable response on a credit key also carries `X-Omnia-Credits-Remaining` and `X-Omnia-Credits-Expire` headers, so a client does not have to call this endpoint to watch its balance. At zero the API answers `402 credits_exhausted` with a top-up link. Not billed and never quota-blocked, and reachable from every plan including MCP-only Agent and Analyst keys.",
+        "responses": {
+          "200": {
+            "description": "usage + call_allowance (legacy alias: free_quota) + mcp (unique_vehicles_per_month, unique_vehicles_disclosed, billed_metric, rows_per_call, aggregates; legacy aliases unique_vins_per_month / unique_vins_disclosed) + next_invoice"
+          },
+          "401": {
+            "description": "Missing/invalid key"
+          }
+        }
+      }
+    },
+    "/v1/webhooks": {
+      "get": {
+        "summary": "List your webhooks",
+        "operationId": "listWebhooks",
+        "tags": [
+          "Webhooks"
+        ],
+        "description": "Every saved-query subscription on your key, with its last delivery status.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Your webhook subscriptions"
+          }
+        }
+      },
+      "post": {
+        "summary": "Register a saved-query webhook",
+        "operationId": "createWebhook",
+        "tags": [
+          "Webhooks"
+        ],
+        "description": "Register a search and a URL. When a listing that matches first appears, it is POSTed to your URL — no polling.\n\nThe body is `{\"webhook_id\", \"query\", \"count\", \"listings\"}`, where each listing uses the same schema as /v1/listings. Every delivery carries `X-Omnia-Signature: sha256=<hex HMAC of the raw body>`, keyed with the secret returned once at creation — verify it with a constant-time comparison before trusting the payload.\n\nA new subscription starts from the moment you create it; it does not replay history. Deliveries retry until they succeed, so a 5xx on your side is resent rather than lost, and a URL that fails 10 times in a row is parked. Your URL must be public HTTPS. Limit 10 active webhooks per key.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "url"
+                ],
+                "properties": {
+                  "url": {
+                    "type": "string",
+                    "format": "uri",
+                    "example": "https://example.com/hooks/omnia"
+                  },
+                  "query": {
+                    "type": "object",
+                    "description": "Any /v1/listings filter: province, make, model, trim, year, condition, body_type, drivetrain, fuel_type, city, oem, price_min/max, mileage_min/max, year_min/max.",
+                    "example": {
+                      "province": "AB",
+                      "make": "Ford",
+                      "condition": "New"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created — the signing secret is returned ONCE"
+          },
+          "400": {
+            "description": "Bad url or unsupported filter"
+          },
+          "409": {
+            "description": "Too many active webhooks"
+          }
+        }
+      }
+    },
+    "/v1/webhooks/{id}": {
+      "delete": {
+        "summary": "Delete a webhook",
+        "operationId": "deleteWebhook",
+        "tags": [
+          "Webhooks"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Deleted"
+          },
+          "404": {
+            "description": "No such webhook on this key"
+          }
+        }
+      },
+      "patch": {
+        "summary": "Update a webhook",
+        "operationId": "updateWebhook",
+        "tags": [
+          "Webhooks"
+        ],
+        "description": "Change the url, query or active flag without losing your place in the stream. Delete-and-recreate would reset the subscription to start from now, so anything that appeared in the gap would never be delivered.\n\nThe delivery position is preserved even when you widen the query: a subscription's position is a point in time, not a set of rows. Re-activating a parked webhook clears its failure count.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "url": {
+                    "type": "string",
+                    "format": "uri"
+                  },
+                  "query": {
+                    "type": "object"
+                  },
+                  "active": {
+                    "type": "boolean"
+                  }
+                },
+                "example": {
+                  "url": "https://example.com/hooks/omnia-v2",
+                  "active": true
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated"
+          },
+          "400": {
+            "description": "Bad url, unsupported filter, or nothing to update"
+          },
+          "404": {
+            "description": "No such webhook on this key"
+          }
+        }
+      }
+    },
+    "/v1/webhooks/{id}/deliveries": {
+      "get": {
+        "summary": "Delivery history for a webhook",
+        "operationId": "webhookDeliveries",
+        "tags": [
+          "Webhooks"
+        ],
+        "description": "Every delivery attempt: UTC timestamp, how many listings were sent, the HTTP status your endpoint returned, round-trip milliseconds, and the error if it failed. Use it to confirm what we sent and when, rather than taking our word for it.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 50,
+              "maximum": 200
+            },
+            "description": "Attempts to return, newest first."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Delivery attempts, newest first"
+          },
+          "404": {
+            "description": "No such webhook on this key"
+          }
+        }
+      }
+    },
+    "/v1/recalls": {
+      "get": {
+        "summary": "Safety recalls for a make/model/year — Transport Canada + NHTSA, never merged",
+        "description": "Open safety recalls from both jurisdictions. Transport Canada is authoritative for a Canadian vehicle; NHTSA is supplementary US context and is genuinely complementary — measured, a 2021 RAV4 has 5 Transport Canada campaigns against 1 at NHTSA, while a 2019 Ram 1500 has 21 against 30. Neither source is a superset of the other.\n\n**Matching is model-level, not VIN-level.** Transport Canada publishes no VIN-level recall lookup, so nobody in Canada can say whether a specific VIN has an open recall without the manufacturer's own portal. An open recall listed here may already have been remedied on that particular vehicle.\n\n**Campaigns are linked, never merged.** Where the same manufacturer campaign appears in both registers, each record carries `linked_to` with a `match_confidence` of `exact` or `probable`. Rows are never collapsed: a false merge would hide a safety notice, while a duplicate merely looks untidy.\n\nAvailable on every plan.",
+        "parameters": [
+          {
+            "name": "make",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Vehicle make, e.g. Honda."
+          },
+          {
+            "name": "model",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Vehicle model. Omit to get every recall for the make."
+          },
+          {
+            "name": "year",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            },
+            "description": "Model year."
+          },
+          {
+            "name": "source",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "canada",
+                "us"
+              ]
+            },
+            "description": "Limit to one register."
+          },
+          {
+            "name": "match",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Comma-separated match tiers to include; defaults to all three. `exact` — the model names agree. `family` — our model name is more specific than theirs (\"Sierra 1500\" against their \"SIERRA\"), so their campaign covers this vehicle. `variant` — theirs is more specific than ours (\"RX\" against \"RX350\"), so the campaign may cover only that variant. Every returned recall reports the tier it matched on."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "`recalls[]` with jurisdiction, campaign number, date, affected system, description and `linked_to`; `counts` by jurisdiction; `match` including the tiers present and the VIN-level caveat; `coverage` stating whether NHTSA has been indexed for this vehicle yet — `not_yet_indexed` is reported honestly rather than as a zero."
+          },
+          "400": {
+            "description": "`make` missing, or an unknown `match`/`source` value"
+          }
+        }
+      }
+    },
+    "/v1/recalls/status": {
+      "get": {
+        "summary": "Recall data freshness — what is held, from when, and when it was last checked",
+        "description": "Published so a caller deciding whether to trust an empty result can see when we last looked, not merely that we looked.",
+        "responses": {
+          "200": {
+            "description": "Row and campaign counts per register, the newest recall date in each, how many make/model/year combinations have been checked against NHTSA, link counts by confidence tier, and the last ingest run per source."
+          }
+        }
+      }
+    },
+    "/v1/payment": {
+      "get": {
+        "summary": "Estimated monthly payment including Canadian vehicle taxes",
+        "description": "Financing arithmetic plus provincial vehicle tax for one transaction. Pass `price` and `province`, or a `vin` from our data and we fill both in.\n\n**The interest rate is always an input.** There is no public source for Canadian auto-loan APRs — the Bank of Canada publishes policy and prime only, and we hold no finance data — so we never imply we know a buyer's rate. Supply `apr`, or name a `rate_source` from `/v1/payment/rates`. Every response echoes `rate_source` naming who answered, so a future lender feed becomes a new source rather than a breaking change.\n\n**Everything here is an estimate, not tax advice.** Provincial vehicle tax is not one rate: Alberta charges GST only; Ontario charges HST at a dealer but 13% RST on the greater of price or wholesale value on a private sale; British Columbia runs six luxury brackets with different private-sale rules; Quebec stacks QST on GST. The federal luxury tax applies above CA$100,000 on new vehicles. The table is versioned — `taxes.as_of` is the date it was last reviewed.",
+        "parameters": [
+          {
+            "name": "price",
+            "in": "query",
+            "schema": {
+              "type": "number"
+            },
+            "description": "Vehicle price in CAD. Required unless `vin` is given."
+          },
+          {
+            "name": "vin",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "VIN of a live listing; fills in price, province and condition."
+          },
+          {
+            "name": "province",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Two-letter province or territory. Required unless supplied by `vin`."
+          },
+          {
+            "name": "apr",
+            "in": "query",
+            "schema": {
+              "type": "number"
+            },
+            "description": "Annual interest rate, percent. Sets `rate_source=caller`."
+          },
+          {
+            "name": "rate_source",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Which resolver supplies the rate. `caller` uses your `apr`; `boc_prime` / `boc_policy` use the cached Bank of Canada benchmark plus your `rate_spread`. Enumerate the live list at /v1/payment/rates."
+          },
+          {
+            "name": "rate_spread",
+            "in": "query",
+            "schema": {
+              "type": "number"
+            },
+            "description": "Points added to a benchmark rate source. Your assumption, not ours."
+          },
+          {
+            "name": "term_months",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            },
+            "description": "Loan term, 1-120. Default 60."
+          },
+          {
+            "name": "down_payment",
+            "in": "query",
+            "schema": {
+              "type": "number"
+            },
+            "description": "Cash down in CAD."
+          },
+          {
+            "name": "trade_in",
+            "in": "query",
+            "schema": {
+              "type": "number"
+            },
+            "description": "Trade-in value in CAD. Reduces the taxable amount at a dealer."
+          },
+          {
+            "name": "fees",
+            "in": "query",
+            "schema": {
+              "type": "number"
+            },
+            "description": "Taxable dealer fees in CAD (documentation, freight)."
+          },
+          {
+            "name": "sale_type",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "dealer",
+                "private"
+              ]
+            },
+            "description": "Dealer or private sale — the tax differs, sometimes greatly."
+          },
+          {
+            "name": "condition",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "new or used. Decides whether the federal luxury tax applies."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "`taxes` with every line itemised, the taxable amount, the table's `as_of` date, the source and province-specific notes; `rate` with the APR and the `rate_source` that supplied it; `financing` with the amount financed, monthly payment, total paid and total interest; `total_cost`; and a disclaimer."
+          },
+          "400": {
+            "description": "Missing price/province, an unknown province, or no rate supplied"
+          },
+          "404": {
+            "description": "`vin` matched no live listing"
+          }
+        }
+      }
+    },
+    "/v1/payment/rates": {
+      "get": {
+        "summary": "Available rate sources, cached benchmarks, and the tax table version",
+        "description": "Discovery surface for the pluggable rate resolver: read it to see what may be passed as `rate_source`. A future lender feed appears here without any change to /v1/payment's contract.",
+        "responses": {
+          "200": {
+            "description": "`rate_sources[]`, `reference_rates[]` (series, label, rate, as-of date, source URL), and `tax_table.as_of` with the provinces covered."
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "API key as 'Authorization: Bearer <key>'"
+      }
+    }
+  },
+  "security": [
+    {
+      "bearerAuth": []
+    }
+  ]
+}
