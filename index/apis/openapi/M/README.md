@@ -1,6 +1,6 @@
 # APIs — M
 
-Browsing 302 APIs starting with **M**.
+Browsing 303 APIs starting with **M**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · **M** · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -41,6 +41,7 @@ Browsing 302 APIs starting with **M**.
 | [maintenanceconnection.com](../../../../apis/openapi/maintenanceconnection.com) | [main](../../../../apis/openapi/maintenanceconnection.com/main) |
 | [majestic.com](../../../../apis/openapi/majestic.com) | [main](../../../../apis/openapi/majestic.com/main) |
 | [makeplans.net](../../../../apis/openapi/makeplans.net) | [main](../../../../apis/openapi/makeplans.net/main) |
+| [makeswift.com](../../../../apis/openapi/makeswift.com) | [main](../../../../apis/openapi/makeswift.com/main) |
 | [malga.io](../../../../apis/openapi/malga.io) | [main](../../../../apis/openapi/malga.io/main) |
 | [malma.ai](../../../../apis/openapi/malma.ai) | [main](../../../../apis/openapi/malma.ai/main) |
 | [malpedia.caad.fkie.fraunhofer.de](../../../../apis/openapi/malpedia.caad.fkie.fraunhofer.de) | [main](../../../../apis/openapi/malpedia.caad.fkie.fraunhofer.de/main) |
