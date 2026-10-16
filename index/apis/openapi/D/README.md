@@ -1,6 +1,6 @@
 # APIs — D
 
-Browsing 203 APIs starting with **D**.
+Browsing 204 APIs starting with **D**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · **D** · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -13,6 +13,7 @@ Browsing 203 APIs starting with **D**.
 | [dagpi.xyz](../../../../apis/openapi/dagpi.xyz) | [main](../../../../apis/openapi/dagpi.xyz/main) |
 | [dagster.io](../../../../apis/openapi/dagster.io) | [main](../../../../apis/openapi/dagster.io/main) |
 | [daily.dev](../../../../apis/openapi/daily.dev) | [main](../../../../apis/openapi/daily.dev/main) |
+| [daishi.ai](../../../../apis/openapi/daishi.ai) | [main](../../../../apis/openapi/daishi.ai/main) |
 | [daktela.com](../../../../apis/openapi/daktela.com) | [daktela-api](../../../../apis/openapi/daktela.com/daktela-api) |
 | [dalenys.com](../../../../apis/openapi/dalenys.com) | [main](../../../../apis/openapi/dalenys.com/main) |
 | [dalil-ai.supabase.co](../../../../apis/openapi/dalil-ai.supabase.co) | [main](../../../../apis/openapi/dalil-ai.supabase.co/main) |
