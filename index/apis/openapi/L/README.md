@@ -1,6 +1,6 @@
 # APIs — L
 
-Browsing 127 APIs starting with **L**.
+Browsing 128 APIs starting with **L**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · **L** · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -32,6 +32,7 @@ Browsing 127 APIs starting with **L**.
 | [lazyads.ai](../../../../apis/openapi/lazyads.ai) | [main](../../../../apis/openapi/lazyads.ai/main) |
 | [lcboapi.com](../../../../apis/openapi/lcboapi.com) | [main](../../../../apis/openapi/lcboapi.com/main) |
 | [leadboxer.com](../../../../apis/openapi/leadboxer.com) | [main](../../../../apis/openapi/leadboxer.com/main) |
+| [leadpages.net](../../../../apis/openapi/leadpages.net) | [main](../../../../apis/openapi/leadpages.net/main) |
 | [leap.energy](../../../../apis/openapi/leap.energy) | [main](../../../../apis/openapi/leap.energy/main) |
 | [leapsome.com](../../../../apis/openapi/leapsome.com) | [main](../../../../apis/openapi/leapsome.com/main) |
 | [learnifier.com](../../../../apis/openapi/learnifier.com) | [learnifier](../../../../apis/openapi/learnifier.com/learnifier) · [main](../../../../apis/openapi/learnifier.com/main) |
