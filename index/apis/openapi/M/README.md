@@ -1,6 +1,6 @@
 # APIs — M
 
-Browsing 303 APIs starting with **M**.
+Browsing 304 APIs starting with **M**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · **M** · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -27,6 +27,7 @@ Browsing 303 APIs starting with **M**.
 | [mailerlite.com](../../../../apis/openapi/mailerlite.com) | [main](../../../../apis/openapi/mailerlite.com/main) |
 | [mailersend.com](../../../../apis/openapi/mailersend.com) | [main](../../../../apis/openapi/mailersend.com/main) |
 | [mailfloss.com](../../../../apis/openapi/mailfloss.com) | [main](../../../../apis/openapi/mailfloss.com/main) |
+| [mailfornet.com](../../../../apis/openapi/mailfornet.com) | [main](../../../../apis/openapi/mailfornet.com/main) |
 | [mailglyph.com](../../../../apis/openapi/mailglyph.com) | [main](../../../../apis/openapi/mailglyph.com/main) |
 | [mailinabox.email](../../../../apis/openapi/mailinabox.email) | [main](../../../../apis/openapi/mailinabox.email/main) |
 | [mailinapp.com](../../../../apis/openapi/mailinapp.com) | [main](../../../../apis/openapi/mailinapp.com/main) |
