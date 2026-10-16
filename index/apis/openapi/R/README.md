@@ -1,6 +1,6 @@
 # APIs — R
 
-Browsing 265 APIs starting with **R**.
+Browsing 266 APIs starting with **R**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · **R** · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -225,6 +225,7 @@ Browsing 265 APIs starting with **R**.
 | [roezan.com](../../../../apis/openapi/roezan.com) | [main](../../../../apis/openapi/roezan.com/main) |
 | [rollbar.com](../../../../apis/openapi/rollbar.com) | [main](../../../../apis/openapi/rollbar.com/main) |
 | [roma.app](../../../../apis/openapi/roma.app) | [main](../../../../apis/openapi/roma.app/main) |
+| [rombik.app](../../../../apis/openapi/rombik.app) | [main](../../../../apis/openapi/rombik.app/main) |
 | [romulus.live](../../../../apis/openapi/romulus.live) | [main](../../../../apis/openapi/romulus.live/main) |
 | [ron-swanson-quotes.herokuapp.com](../../../../apis/openapi/ron-swanson-quotes.herokuapp.com) | [main](../../../../apis/openapi/ron-swanson-quotes.herokuapp.com/main) |
 | [rook-connect.com](../../../../apis/openapi/rook-connect.com) | [main](../../../../apis/openapi/rook-connect.com/main) |
