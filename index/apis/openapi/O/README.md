@@ -1,6 +1,6 @@
 # APIs — O
 
-Browsing 201 APIs starting with **O**.
+Browsing 202 APIs starting with **O**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · **O** · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -46,6 +46,7 @@ Browsing 201 APIs starting with **O**.
 | [omdbapi.com](../../../../apis/openapi/omdbapi.com) | [main](../../../../apis/openapi/omdbapi.com/main) |
 | [ometria.com](../../../../apis/openapi/ometria.com) | [data-api](../../../../apis/openapi/ometria.com/data-api) |
 | [omise.co](../../../../apis/openapi/omise.co) | [main](../../../../apis/openapi/omise.co/main) |
+| [omniaauto.ca](../../../../apis/openapi/omniaauto.ca) | [main](../../../../apis/openapi/omniaauto.ca/main) |
 | [omnidots.com](../../../../apis/openapi/omnidots.com) | [main](../../../../apis/openapi/omnidots.com/main) |
 | [omnimind.ai](../../../../apis/openapi/omnimind.ai) | [main](../../../../apis/openapi/omnimind.ai/main) |
 | [omnipush.io](../../../../apis/openapi/omnipush.io) | [main](../../../../apis/openapi/omnipush.io/main) |
