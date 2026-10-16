@@ -1,6 +1,6 @@
 # APIs — A
 
-Browsing 473 APIs starting with **A**.
+Browsing 474 APIs starting with **A**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · **A** · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -405,6 +405,7 @@ Browsing 473 APIs starting with **A**.
 | [askell.is](../../../../apis/openapi/askell.is) | [main](../../../../apis/openapi/askell.is/main) |
 | [askmiso.com](../../../../apis/openapi/askmiso.com) | [main](../../../../apis/openapi/askmiso.com/main) |
 | [asknicely.asknice.ly](../../../../apis/openapi/asknicely.asknice.ly) | [main](../../../../apis/openapi/asknicely.asknice.ly/main) |
+| [asoskill.com](../../../../apis/openapi/asoskill.com) | [main](../../../../apis/openapi/asoskill.com/main) |
 | [assembly.com](../../../../apis/openapi/assembly.com) | [main](../../../../apis/openapi/assembly.com/main) |
 | [assemblyai.com](../../../../apis/openapi/assemblyai.com) | [main](../../../../apis/openapi/assemblyai.com/main) |
 | [assertible.com](../../../../apis/openapi/assertible.com) | [main](../../../../apis/openapi/assertible.com/main) |
