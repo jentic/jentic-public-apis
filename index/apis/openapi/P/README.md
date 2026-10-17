@@ -1,6 +1,6 @@
 # APIs — P
 
-Browsing 354 APIs starting with **P**.
+Browsing 355 APIs starting with **P**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · **P** · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -211,6 +211,7 @@ Browsing 354 APIs starting with **P**.
 | [platform.mattel](../../../../apis/openapi/platform.mattel) | [main](../../../../apis/openapi/platform.mattel/main) |
 | [plaud.ai](../../../../apis/openapi/plaud.ai) | [main](../../../../apis/openapi/plaud.ai/main) |
 | [plausible.io](../../../../apis/openapi/plausible.io) | [main](../../../../apis/openapi/plausible.io/main) |
+| [play.ht](../../../../apis/openapi/play.ht) | [main](../../../../apis/openapi/play.ht/main) |
 | [playcanvas.com](../../../../apis/openapi/playcanvas.com) | [main](../../../../apis/openapi/playcanvas.com/main) |
 | [pleo.io](../../../../apis/openapi/pleo.io) | [main](../../../../apis/openapi/pleo.io/main) |
 | [plex.tv](../../../../apis/openapi/plex.tv) | [main](../../../../apis/openapi/plex.tv/main) |
