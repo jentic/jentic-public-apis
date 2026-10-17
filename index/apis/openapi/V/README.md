@@ -1,6 +1,6 @@
 # APIs — V
 
-Browsing 66 APIs starting with **V**.
+Browsing 67 APIs starting with **V**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · **V** · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -55,6 +55,7 @@ Browsing 66 APIs starting with **V**.
 | [vmware.local](../../../../apis/openapi/vmware.local) | [vrni](../../../../apis/openapi/vmware.local/vrni) |
 | [vnpay.vn](../../../../apis/openapi/vnpay.vn) | [main](../../../../apis/openapi/vnpay.vn/main) |
 | [vocadb.net](../../../../apis/openapi/vocadb.net) | [main](../../../../apis/openapi/vocadb.net/main) |
+| [voicefusion.com](../../../../apis/openapi/voicefusion.com) | [main](../../../../apis/openapi/voicefusion.com/main) |
 | [voicegram.io](../../../../apis/openapi/voicegram.io) | [main](../../../../apis/openapi/voicegram.io/main) |
 | [voipstudio.com](../../../../apis/openapi/voipstudio.com) | [main](../../../../apis/openapi/voipstudio.com/main) |
 | [voiso.com](../../../../apis/openapi/voiso.com) | [main](../../../../apis/openapi/voiso.com/main) |
