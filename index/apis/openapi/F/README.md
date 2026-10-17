@@ -1,6 +1,6 @@
 # APIs — F
 
-Browsing 156 APIs starting with **F**.
+Browsing 157 APIs starting with **F**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · **F** · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -39,6 +39,7 @@ Browsing 156 APIs starting with **F**.
 | [fecru.local](../../../../apis/openapi/fecru.local) | [main](../../../../apis/openapi/fecru.local/main) |
 | [fedex.com](../../../../apis/openapi/fedex.com) | [main](../../../../apis/openapi/fedex.com/main) |
 | [feedblitz.com](../../../../apis/openapi/feedblitz.com) | [main](../../../../apis/openapi/feedblitz.com/main) |
+| [feedbucket.app](../../../../apis/openapi/feedbucket.app) | [main](../../../../apis/openapi/feedbucket.app/main) |
 | [feedier.com](../../../../apis/openapi/feedier.com) | [main](../../../../apis/openapi/feedier.com/main) |
 | [feedly.com](../../../../apis/openapi/feedly.com) | [main](../../../../apis/openapi/feedly.com/main) |
 | [feefo.com](../../../../apis/openapi/feefo.com) | [main](../../../../apis/openapi/feefo.com/main) |
