@@ -1,0 +1,1319 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Hermoso MCP server and OAuth (not the REST API)",
+    "version": "1.0.0",
+    "summary": "The Hermoso MCP endpoint and its OAuth documents. The REST API at /v1 is described by its own spec, generated from the router: https://app.hermoso.ai/openapi.json",
+    "description": "Hermoso is an AI marketing studio built to be driven by an agent. The **public programmatic interface is a Model Context Protocol (MCP) server** at `POST https://app.hermoso.ai/mcp`, speaking JSON-RPC 2.0 over the MCP Streamable HTTP transport. One connection exposes the whole loop as tools: research the ads running in a market, generate finished on-brand image and video ads, publish or schedule them to the brand's own channels, and build and read paid campaigns.\n\n**This document describes the MCP endpoint and the OAuth documents around it, and nothing else.** It is deliberately small, because the MCP surface genuinely is: the tools are not separate REST paths, they are `tools/call` methods on the single MCP endpoint. Call `tools/list` after `initialize` to enumerate them, or read the generated roster at <https://hermoso.ai/docs/reference/tools.json>.\n\n**There is also a public REST API, and it has its own document.** `/v1` covers publishing, scheduling, media, channels and credits on the same `hmk_` bearer token, and an agent with no account can provision one on a paid plan with `POST /v1/signup`. It is not described here, deliberately: its OpenAPI document is GENERATED from the same operations table the router is mounted from, so a second hand-written copy would be a second thing to go stale. Read it at <https://app.hermoso.ai/openapi.json> (live, authoritative) or <https://hermoso.ai/docs/reference/openapi.json> (static copy), and the prose at <https://hermoso.ai/docs/api/>. `/v1` sends no CORS headers either, on purpose: an API key carries full account authority.\n\n**What genuinely has no contract are the routes under `/api` on the app.** They are shaped for our own web client, they authenticate with a browser session, and they change frequently. They are not documented anywhere because building against them will break. Use `/v1`, MCP or the npm CLI (`npm install -g hermoso`).\n\n## Authenticating\n\nTwo methods, both bearer tokens on the `Authorization` header:\n\n- **OAuth 2.1 authorization code + PKCE** — the path an MCP client takes. Dynamic client registration is open (RFC 7591), so a client can register itself with no pre-arranged credentials. Discovery follows RFC 9728 and RFC 8414: the `401` from `/mcp` carries a `WWW-Authenticate: Bearer resource_metadata=\"…\"` header pointing at the protected-resource document.\n- **Agent key** — a long-lived `hmk_…` token minted at app.hermoso.ai → MCP & CLI → Terminal & API keys, for scripts and headless agents.\n\n`initialize` answers without a token so a client can discover the server before authenticating. `tools/call` requires one.\n\n## Errors\n\nEvery failure has the same JSON shape — `error` (a human-safe string), an optional `connector` key naming a provider that is not linked, and an optional `meta` object of machine-readable hints. The one rule worth memorising: **a 401 without a `connector` field means your key is bad; a 401 with one means that provider is not connected.** Branch on the field's presence, never on the message text. Full contract: <https://hermoso.ai/docs/errors/>.\n\n## Costs\n\nGeneration is metered in credits with exact published per-render prices. Call the `hermoso_capabilities` tool — free and read-only — before rendering: it returns the valid model ids with their exact credit costs and what this workspace has connected. Machine-readable price list: <https://hermoso.ai/costs.md>.",
+    "termsOfService": "https://hermoso.ai/terms/",
+    "contact": {
+      "name": "Hermoso support",
+      "email": "admin@hermoso.ai",
+      "url": "https://hermoso.ai/contact/"
+    },
+    "license": {
+      "name": "Proprietary",
+      "url": "https://hermoso.ai/terms/"
+    },
+    "x-jentic-source-url": "https://hermoso.ai/openapi.json"
+  },
+  "servers": [
+    {
+      "url": "https://app.hermoso.ai",
+      "description": "Production"
+    }
+  ],
+  "paths": {
+    "/mcp": {
+      "summary": "MCP Streamable HTTP endpoint",
+      "description": "The single endpoint every Hermoso tool is called through, using the MCP Streamable HTTP transport.",
+      "post": {
+        "operationId": "mcpSendRequest",
+        "tags": [
+          "MCP"
+        ],
+        "summary": "Send a JSON-RPC request to the MCP server",
+        "description": "Sends one JSON-RPC 2.0 message to the Hermoso MCP server and returns its reply.\n\nThe usual sequence is `initialize` (which answers without a token, so a client can discover the server first), then `tools/list` to enumerate the available tools, then `tools/call` to run one. `resources/list` and `resources/read` expose the workspace's readable resources.\n\nThe reply is `application/json` for a single response, or `text/event-stream` when the server streams progress notifications before the result — set `Accept: application/json, text/event-stream` and handle both. The server returns an `Mcp-Session-Id` header on `initialize`; send it back on every subsequent request in the session.\n\nLong-running work (a video render) is a job: the tool returns a job id immediately and the agent polls `get_job`.",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "oauth2": [
+              "hermoso.research",
+              "hermoso.generate"
+            ]
+          },
+          {}
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/McpSessionId"
+          },
+          {
+            "$ref": "#/components/parameters/McpProtocolVersion"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "description": "A single JSON-RPC 2.0 request object.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/JsonRpcRequest"
+              },
+              "examples": {
+                "initialize": {
+                  "summary": "Handshake (no token required)",
+                  "value": {
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "initialize",
+                    "params": {
+                      "protocolVersion": "2025-06-18",
+                      "capabilities": {},
+                      "clientInfo": {
+                        "name": "my-agent",
+                        "version": "1.0.0"
+                      }
+                    }
+                  }
+                },
+                "toolsList": {
+                  "summary": "Enumerate the available tools",
+                  "value": {
+                    "jsonrpc": "2.0",
+                    "id": 2,
+                    "method": "tools/list",
+                    "params": {}
+                  }
+                },
+                "toolsCall": {
+                  "summary": "Run a tool (free, read-only example)",
+                  "value": {
+                    "jsonrpc": "2.0",
+                    "id": 3,
+                    "method": "tools/call",
+                    "params": {
+                      "name": "hermoso_capabilities",
+                      "arguments": {}
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The JSON-RPC reply. A JSON-RPC-level failure is reported in the `error` member of a 200 body; transport and auth failures use the HTTP status codes below.",
+            "headers": {
+              "Mcp-Session-Id": {
+                "description": "Returned on `initialize`. Echo it back on every subsequent request in this session.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JsonRpcResponse"
+                }
+              },
+              "text/event-stream": {
+                "schema": {
+                  "type": "string",
+                  "description": "Server-sent events, each `data:` line carrying one JSON-RPC message."
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "402": {
+            "$ref": "#/components/responses/PaymentRequired"
+          },
+          "404": {
+            "$ref": "#/components/responses/SessionNotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      },
+      "get": {
+        "operationId": "mcpOpenEventStream",
+        "tags": [
+          "MCP"
+        ],
+        "summary": "Open the server-to-client event stream",
+        "description": "Opens a Server-Sent Events stream so the server can push notifications and responses that are not the direct reply to a request. Requires an authenticated session; send the `Mcp-Session-Id` returned by `initialize`.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/McpSessionId"
+          },
+          {
+            "name": "Last-Event-ID",
+            "in": "header",
+            "required": false,
+            "description": "Resume a dropped stream from the last event the client received.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "An open SSE stream.",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "type": "string",
+                  "description": "Server-sent events, each `data:` line carrying one JSON-RPC message."
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/SessionNotFound"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "mcpEndSession",
+        "tags": [
+          "MCP"
+        ],
+        "summary": "End the MCP session",
+        "description": "Explicitly terminates the session named by `Mcp-Session-Id` and releases its server-side state. Sessions also expire on their own after a period of inactivity, so this is a courtesy rather than a requirement.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/McpSessionId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The session was terminated and its server-side state released."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/SessionNotFound"
+          }
+        }
+      }
+    },
+    "/.well-known/mcp.json": {
+      "get": {
+        "operationId": "getMcpServerCard",
+        "tags": [
+          "Discovery"
+        ],
+        "summary": "Get the MCP server card",
+        "description": "The server's own description in the Model Context Protocol server schema: its name, what it does, the remote Streamable HTTP URL, and the npm package that runs it over stdio. Generated live from the running server, so it is authoritative if it ever disagrees with the prose on the website.",
+        "security": [
+          {}
+        ],
+        "responses": {
+          "200": {
+            "description": "The server card.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/McpServerCard"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/.well-known/oauth-protected-resource": {
+      "get": {
+        "operationId": "getProtectedResourceMetadata",
+        "tags": [
+          "Discovery",
+          "OAuth"
+        ],
+        "summary": "Get OAuth protected-resource metadata (RFC 9728)",
+        "description": "Names the resource an access token must be audience-bound to, the authorization servers that may issue one, and the scopes this resource understands. An unauthenticated request to `/mcp` points here from its `WWW-Authenticate` header, which is how a client bootstraps the whole flow knowing only the MCP URL.",
+        "security": [
+          {}
+        ],
+        "responses": {
+          "200": {
+            "description": "Protected-resource metadata.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProtectedResourceMetadata"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/.well-known/oauth-authorization-server": {
+      "get": {
+        "operationId": "getAuthorizationServerMetadata",
+        "tags": [
+          "Discovery",
+          "OAuth"
+        ],
+        "summary": "Get OAuth authorization server metadata (RFC 8414)",
+        "description": "The authorization, token and dynamic-registration endpoints, the grant and response types supported, the PKCE methods accepted, and the scopes on offer. Everything a client needs to run the flow without being configured by hand.",
+        "security": [
+          {}
+        ],
+        "responses": {
+          "200": {
+            "description": "Authorization server metadata.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthorizationServerMetadata"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/oauth/register": {
+      "post": {
+        "operationId": "registerOAuthClient",
+        "tags": [
+          "OAuth"
+        ],
+        "summary": "Register an OAuth client dynamically (RFC 7591)",
+        "description": "Registration is open: any MCP client can register itself and receive a `client_id` with no pre-arranged credentials and no approval step. Clients are public — `token_endpoint_auth_method` is `none` — so PKCE is what protects the exchange, and no client secret is issued.",
+        "security": [
+          {}
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClientRegistrationRequest"
+              },
+              "example": {
+                "client_name": "My agent",
+                "redirect_uris": [
+                  "https://example.com/oauth/callback"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The registered client.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClientRegistrationResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "The registered client.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClientRegistrationResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/OAuthError"
+          }
+        }
+      }
+    },
+    "/oauth/authorize": {
+      "get": {
+        "operationId": "startAuthorization",
+        "tags": [
+          "OAuth"
+        ],
+        "summary": "Start the authorization code flow",
+        "description": "A browser endpoint: it renders Hermoso's sign-in and consent screen and then redirects back to `redirect_uri` with a `code`. **An agent cannot complete this step headlessly** — it needs a human at a browser. A headless agent should use an `hmk_…` agent key instead, minted at app.hermoso.ai → MCP & CLI → Terminal & API keys.",
+        "security": [
+          {}
+        ],
+        "parameters": [
+          {
+            "name": "response_type",
+            "in": "query",
+            "required": true,
+            "description": "Must be `code`.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "code"
+              ]
+            }
+          },
+          {
+            "name": "client_id",
+            "in": "query",
+            "required": true,
+            "description": "The `client_id` returned by dynamic registration.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "redirect_uri",
+            "in": "query",
+            "required": true,
+            "description": "One of the URIs registered for this client.",
+            "schema": {
+              "type": "string",
+              "format": "uri"
+            }
+          },
+          {
+            "name": "code_challenge",
+            "in": "query",
+            "required": true,
+            "description": "PKCE challenge derived from the client's verifier.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "code_challenge_method",
+            "in": "query",
+            "required": true,
+            "description": "Must be `S256`; `plain` is not accepted.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "S256"
+              ]
+            }
+          },
+          {
+            "name": "scope",
+            "in": "query",
+            "required": false,
+            "description": "Space-separated scopes.",
+            "schema": {
+              "type": "string",
+              "examples": [
+                "hermoso.research hermoso.generate"
+              ]
+            }
+          },
+          {
+            "name": "state",
+            "in": "query",
+            "required": false,
+            "description": "Opaque value echoed back on the redirect, for CSRF protection.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "resource",
+            "in": "query",
+            "required": false,
+            "description": "The resource the token should be bound to (RFC 8707).",
+            "schema": {
+              "type": "string",
+              "format": "uri"
+            }
+          }
+        ],
+        "responses": {
+          "302": {
+            "description": "Redirect back to `redirect_uri` carrying `code` and `state`.",
+            "headers": {
+              "Location": {
+                "description": "The callback URL with the authorization code.",
+                "schema": {
+                  "type": "string",
+                  "format": "uri"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "The sign-in and consent page, as HTML.",
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "A required parameter is missing or invalid.",
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/oauth/token": {
+      "post": {
+        "operationId": "exchangeAuthorizationCode",
+        "tags": [
+          "OAuth"
+        ],
+        "summary": "Exchange an authorization code for an access token",
+        "description": "Exchanges the `code` from the redirect for a bearer access token, proving possession of the PKCE verifier. `authorization_code` is the only grant type supported: there is no client-credentials grant, because every token is bound to a person's workspace.",
+        "security": [
+          {}
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TokenRequest"
+              }
+            },
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "$ref": "#/components/schemas/TokenRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The access token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TokenResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/OAuthError"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "A Hermoso agent key (`hmk_…`), minted at app.hermoso.ai → MCP & CLI → Terminal & API keys. Sent as `Authorization: Bearer hmk_…`. A key is pinned to one brand workspace, and that pin is re-authorised on the server for every request — it is never read off a header the caller controls."
+      },
+      "oauth2": {
+        "type": "oauth2",
+        "description": "OAuth 2.1 authorization code flow with PKCE (S256). Dynamic client registration is open, so no credentials need to be arranged in advance.",
+        "flows": {
+          "authorizationCode": {
+            "authorizationUrl": "https://app.hermoso.ai/oauth/authorize",
+            "tokenUrl": "https://app.hermoso.ai/oauth/token",
+            "scopes": {
+              "hermoso.research": "Names the research surface: the Meta, Google and LinkedIn ad libraries, organic social search, competitor teardowns, and reads of the brand, workspace, credit balance and job status.",
+              "hermoso.generate": "Names the acting surface: generating creative, publishing to connected channels, and building and reading ad campaigns. Renders consume credits, and any call that arms real ad spend requires an explicit per-call confirmation regardless of the token presented."
+            }
+          }
+        }
+      }
+    },
+    "parameters": {
+      "McpSessionId": {
+        "name": "Mcp-Session-Id",
+        "in": "header",
+        "required": false,
+        "description": "The session id returned by `initialize`. Required on every request after the handshake.",
+        "schema": {
+          "type": "string"
+        }
+      },
+      "McpProtocolVersion": {
+        "name": "MCP-Protocol-Version",
+        "in": "header",
+        "required": false,
+        "description": "The protocol version the client negotiated during `initialize`.",
+        "schema": {
+          "type": "string",
+          "examples": [
+            "2025-06-18"
+          ]
+        }
+      }
+    },
+    "responses": {
+      "BadRequest": {
+        "description": "A malformed request, or the right call on the wrong surface. The message names the parameter.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "Unauthorized": {
+        "description": "Either your key is invalid, revoked or absent (a **bare** 401), or a provider this call needs is not connected for this workspace (a 401 **carrying a `connector` field**). The two need completely different fixes: re-authenticate, versus send the user to link that provider. Branch on whether `connector` is present, never on the message text.",
+        "headers": {
+          "WWW-Authenticate": {
+            "description": "On an unauthenticated MCP request, carries `resource_metadata` pointing at the RFC 9728 document that bootstraps the OAuth flow.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            },
+            "examples": {
+              "badKey": {
+                "summary": "Your key is bad — re-authenticate",
+                "value": {
+                  "error": "Sign in to continue.",
+                  "meta": {
+                    "status": 401
+                  }
+                }
+              },
+              "connectorMissing": {
+                "summary": "A provider is not linked — send the user to connect it",
+                "value": {
+                  "error": "Connect Meta first (Settings ▸ Connectors ▸ Meta).",
+                  "connector": "meta"
+                }
+              }
+            }
+          }
+        }
+      },
+      "PaymentRequired": {
+        "description": "Out of credits, or the balance cannot cover the estimate for this render. Check `meta.userOutOfCredits` and offer the `buy_credits` tool.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            },
+            "example": {
+              "error": "Not enough credits for this render.",
+              "meta": {
+                "userOutOfCredits": true
+              }
+            }
+          }
+        }
+      },
+      "SessionNotFound": {
+        "description": "No such MCP session — it expired or was terminated. Re-run `initialize` to start a new one; the server answers 404 (never 400) precisely so a client knows it must re-initialize.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "RateLimited": {
+        "description": "Rate limited, by us or by an upstream platform. Back off and retry. **The connection is fine** — re-authorising cannot clear a rate limit, and the message says so.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "Unavailable": {
+        "description": "A provider is at capacity, or a read failed and we will not guess. Retry with backoff. A failed read is reported as a failure rather than as an empty result: \"nothing is connected\" and \"I could not tell you what is connected\" are different answers.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "OAuthError": {
+        "description": "A standard OAuth 2.0 error response (RFC 6749 §5.2).",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/OAuthErrorBody"
+            }
+          }
+        }
+      }
+    },
+    "schemas": {
+      "Error": {
+        "type": "object",
+        "title": "Error",
+        "description": "The one error shape every Hermoso route returns. Documented in full at https://hermoso.ai/docs/errors/.",
+        "required": [
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "type": "string",
+            "description": "A human-readable message, safe to show a user. Vendor names, credentials and raw upstream response bodies are scrubbed out of it."
+          },
+          "connector": {
+            "type": "string",
+            "description": "Present only on a connector problem: the provider key that is not linked. Its presence is load-bearing — see the 401 description.",
+            "examples": [
+              "meta",
+              "google_ads",
+              "tiktok",
+              "linkedin"
+            ]
+          },
+          "meta": {
+            "type": "object",
+            "description": "A small allowlisted set of machine-readable hints. Never the raw upstream message.",
+            "additionalProperties": true,
+            "properties": {
+              "userOutOfCredits": {
+                "type": "boolean",
+                "description": "The balance cannot cover this call. Offer `buy_credits`."
+              },
+              "suggestModel": {
+                "type": "string",
+                "description": "A model id that can serve this request when the one asked for cannot."
+              },
+              "contentStop": {
+                "type": "boolean",
+                "description": "The model stopped on its own content filter. Change the prompt; do not retry it unchanged."
+              },
+              "policyBlock": {
+                "type": "boolean",
+                "description": "An advertising-policy refusal. Change the creative; do not retry it unchanged."
+              },
+              "status": {
+                "type": "integer",
+                "description": "The HTTP status, repeated in the body for clients that only read the payload."
+              }
+            }
+          }
+        },
+        "examples": [
+          {
+            "error": "Connect Meta first (Settings ▸ Connectors ▸ Meta).",
+            "connector": "meta"
+          },
+          {
+            "error": "No such endpoint: GET /api/nonexistent"
+          }
+        ]
+      },
+      "JsonRpcRequest": {
+        "type": "object",
+        "title": "JsonRpcRequest",
+        "description": "A JSON-RPC 2.0 request, as defined by the Model Context Protocol.",
+        "required": [
+          "jsonrpc",
+          "method"
+        ],
+        "properties": {
+          "jsonrpc": {
+            "type": "string",
+            "const": "2.0",
+            "description": "Always the string `2.0`."
+          },
+          "id": {
+            "description": "Correlates the reply with this request. Omit it to send a notification, which gets no reply.",
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "integer"
+              }
+            ]
+          },
+          "method": {
+            "type": "string",
+            "description": "The MCP method to invoke.",
+            "examples": [
+              "initialize",
+              "tools/list",
+              "tools/call",
+              "resources/list",
+              "resources/read",
+              "ping"
+            ]
+          },
+          "params": {
+            "type": "object",
+            "description": "Method parameters. For `tools/call` this is `{ name, arguments }`, where `name` is a tool from `tools/list` and `arguments` matches that tool's own input schema.",
+            "additionalProperties": true,
+            "properties": {
+              "name": {
+                "type": "string",
+                "description": "For `tools/call`: the tool to run.",
+                "examples": [
+                  "hermoso_capabilities",
+                  "plan_ad",
+                  "render_ad",
+                  "post_to_meta"
+                ]
+              },
+              "arguments": {
+                "type": "object",
+                "description": "For `tools/call`: arguments matching the tool's declared input schema.",
+                "additionalProperties": true
+              }
+            }
+          }
+        }
+      },
+      "JsonRpcResponse": {
+        "type": "object",
+        "title": "JsonRpcResponse",
+        "description": "A JSON-RPC 2.0 response. Exactly one of `result` or `error` is present.",
+        "required": [
+          "jsonrpc"
+        ],
+        "properties": {
+          "jsonrpc": {
+            "type": "string",
+            "const": "2.0",
+            "description": "Always the string `2.0`."
+          },
+          "id": {
+            "description": "The id of the request this answers.",
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "result": {
+            "type": "object",
+            "description": "The method's result on success. Its shape depends on the method.",
+            "additionalProperties": true
+          },
+          "error": {
+            "$ref": "#/components/schemas/JsonRpcError"
+          }
+        }
+      },
+      "JsonRpcError": {
+        "type": "object",
+        "title": "JsonRpcError",
+        "description": "A JSON-RPC-level failure, returned inside a 200 response.",
+        "required": [
+          "code",
+          "message"
+        ],
+        "properties": {
+          "code": {
+            "type": "integer",
+            "description": "The JSON-RPC error code. `-32700` parse error, `-32600` invalid request, `-32601` method not found, `-32602` invalid params, `-32603` internal error.",
+            "examples": [
+              -32601,
+              -32602
+            ]
+          },
+          "message": {
+            "type": "string",
+            "description": "A short description of the failure."
+          },
+          "data": {
+            "description": "Optional additional detail."
+          }
+        }
+      },
+      "McpServerCard": {
+        "type": "object",
+        "title": "McpServerCard",
+        "description": "The Model Context Protocol server description, as published in the MCP registry.",
+        "required": [
+          "name",
+          "description",
+          "version"
+        ],
+        "properties": {
+          "$schema": {
+            "type": "string",
+            "format": "uri",
+            "description": "The MCP server schema this document conforms to."
+          },
+          "name": {
+            "type": "string",
+            "description": "The registry name of the server.",
+            "examples": [
+              "io.github.hermoso-ai/hermoso"
+            ]
+          },
+          "title": {
+            "type": "string",
+            "description": "The display name."
+          },
+          "description": {
+            "type": "string",
+            "description": "What the server does, written for an agent deciding whether to reach for it."
+          },
+          "version": {
+            "type": "string",
+            "description": "The published version, matching the npm package."
+          },
+          "websiteUrl": {
+            "type": "string",
+            "format": "uri",
+            "description": "The documentation home."
+          },
+          "repository": {
+            "type": "object",
+            "description": "Where the source lives.",
+            "properties": {
+              "url": {
+                "type": "string",
+                "format": "uri",
+                "description": "The repository URL."
+              },
+              "source": {
+                "type": "string",
+                "description": "The hosting service.",
+                "examples": [
+                  "github"
+                ]
+              },
+              "subfolder": {
+                "type": "string",
+                "description": "The path within the repository."
+              }
+            }
+          },
+          "remotes": {
+            "type": "array",
+            "description": "Hosted transports a client can connect to directly.",
+            "items": {
+              "type": "object",
+              "required": [
+                "type",
+                "url"
+              ],
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "description": "The transport.",
+                  "examples": [
+                    "streamable-http"
+                  ]
+                },
+                "url": {
+                  "type": "string",
+                  "format": "uri",
+                  "description": "The endpoint URL."
+                }
+              }
+            }
+          },
+          "packages": {
+            "type": "array",
+            "description": "Packages that run the same server locally over stdio.",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          }
+        }
+      },
+      "ProtectedResourceMetadata": {
+        "type": "object",
+        "title": "ProtectedResourceMetadata",
+        "description": "RFC 9728 protected-resource metadata.",
+        "required": [
+          "resource",
+          "authorization_servers"
+        ],
+        "properties": {
+          "resource": {
+            "type": "string",
+            "format": "uri",
+            "description": "The resource identifier an access token must be bound to.",
+            "examples": [
+              "https://app.hermoso.ai/mcp"
+            ]
+          },
+          "authorization_servers": {
+            "type": "array",
+            "description": "Issuers permitted to mint tokens for this resource.",
+            "items": {
+              "type": "string",
+              "format": "uri"
+            }
+          },
+          "scopes_supported": {
+            "type": "array",
+            "description": "The scopes this resource understands.",
+            "items": {
+              "type": "string",
+              "enum": [
+                "hermoso.research",
+                "hermoso.generate"
+              ]
+            }
+          },
+          "bearer_methods_supported": {
+            "type": "array",
+            "description": "How a token may be presented.",
+            "items": {
+              "type": "string",
+              "enum": [
+                "header"
+              ]
+            }
+          }
+        }
+      },
+      "AuthorizationServerMetadata": {
+        "type": "object",
+        "title": "AuthorizationServerMetadata",
+        "description": "RFC 8414 authorization server metadata.",
+        "required": [
+          "issuer",
+          "authorization_endpoint",
+          "token_endpoint"
+        ],
+        "properties": {
+          "issuer": {
+            "type": "string",
+            "format": "uri",
+            "description": "The issuer identifier."
+          },
+          "authorization_endpoint": {
+            "type": "string",
+            "format": "uri",
+            "description": "Where a browser starts the flow."
+          },
+          "token_endpoint": {
+            "type": "string",
+            "format": "uri",
+            "description": "Where a code is exchanged for a token."
+          },
+          "registration_endpoint": {
+            "type": "string",
+            "format": "uri",
+            "description": "Where a client registers itself (RFC 7591)."
+          },
+          "response_types_supported": {
+            "type": "array",
+            "description": "Supported response types.",
+            "items": {
+              "type": "string",
+              "enum": [
+                "code"
+              ]
+            }
+          },
+          "grant_types_supported": {
+            "type": "array",
+            "description": "Supported grant types.",
+            "items": {
+              "type": "string",
+              "enum": [
+                "authorization_code"
+              ]
+            }
+          },
+          "code_challenge_methods_supported": {
+            "type": "array",
+            "description": "Supported PKCE methods. `plain` is deliberately not offered.",
+            "items": {
+              "type": "string",
+              "enum": [
+                "S256"
+              ]
+            }
+          },
+          "token_endpoint_auth_methods_supported": {
+            "type": "array",
+            "description": "Clients are public, so no secret is issued and none is accepted.",
+            "items": {
+              "type": "string",
+              "enum": [
+                "none"
+              ]
+            }
+          },
+          "scopes_supported": {
+            "type": "array",
+            "description": "The scopes on offer.",
+            "items": {
+              "type": "string",
+              "enum": [
+                "hermoso.research",
+                "hermoso.generate"
+              ]
+            }
+          }
+        }
+      },
+      "ClientRegistrationRequest": {
+        "type": "object",
+        "title": "ClientRegistrationRequest",
+        "description": "An RFC 7591 dynamic client registration request.",
+        "required": [
+          "redirect_uris"
+        ],
+        "properties": {
+          "redirect_uris": {
+            "type": "array",
+            "minItems": 1,
+            "description": "The callback URIs this client will use.",
+            "items": {
+              "type": "string",
+              "format": "uri"
+            }
+          },
+          "client_name": {
+            "type": "string",
+            "description": "A human-readable name, shown on the consent screen."
+          },
+          "grant_types": {
+            "type": "array",
+            "description": "Requested grant types. Only `authorization_code` is supported.",
+            "items": {
+              "type": "string",
+              "enum": [
+                "authorization_code"
+              ]
+            }
+          },
+          "response_types": {
+            "type": "array",
+            "description": "Requested response types. Only `code` is supported.",
+            "items": {
+              "type": "string",
+              "enum": [
+                "code"
+              ]
+            }
+          },
+          "token_endpoint_auth_method": {
+            "type": "string",
+            "description": "Clients are public; this is `none`.",
+            "enum": [
+              "none"
+            ]
+          },
+          "scope": {
+            "type": "string",
+            "description": "Space-separated scopes the client intends to request."
+          }
+        }
+      },
+      "ClientRegistrationResponse": {
+        "type": "object",
+        "title": "ClientRegistrationResponse",
+        "description": "The registered client. No client secret is issued — PKCE protects the exchange instead.",
+        "required": [
+          "client_id"
+        ],
+        "properties": {
+          "client_id": {
+            "type": "string",
+            "description": "The identifier to use on `/oauth/authorize`.",
+            "examples": [
+              "cl_Md83zaYY16gulR6YxfxFKg"
+            ]
+          },
+          "client_name": {
+            "type": "string",
+            "description": "The name as registered."
+          },
+          "redirect_uris": {
+            "type": "array",
+            "description": "The callback URIs as registered.",
+            "items": {
+              "type": "string",
+              "format": "uri"
+            }
+          },
+          "grant_types": {
+            "type": "array",
+            "description": "The grant types granted.",
+            "items": {
+              "type": "string"
+            }
+          },
+          "response_types": {
+            "type": "array",
+            "description": "The response types granted.",
+            "items": {
+              "type": "string"
+            }
+          },
+          "token_endpoint_auth_method": {
+            "type": "string",
+            "description": "Always `none` — clients are public."
+          }
+        }
+      },
+      "TokenRequest": {
+        "type": "object",
+        "title": "TokenRequest",
+        "description": "An authorization code exchange.",
+        "required": [
+          "grant_type",
+          "code",
+          "redirect_uri",
+          "client_id",
+          "code_verifier"
+        ],
+        "properties": {
+          "grant_type": {
+            "type": "string",
+            "description": "The only grant type supported.",
+            "enum": [
+              "authorization_code"
+            ]
+          },
+          "code": {
+            "type": "string",
+            "description": "The authorization code from the redirect."
+          },
+          "redirect_uri": {
+            "type": "string",
+            "format": "uri",
+            "description": "Must match the one used on `/oauth/authorize`."
+          },
+          "client_id": {
+            "type": "string",
+            "description": "The registered client id."
+          },
+          "code_verifier": {
+            "type": "string",
+            "description": "The PKCE verifier whose S256 hash was sent as `code_challenge`."
+          },
+          "resource": {
+            "type": "string",
+            "format": "uri",
+            "description": "The resource to bind the token to (RFC 8707)."
+          }
+        }
+      },
+      "TokenResponse": {
+        "type": "object",
+        "title": "TokenResponse",
+        "description": "A successful token exchange.",
+        "required": [
+          "access_token",
+          "token_type"
+        ],
+        "properties": {
+          "access_token": {
+            "type": "string",
+            "description": "The bearer token. Send it as `Authorization: Bearer …` on every MCP request."
+          },
+          "token_type": {
+            "type": "string",
+            "description": "Always `Bearer`.",
+            "enum": [
+              "Bearer"
+            ]
+          },
+          "expires_in": {
+            "type": "integer",
+            "description": "Lifetime in seconds."
+          },
+          "scope": {
+            "type": "string",
+            "description": "The scopes actually granted, which may be narrower than those requested."
+          }
+        }
+      },
+      "OAuthErrorBody": {
+        "type": "object",
+        "title": "OAuthErrorBody",
+        "description": "A standard OAuth 2.0 error (RFC 6749 §5.2). The OAuth endpoints use this shape rather than the Hermoso `Error` shape, because OAuth clients parse it.",
+        "required": [
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "type": "string",
+            "description": "The OAuth error code.",
+            "examples": [
+              "invalid_request",
+              "invalid_grant",
+              "unsupported_grant_type",
+              "invalid_client"
+            ]
+          },
+          "error_description": {
+            "type": "string",
+            "description": "A human-readable explanation."
+          }
+        }
+      }
+    }
+  },
+  "security": [
+    {
+      "bearerAuth": []
+    },
+    {
+      "oauth2": [
+        "hermoso.research",
+        "hermoso.generate"
+      ]
+    }
+  ],
+  "tags": [
+    {
+      "name": "MCP",
+      "description": "The Model Context Protocol endpoint. This is the API: every Hermoso tool is a `tools/call` method here.",
+      "externalDocs": {
+        "description": "MCP & CLI guide",
+        "url": "https://hermoso.ai/docs/mcp/"
+      }
+    },
+    {
+      "name": "Discovery",
+      "description": "Machine-readable documents that let a client find and describe this server without being configured by hand."
+    },
+    {
+      "name": "OAuth",
+      "description": "OAuth 2.1 authorization code flow with PKCE and open dynamic client registration."
+    }
+  ],
+  "externalDocs": {
+    "description": "Hermoso developer documentation",
+    "url": "https://hermoso.ai/docs/"
+  }
+}
