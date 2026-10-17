@@ -1,6 +1,6 @@
 # APIs — B
 
-Browsing 243 APIs starting with **B**.
+Browsing 244 APIs starting with **B**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · **B** · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -13,6 +13,7 @@ Browsing 243 APIs starting with **B**.
 | [backend.experteaseai.com](../../../../apis/openapi/backend.experteaseai.com) | [main](../../../../apis/openapi/backend.experteaseai.com/main) |
 | [backend.genpage.ai](../../../../apis/openapi/backend.genpage.ai) | [main](../../../../apis/openapi/backend.genpage.ai/main) |
 | [backendless.com](../../../../apis/openapi/backendless.com) | [main](../../../../apis/openapi/backendless.com/main) |
+| [backgrounderase.com](../../../../apis/openapi/backgrounderase.com) | [main](../../../../apis/openapi/backgrounderase.com/main) |
 | [baconipsum.com](../../../../apis/openapi/baconipsum.com) | [main](../../../../apis/openapi/baconipsum.com/main) |
 | [bagisto.com](../../../../apis/openapi/bagisto.com) | [main](../../../../apis/openapi/bagisto.com/main) |
 | [balena.io](../../../../apis/openapi/balena.io) | [main](../../../../apis/openapi/balena.io/main) |
