@@ -1,0 +1,1544 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Voicegram Public API",
+    "description": "The Voicegram public API lets you integrate Voicegram with Zapier, Make,\nn8n, or any custom system. All requests authenticate via a Personal Access\nToken (PAT) sent in the `Authorization: Bearer vg_pat_<...>` header.\n\n## Authentication\n\nCreate a PAT in the Voicegram dashboard at `/dashboard/integrations/api-tokens`.\nTokens are bound to a single account and inherit that account's permissions.\nThe token format is `vg_pat_<64-hex>`; only the prefix is stored in plaintext\nserver-side, so the token is unrecoverable from the dashboard after creation.\n\n## Plan gating\n\nAll endpoints except `GET /api/v1/me` require a paid plan (Starter or above).\nPATs for free-plan accounts authenticate successfully against `/me` so\nintegrations can display a meaningful upgrade prompt, but every other\nendpoint returns `403 plan_required`.\n\n## Rate limiting\n\nEach endpoint is rate limited per account. On `429 rate_limited`,\nback off and retry.\n\n## Webhook delivery semantics\n\nWebhook URLs registered via `POST /api/v1/webhook-subscriptions` must be\nterminal receivers: any `3xx` response is treated as a delivery failure\nrecorded as `redirect_blocked: <status>`. Configure your endpoint to\nrespond directly with `2xx`, `4xx`, or `5xx`. See\nhttps://voicegram.io/docs/integrations/webhooks for details.\n\nOutbound deliveries POST a JSON body signed with an HMAC in the\n`X-Voicegram-Signature` header (`t=<unix-seconds>,v1=<hex-hmac>`),\nand each attempt carries a unique `X-Voicegram-Delivery-Id` header\n(UUID, fresh per attempt) for support correlation. Failed deliveries\nare retried with backoff over several hours before auto-disable.\n",
+    "version": "1.0.0",
+    "contact": {
+      "name": "Voicegram integrations",
+      "url": "https://voicegram.io/docs/integrations"
+    },
+    "license": {
+      "name": "Proprietary"
+    },
+    "x-jentic-source-url": "https://www.voicegram.io/api/v1/openapi.json"
+  },
+  "servers": [
+    {
+      "url": "https://voicegram.io",
+      "description": "Production"
+    }
+  ],
+  "paths": {
+    "/api/v1/me": {
+      "get": {
+        "operationId": "getMe",
+        "tags": [
+          "account"
+        ],
+        "summary": "Get the authenticated account",
+        "description": "Verifies the PAT and returns the authenticated account's basic info.\nUse it to verify a token and confirm which account it belongs to, for\nexample on an integration's connection screen.\n\nUnlike every other endpoint, `/me` does NOT plan-gate. Free-plan PATs\nauthenticate successfully here so an integration can detect a free-plan\naccount and prompt the user to upgrade.\n",
+        "security": [
+          {
+            "PersonalAccessToken": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Account info",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Account"
+                },
+                "example": {
+                  "account_id": "550e8400-e29b-41d4-a716-446655440000",
+                  "account_name": "Acme Corp",
+                  "plan_name": "pro",
+                  "plan_tier_index": 2,
+                  "plan_retention_days": 365
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/api/v1/channels": {
+      "get": {
+        "operationId": "listChannels",
+        "tags": [
+          "channels"
+        ],
+        "summary": "List domains and campaigns",
+        "description": "Returns the domains and campaigns owned by the authenticated account.\nUse it to populate a channel picker so users can scope an integration to a single channel.\n\nSort order: domains first (alphabetical by domain), then campaigns\n(alphabetical by name).\n",
+        "security": [
+          {
+            "PersonalAccessToken": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Channel list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "channels"
+                  ],
+                  "properties": {
+                    "channels": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Channel"
+                      }
+                    }
+                  }
+                },
+                "example": {
+                  "channels": [
+                    {
+                      "id": "11111111-1111-1111-1111-111111111111",
+                      "type": "domain",
+                      "name": "acme.com"
+                    },
+                    {
+                      "id": "22222222-2222-2222-2222-222222222222",
+                      "type": "domain",
+                      "name": "shop.acme.com"
+                    },
+                    {
+                      "id": "33333333-3333-3333-3333-333333333333",
+                      "type": "campaign",
+                      "name": "Store Feedback",
+                      "slug": "store-feedback"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/PlanRequired"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/api/v1/voicegrams/recent": {
+      "get": {
+        "operationId": "listRecentVoicegrams",
+        "tags": [
+          "voicegrams"
+        ],
+        "summary": "List recent completed Voicegrams",
+        "description": "Returns the N most-recent completed Voicegrams for the PAT's account,\nin the canonical `voicegram.completed` payload shape.\n\nAccounts with no completed Voicegrams receive a single sample row (clearly marked).\n",
+        "security": [
+          {
+            "PersonalAccessToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "How many Voicegrams to return. Defaults to 3. Values outside the\nallowed range are clamped to the nearest valid value; non-integer or\nunparseable input falls back to the default.\n",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 10,
+              "default": 3
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Recent Voicegrams in webhook-payload shape",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "voicegrams"
+                  ],
+                  "properties": {
+                    "voicegrams": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/VoicegramCompleted"
+                      }
+                    }
+                  }
+                },
+                "example": {
+                  "voicegrams": [
+                    {
+                      "event": "voicegram.completed",
+                      "event_id": "evt_sample-12345678",
+                      "delivered_at": "2026-05-14T19:23:45.000Z",
+                      "data": {
+                        "id": "vg_sample_12345678",
+                        "created_at": "2026-05-13T19:22:00.000Z",
+                        "completed_at": "2026-05-13T19:23:00.000Z",
+                        "duration_seconds": 47,
+                        "sender": {
+                          "verification_method": "email",
+                          "contact_verified": true,
+                          "email": "sample.customer@example.com",
+                          "phone": null,
+                          "whatsapp": null
+                        },
+                        "channel": {
+                          "type": "domain",
+                          "id": "sample-domain-id",
+                          "name": "example.com",
+                          "page_url": "https://example.com/pricing"
+                        },
+                        "transcript": {
+                          "text": "Hi, I wanted to ask about your enterprise pricing options. Please call me back at four one five, five five five, oh one two three or email pricing.questions@example.com. Thanks.",
+                          "confidence": 0.94
+                        },
+                        "summary": {
+                          "text": "Customer asking about enterprise pricing. Wants a callback or follow-up email.",
+                          "urgency": "medium",
+                          "sentiment": "neutral",
+                          "intent": "inquiry",
+                          "callback_required": true,
+                          "action_items": [
+                            {
+                              "task": "Send enterprise pricing details",
+                              "priority": "medium",
+                              "deadline": null
+                            },
+                            {
+                              "task": "Call back at +14155550123",
+                              "priority": "medium",
+                              "deadline": null
+                            }
+                          ],
+                          "mentioned": {
+                            "names": [
+                              "Example Corp"
+                            ],
+                            "phones": [
+                              "+14155550123"
+                            ],
+                            "emails": [
+                              "pricing.questions@example.com"
+                            ]
+                          }
+                        },
+                        "audio": {
+                          "url": "https://www.voicegram.io/api/listen/vg_sample_12345678?t=sample-token-redacted",
+                          "expires_at": "2026-05-15T19:23:45.000Z",
+                          "content_type": "audio/webm"
+                        },
+                        "dashboard_url": "https://voicegram.io/dashboard/inbox/vg_sample_12345678",
+                        "tags": [
+                          "pricing",
+                          "enterprise"
+                        ],
+                        "google_review": {
+                          "enabled": true,
+                          "review_url": "https://search.google.com/local/writereview?placeid=sample-place-id-12345678",
+                          "draft_text": "Hi, I wanted to ask about your enterprise pricing options. Please call me back at four one five, five five five, oh one two three or email pricing.questions@example.com. Thanks."
+                        }
+                      }
+                    },
+                    {
+                      "event": "voicegram.completed",
+                      "event_id": "evt_sample-87654321",
+                      "delivered_at": "2026-05-14T20:10:00.000Z",
+                      "data": {
+                        "id": "vg_sample_87654321",
+                        "created_at": "2026-05-14T20:08:30.000Z",
+                        "completed_at": "2026-05-14T20:09:15.000Z",
+                        "duration_seconds": 22,
+                        "sender": {
+                          "verification_method": "sms",
+                          "contact_verified": true,
+                          "email": null,
+                          "phone": "+12125550148",
+                          "whatsapp": null
+                        },
+                        "channel": {
+                          "type": "domain",
+                          "id": "sample-domain-id",
+                          "name": "example.com",
+                          "page_url": "https://example.com/contact"
+                        },
+                        "transcript": {
+                          "text": "Hi, it is Jordan. My order has not arrived yet and I need it by Friday. Could someone call me back? Thanks.",
+                          "confidence": 0.97
+                        },
+                        "summary": {
+                          "text": "Jordan reports a late order needed by Friday and requests a callback. The callback number is the verified sender phone.",
+                          "urgency": "high",
+                          "sentiment": "frustrated",
+                          "intent": "support",
+                          "callback_required": true,
+                          "action_items": [
+                            {
+                              "task": "Call Jordan back about the late order",
+                              "priority": "high",
+                              "deadline": null
+                            }
+                          ],
+                          "mentioned": {
+                            "names": [
+                              "Jordan"
+                            ],
+                            "phones": [],
+                            "emails": []
+                          }
+                        },
+                        "audio": {
+                          "url": "https://www.voicegram.io/api/listen/vg_sample_87654321?t=sample-token-redacted",
+                          "expires_at": "2026-05-16T20:10:00.000Z",
+                          "content_type": "audio/webm"
+                        },
+                        "dashboard_url": "https://voicegram.io/dashboard/inbox/vg_sample_87654321",
+                        "tags": [
+                          "order",
+                          "callback"
+                        ],
+                        "google_review": {
+                          "enabled": false,
+                          "review_url": null,
+                          "draft_text": null
+                        }
+                      }
+                    },
+                    {
+                      "event": "voicegram.completed",
+                      "event_id": "evt_sample-24681357",
+                      "delivered_at": "2026-05-15T09:05:00.000Z",
+                      "data": {
+                        "id": "vg_sample_24681357",
+                        "created_at": "2026-05-15T09:03:10.000Z",
+                        "completed_at": "2026-05-15T09:04:20.000Z",
+                        "duration_seconds": 31,
+                        "sender": {
+                          "verification_method": "email",
+                          "contact_verified": false,
+                          "email": "sam.rivera@example.com",
+                          "phone": null,
+                          "whatsapp": null
+                        },
+                        "channel": {
+                          "type": "campaign",
+                          "id": "sample-campaign-id",
+                          "name": "Spring Open House",
+                          "page_url": null
+                        },
+                        "transcript": {
+                          "text": "Hi, this is Sam. I would like to book a visit for Saturday morning if you still have openings. Email me back. Thanks.",
+                          "confidence": 0.95
+                        },
+                        "summary": {
+                          "text": "Sam wants to book a Saturday morning visit and asks for a reply by email.",
+                          "urgency": "medium",
+                          "sentiment": "positive",
+                          "intent": "scheduling",
+                          "callback_required": false,
+                          "action_items": [
+                            {
+                              "task": "Reply to Sam about Saturday morning openings",
+                              "priority": "medium",
+                              "deadline": null
+                            }
+                          ],
+                          "mentioned": {
+                            "names": [
+                              "Sam"
+                            ],
+                            "phones": [],
+                            "emails": []
+                          }
+                        },
+                        "audio": {
+                          "url": "https://www.voicegram.io/api/listen/vg_sample_24681357?t=sample-token-redacted",
+                          "expires_at": "2026-05-16T09:05:00.000Z",
+                          "content_type": "audio/webm"
+                        },
+                        "dashboard_url": "https://voicegram.io/dashboard/inbox/vg_sample_24681357",
+                        "tags": [
+                          "visit"
+                        ],
+                        "google_review": {
+                          "enabled": true,
+                          "review_url": "https://search.google.com/local/writereview?placeid=sample-place-id-24681357",
+                          "draft_text": "Hi, this is Sam. I would like to book a visit for Saturday morning if you still have openings. Email me back. Thanks."
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/PlanRequired"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/api/v1/webhook-subscriptions": {
+      "post": {
+        "operationId": "createWebhookSubscription",
+        "tags": [
+          "webhooks"
+        ],
+        "summary": "Create a webhook subscription",
+        "description": "Creates a webhook subscription that fires the `voicegram.completed`\nevent to the supplied URL on every matching completed Voicegram for\nthe account.\n\n## Terminal receiver requirement\n\nThe URL MUST be a terminal receiver. Your endpoint must respond\ndirectly with `2xx/4xx/5xx`; a `3xx` response is treated as a delivery\nfailure (recorded as `redirect_blocked`). This applies to real-event\ndelivery, retry delivery, and the dashboard's test-event endpoint.\n\n## Secret handling\n\nThe response includes the plaintext signing `secret` ONCE. After this\nresponse the plaintext is unrecoverable from the API; `secret_prefix`\nis the only identifier surfaced afterwards. Save the plaintext in a\nsecure secret store on your end. If you lose it, delete the subscription\nand create a new one to rotate.\n\n## URL validation\n\n- MUST use HTTPS (`http://` returns `400 invalid_url`).\n- MUST be a valid URI under 2048 characters.\n- MUST NOT contain user/password credentials (`https://user:pass@host`).\n- The URL must not point to a private or internal host.\n\n## Subscription cap\n\nActive subscriptions per account are capped at 25. The 26th\nsubscription returns `409 limit_reached`. Deleted subscriptions\ndon't count toward the cap.\n\n## channel_id resolution\n\nIf `channel_id` is provided, it must be a domain or campaign on your\naccount. Returns `400 invalid_channel_id` if no match exists.\n",
+        "security": [
+          {
+            "PersonalAccessToken": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateWebhookSubscriptionRequest"
+              },
+              "examples": {
+                "zapier": {
+                  "summary": "Zapier-source subscription",
+                  "value": {
+                    "url": "https://hooks.zapier.com/hooks/standard/12345/abc",
+                    "event_type": "voicegram.completed",
+                    "channel_id": null,
+                    "source": "zapier",
+                    "zapier_subscription_id": "zap-12345-abc"
+                  }
+                },
+                "dashboard": {
+                  "summary": "Dashboard-source subscription scoped to a domain",
+                  "value": {
+                    "url": "https://example.com/webhooks/voicegram",
+                    "event_type": "voicegram.completed",
+                    "channel_id": "11111111-1111-1111-1111-111111111111",
+                    "source": "dashboard"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Subscription created. The response includes the plaintext signing\n`secret` exactly once.\n",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookSubscriptionWithSecret"
+                },
+                "example": {
+                  "id": "44444444-4444-4444-4444-444444444444",
+                  "url": "https://hooks.zapier.com/hooks/standard/12345/abc",
+                  "secret": "vg_whsec_0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+                  "secret_prefix": "vg_whsec_012",
+                  "is_active": true,
+                  "created_at": "2026-05-14T19:23:45.000Z"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Body failed validation. The `error` field disambiguates:\n- `validation_error`: generic schema failure (see `issues`)\n- `invalid_url`: URL is not HTTPS, contains credentials, or\n  targets a private/internal host (the `reason` field carries a\n  stable diagnostic enum string)\n- `invalid_channel_id`: `channel_id` does not match any domain\n  or campaign on the PAT's account\n",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "examples": {
+                  "validation_error": {
+                    "summary": "Validation failure",
+                    "value": {
+                      "error": "validation_error",
+                      "issues": [
+                        {
+                          "path": [
+                            "url"
+                          ],
+                          "message": "Invalid url"
+                        }
+                      ]
+                    }
+                  },
+                  "invalid_url": {
+                    "summary": "URL targets a private host",
+                    "value": {
+                      "error": "invalid_url",
+                      "message": "URL must be HTTPS and not target a private/internal host.",
+                      "reason": "host_resolves_to_private_ip: 10.0.0.5"
+                    }
+                  },
+                  "invalid_channel_id": {
+                    "summary": "channel_id not on this account",
+                    "value": {
+                      "error": "invalid_channel_id",
+                      "message": "channel_id does not match any domain or campaign on your account."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/PlanRequired"
+          },
+          "409": {
+            "description": "Conflict. Either the active-subscription cap of 25 has been\nreached (`limit_reached`), or a Zapier subscription with this\n`zapier_subscription_id` already exists (`conflict`).\n",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "examples": {
+                  "limit_reached": {
+                    "value": {
+                      "error": "limit_reached",
+                      "message": "Active subscription limit of 25 reached. Delete or disable an existing subscription before creating a new one."
+                    }
+                  },
+                  "conflict": {
+                    "value": {
+                      "error": "conflict",
+                      "message": "A subscription with this zapier_subscription_id already exists."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      },
+      "get": {
+        "operationId": "listWebhookSubscriptions",
+        "tags": [
+          "webhooks"
+        ],
+        "summary": "List webhook subscriptions",
+        "description": "Lists webhook subscriptions for the PAT's account. Includes both\nactive (`is_active=true`) and soft-deleted (`is_active=false`) rows\nunless filtered.\n\nSort order is `created_at DESC` (newest first).\n\n`pagination.total` counts rows matching the request's filters\n(`account_id` + `source` + `is_active`), ignoring `limit`/`offset`.\nUse it to determine whether further pages exist.\n\nNever returns the plaintext `secret`. The plaintext was returned\nonce in the POST 201 response and is unrecoverable from the API\nafterwards.\n",
+        "security": [
+          {
+            "PersonalAccessToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Page size (1–100, default 25).",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 25
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "description": "Page start (zero-based, default 0).",
+            "required": false,
+            "example": 25,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0
+            }
+          },
+          {
+            "name": "source",
+            "in": "query",
+            "description": "Filter by source (`zapier` or `dashboard`).",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "zapier",
+                "dashboard"
+              ]
+            }
+          },
+          {
+            "name": "is_active",
+            "in": "query",
+            "description": "Filter to active or soft-deleted rows.",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Subscription list with filter-aware pagination total",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "subscriptions",
+                    "pagination"
+                  ],
+                  "properties": {
+                    "subscriptions": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/WebhookSubscription"
+                      }
+                    },
+                    "pagination": {
+                      "$ref": "#/components/schemas/Pagination"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Query parameters failed validation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "validation_error",
+                  "issues": [
+                    {
+                      "path": [
+                        "limit"
+                      ],
+                      "message": "Number must be less than or equal to 100"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/PlanRequired"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/api/v1/webhook-subscriptions/{id}": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "description": "The Voicegram-issued subscription id (UUID).",
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      ],
+      "get": {
+        "operationId": "getWebhookSubscription",
+        "tags": [
+          "webhooks"
+        ],
+        "summary": "Get a single webhook subscription",
+        "description": "Returns a single webhook subscription for the PAT's account.\nReturns `404` whether the subscription does not exist or belongs\nto a different account. Never returns the plaintext `secret`.\n",
+        "security": [
+          {
+            "PersonalAccessToken": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Subscription detail",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookSubscription"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/PlanRequired"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteWebhookSubscription",
+        "tags": [
+          "webhooks"
+        ],
+        "summary": "Soft-delete a webhook subscription",
+        "description": "Delete a webhook subscription. Stops all future deliveries.\n",
+        "security": [
+          {
+            "PersonalAccessToken": []
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Subscription soft-deleted"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/PlanRequired"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "PersonalAccessToken": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "vg_pat_<64 hex>",
+        "description": "Personal Access Token issued from the Voicegram dashboard. Format:\n`vg_pat_` followed by 64 hex characters. Voicegram never stores the\nplaintext after creation; tokens are therefore unrecoverable. If you\nlose a token, revoke it and create a new one.\n"
+      }
+    },
+    "schemas": {
+      "Account": {
+        "type": "object",
+        "required": [
+          "account_id",
+          "account_name",
+          "plan_name",
+          "plan_tier_index",
+          "plan_retention_days"
+        ],
+        "properties": {
+          "account_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Stable account identifier"
+          },
+          "account_name": {
+            "type": "string",
+            "description": "Display name of the account (or \"Unnamed Account\" if unset)."
+          },
+          "plan_name": {
+            "type": "string",
+            "enum": [
+              "free",
+              "starter",
+              "pro",
+              "business",
+              "enterprise"
+            ],
+            "description": "Plan slug. Free-plan accounts can call `/me` but no other endpoint."
+          },
+          "plan_tier_index": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 4,
+            "description": "Position of `plan_name` in the canonical tier ordering\n`[free, starter, pro, business, enterprise]`. Useful for \"is\nplan at least X?\" checks without coupling to the slug list.\n"
+          },
+          "plan_retention_days": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "How many days completed Voicegrams are retained for this account\nbefore the audio is deleted. `null` means unlimited retention\n(Business / Enterprise). This is the account's own retention\nwindow, useful for surfacing \"your recordings are kept for N days\"\nin an integration.\n"
+          }
+        }
+      },
+      "Channel": {
+        "type": "object",
+        "required": [
+          "id",
+          "type",
+          "name"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Channel identifier. Stable across renames."
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "domain",
+              "campaign"
+            ]
+          },
+          "name": {
+            "type": "string",
+            "description": "For `type=domain` this is the hostname (e.g. `acme.com`). For\n`type=campaign` this is the campaign display name.\n"
+          },
+          "slug": {
+            "type": "string",
+            "description": "URL-safe slug. Only present for `type=campaign`; absent on\ndomain rows.\n"
+          }
+        }
+      },
+      "VoicegramCompleted": {
+        "type": "object",
+        "description": "Canonical `voicegram.completed` payload shape. This is the exact\nshape POSTed to webhook URLs and also the shape returned by\n`GET /api/v1/voicegrams/recent`.\n",
+        "required": [
+          "event",
+          "event_id",
+          "delivered_at",
+          "data"
+        ],
+        "properties": {
+          "event": {
+            "type": "string",
+            "enum": [
+              "voicegram.completed"
+            ]
+          },
+          "event_id": {
+            "type": "string",
+            "description": "Stable event identifier of the form `evt_<uuid>`. The SAME value\nis sent across retries of the same event. Customers requiring\nexactly-once delivery should deduplicate on this field.\n"
+          },
+          "delivered_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "ISO 8601 timestamp when this delivery attempt fired."
+          },
+          "data": {
+            "type": "object",
+            "required": [
+              "id",
+              "created_at",
+              "completed_at",
+              "duration_seconds",
+              "sender",
+              "channel",
+              "transcript",
+              "summary",
+              "audio",
+              "dashboard_url",
+              "tags",
+              "google_review"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "description": "Voicegram row identifier."
+              },
+              "created_at": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "completed_at": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "duration_seconds": {
+                "type": "number",
+                "description": "Audio duration in seconds."
+              },
+              "sender": {
+                "type": "object",
+                "required": [
+                  "verification_method",
+                  "contact_verified",
+                  "email",
+                  "phone",
+                  "whatsapp"
+                ],
+                "properties": {
+                  "verification_method": {
+                    "type": "string",
+                    "enum": [
+                      "email",
+                      "sms",
+                      "whatsapp"
+                    ],
+                    "description": "The channel the sender used to give their contact\ninformation (`email`, `sms` or `whatsapp`). Whether it was\nconfirmed is in `contact_verified`. The name predates\noptional verification and is kept so existing integrations\nkeep working.\n"
+                  },
+                  "contact_verified": {
+                    "type": "boolean",
+                    "description": "`true` when the sender proved they own this email address\nor phone number by entering a one-time code before\nrecording. `false` when the verification code was turned\noff for the widget or campaign: the email or phone is\nexactly what the sender typed and was never confirmed, so\nit may be mistyped or belong to someone else.\n"
+                  },
+                  "email": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "format": "email",
+                    "description": "Populated when `verification_method=email`, null\notherwise. Exactly one of `email`, `phone`, and\n`whatsapp` is populated.\n"
+                  },
+                  "phone": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "E.164 number, populated when `verification_method=sms`,\nnull otherwise. Exactly one of `email`, `phone`, and\n`whatsapp` is populated.\n"
+                  },
+                  "whatsapp": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "E.164 number, populated when\n`verification_method=whatsapp`, null otherwise. Exactly\none of `email`, `phone`, and `whatsapp` is populated.\n"
+                  }
+                }
+              },
+              "channel": {
+                "type": "object",
+                "required": [
+                  "type",
+                  "id",
+                  "name",
+                  "page_url"
+                ],
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "domain",
+                      "campaign"
+                    ]
+                  },
+                  "id": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "page_url": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "format": "uri",
+                    "description": "Page URL where the Voicegram was recorded. Null for\ncampaign-sourced Voicegrams.\n"
+                  }
+                }
+              },
+              "transcript": {
+                "type": "object",
+                "required": [
+                  "text",
+                  "confidence"
+                ],
+                "properties": {
+                  "text": {
+                    "type": "string",
+                    "description": "Full transcript text."
+                  },
+                  "confidence": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1,
+                    "description": "Transcription confidence score, 0.0 to 1.0."
+                  }
+                }
+              },
+              "summary": {
+                "type": "object",
+                "required": [
+                  "text",
+                  "urgency",
+                  "sentiment",
+                  "intent",
+                  "callback_required",
+                  "action_items",
+                  "mentioned"
+                ],
+                "description": "Structured AI summary object. Groups urgency, sentiment, intent,\ncallback_required, action items, and extracted entities.\n",
+                "properties": {
+                  "text": {
+                    "type": "string",
+                    "description": "AI-generated prose summary (max ~200 words)."
+                  },
+                  "urgency": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "enum": [
+                      "low",
+                      "medium",
+                      "high",
+                      null
+                    ],
+                    "description": "AI-classified urgency. Null when not classified."
+                  },
+                  "sentiment": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "enum": [
+                      "positive",
+                      "neutral",
+                      "negative",
+                      "frustrated",
+                      null
+                    ],
+                    "description": "AI-classified overall sentiment."
+                  },
+                  "intent": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "AI-classified intent (free-form, e.g. `inquiry`, `support`,\n`complaint`, `scheduling`, `follow-up`, `sales`).\n"
+                  },
+                  "callback_required": {
+                    "type": "boolean",
+                    "description": "True when the caller explicitly requested a callback."
+                  },
+                  "action_items": {
+                    "type": "array",
+                    "description": "AI-extracted action items, normalized to objects with\n`task`, `priority`, and `deadline`.\n",
+                    "items": {
+                      "type": "object",
+                      "required": [
+                        "task",
+                        "priority",
+                        "deadline"
+                      ],
+                      "properties": {
+                        "task": {
+                          "type": "string"
+                        },
+                        "priority": {
+                          "type": "string",
+                          "enum": [
+                            "low",
+                            "medium",
+                            "high"
+                          ]
+                        },
+                        "deadline": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "description": "Free-form deadline (e.g. `ASAP`, `by Friday`)."
+                        }
+                      }
+                    }
+                  },
+                  "mentioned": {
+                    "type": "object",
+                    "required": [
+                      "names",
+                      "phones",
+                      "emails"
+                    ],
+                    "description": "AI-extracted entities mentioned in the call.\n",
+                    "properties": {
+                      "names": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        },
+                        "description": "People or companies mentioned by name."
+                      },
+                      "phones": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        },
+                        "description": "Phone numbers in E.164 format (`+CCNNNNNNNNNN`)."
+                      },
+                      "emails": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        },
+                        "description": "Email addresses."
+                      }
+                    }
+                  }
+                }
+              },
+              "audio": {
+                "type": "object",
+                "required": [
+                  "url",
+                  "expires_at",
+                  "content_type"
+                ],
+                "properties": {
+                  "url": {
+                    "type": "string",
+                    "format": "uri",
+                    "description": "Signed listen URL backed by a per-recipient listener\ntoken. Validity is plan-scaled: 30 days (Free), 90\ndays (Starter), 365 days (Pro / Business /\nEnterprise). After expiry or revocation, the URL\nreturns `403`. If the underlying audio file has been\ndeleted (plan retention reached), the URL returns\n`410`. For permanent access, use the auth-gated\n`dashboard_url` or re-fetch the Voicegram via this\nAPI to receive a fresh URL.\n"
+                  },
+                  "expires_at": {
+                    "type": "string",
+                    "format": "date-time",
+                    "description": "ISO 8601 timestamp at which `url` stops working."
+                  },
+                  "content_type": {
+                    "type": "string",
+                    "enum": [
+                      "audio/webm"
+                    ],
+                    "description": "MIME type of the audio at `url`. Literal `audio/webm`\nin v1.\n"
+                  }
+                }
+              },
+              "dashboard_url": {
+                "type": "string",
+                "format": "uri",
+                "description": "Permanent (auth-gated) link to the Voicegram in the Voicegram\ndashboard.\n"
+              },
+              "tags": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "User-supplied tags from the dashboard Tags input. Distinct\nfrom the AI-derived `summary.urgency` / `.sentiment` /\n`.intent` fields. Empty array when the user has not tagged\nthe Voicegram.\n"
+              },
+              "google_review": {
+                "type": "object",
+                "required": [
+                  "enabled",
+                  "review_url",
+                  "draft_text"
+                ],
+                "description": "The Google review step for this Voicegram: whether it was on,\nthe review link, and the text the sender was offered. Always\npresent. It records the step as it was when the Voicegram was\nprocessed, and webhooks and `GET /api/v1/voicegrams/recent`\nreport the same saved values, so changing a widget's or\ncampaign's location later does not change them. Voicegrams\nprocessed before this field was added report `enabled: false`\nwith both values null, even if the sender was offered a\nreview. What the sender did next (copied the text, opened\nGoogle) happens after this event and is not included; it shows\nin the message's activity in your dashboard.\n",
+                "properties": {
+                  "enabled": {
+                    "type": "boolean",
+                    "description": "`true` when the Google review step was on for the widget\nor campaign this Voicegram came from when it was\nprocessed: a Google review location was chosen for it and\nyour plan included Google reviews. `false` otherwise, and\nthen `review_url` and `draft_text` are both null.\n"
+                  },
+                  "review_url": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "format": "uri",
+                    "description": "The Google review link the sender was offered for that\nlocation. Always set when `enabled` is `true`, null when\nit is `false`.\n"
+                  },
+                  "draft_text": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "maxLength": 4096,
+                    "description": "The review text the sender was offered: their own message\nas transcribed, with card numbers and Social Security\nnumbers spoken aloud masked, and a very long message\nshortened to 4,096 characters. The sender can edit it\nbefore posting, so a posted review may differ. Null when\n`enabled` is `false` or when the recording had no detected\nspeech.\n"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "CreateWebhookSubscriptionRequest": {
+        "type": "object",
+        "required": [
+          "url",
+          "event_type",
+          "source"
+        ],
+        "properties": {
+          "url": {
+            "type": "string",
+            "format": "uri",
+            "maxLength": 2048,
+            "description": "HTTPS URL to POST events to. Must be a terminal receiver: `3xx`\nresponses are treated as delivery failures (`redirect_blocked`).\n"
+          },
+          "event_type": {
+            "type": "string",
+            "enum": [
+              "voicegram.completed"
+            ],
+            "description": "The only event in v1.\n"
+          },
+          "channel_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Optional. When null the subscription fires for all channels on\nthe account. When set, the server derives `channel_type` from\nthe id; mismatch returns `400 invalid_channel_id`.\n"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "zapier",
+              "dashboard"
+            ],
+            "description": "Whether the subscription was created via Zapier or the dashboard.\nSend `zapier` or `dashboard`; this governs whether\n`zapier_subscription_id` is required.\n"
+          },
+          "zapier_subscription_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 255,
+            "description": "REQUIRED when `source=zapier`. FORBIDDEN when `source=dashboard`.\n"
+          }
+        }
+      },
+      "WebhookSubscription": {
+        "type": "object",
+        "description": "Webhook subscription row. NEVER includes the plaintext `secret`.\nThe plaintext was returned exactly once in the POST 201 response\nand is unrecoverable afterwards.\n",
+        "required": [
+          "id",
+          "url",
+          "secret_prefix",
+          "channel_id",
+          "channel_type",
+          "source",
+          "zapier_subscription_id",
+          "is_active",
+          "consecutive_failures",
+          "last_delivery_at",
+          "last_success_at",
+          "last_error",
+          "created_at",
+          "created_by_user_id"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "url": {
+            "type": "string",
+            "format": "uri"
+          },
+          "secret_prefix": {
+            "type": "string",
+            "description": "First 12 characters of the signing secret (e.g. `vg_whsec_012`).\n"
+          },
+          "channel_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Null when the subscription fires for all channels."
+          },
+          "channel_type": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "domain",
+              "campaign",
+              null
+            ],
+            "description": "Null when `channel_id` is null. Read-only; cannot be changed\nafter creation.\n"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "zapier",
+              "dashboard"
+            ]
+          },
+          "zapier_subscription_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Populated for `source=zapier`, null for `source=dashboard`."
+          },
+          "is_active": {
+            "type": "boolean",
+            "description": "False once soft-deleted (via `DELETE /api/v1/webhook-subscriptions/{id}`)\nor auto-disabled after 5 consecutive failed events.\n"
+          },
+          "consecutive_failures": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Number of consecutive events (full retry cycles) that have\nfailed for this subscription. Resets to 0 on any `2xx` delivery.\nTriggers auto-disable at 5.\n"
+          },
+          "last_delivery_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "last_success_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "last_error": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Most recent error excerpt, to help diagnose delivery failures.\n"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "created_by_user_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Populated for `source=dashboard` rows (the dashboard user who\ncreated the row). Null for `source=zapier` rows.\n"
+          }
+        }
+      },
+      "WebhookSubscriptionWithSecret": {
+        "type": "object",
+        "description": "Subset of the WebhookSubscription shape returned ONLY by the POST\n201 response. Includes the plaintext `secret` which is never\nreturned by any other endpoint.\n",
+        "required": [
+          "id",
+          "url",
+          "secret",
+          "secret_prefix",
+          "is_active",
+          "created_at"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "url": {
+            "type": "string",
+            "format": "uri"
+          },
+          "secret": {
+            "type": "string",
+            "description": "Plaintext signing secret. Returned ONCE in this response. After\nthis response the plaintext is unrecoverable from any API.\nSave it in a secure secret store on your end. To rotate,\ndelete the subscription and create a new one.\n"
+          },
+          "secret_prefix": {
+            "type": "string",
+            "description": "First 12 characters of the signing secret (e.g. `vg_whsec_012`).\nSafe to display in lists, logs, and dashboards.\n"
+          },
+          "is_active": {
+            "type": "boolean"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "Pagination": {
+        "type": "object",
+        "required": [
+          "limit",
+          "offset",
+          "total"
+        ],
+        "properties": {
+          "limit": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "total": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Total row count matching the request's filters (account +\n`source` + `is_active`), ignoring `limit`/`offset`. Use to\ndecide whether further pages exist.\n"
+          }
+        }
+      },
+      "Error": {
+        "type": "object",
+        "description": "Standard error response. The `error` field carries a stable enum\ncode suitable for client diagnostics. The `message` field is human\nreadable and may change wording between releases. The optional\n`issues` array surfaces schema-validation errors and only appears\non `validation_error` responses.\n",
+        "required": [
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "type": "string",
+            "enum": [
+              "invalid_token",
+              "plan_required",
+              "validation_error",
+              "invalid_url",
+              "invalid_channel_id",
+              "not_found",
+              "rate_limited",
+              "limit_reached",
+              "conflict",
+              "internal_error"
+            ],
+            "description": "Stable error code."
+          },
+          "message": {
+            "type": "string",
+            "description": "Human-readable error message."
+          },
+          "reason": {
+            "type": "string",
+            "description": "Stable diagnostic string. Only set on `invalid_url` responses.\nTreat this as an open set and match on the prefix before the colon\nwhen one is present. Bare (colon-less) values: `url_parse_failed`,\n`scheme_must_be_https`, `url_must_not_contain_credentials`,\n`hostname_is_localhost`, `dns_lookup_returned_no_addresses`.\nAddress/message-suffixed values of the form `<reason>: <detail>`:\n`host_resolves_to_private_ip: 10.0.0.5`,\n`ipv4_is_private_or_loopback: 127.0.0.1`,\n`ipv6_is_private_or_loopback: ::1`, and\n`dns_lookup_failed: <message>`.\n"
+          },
+          "issues": {
+            "type": "array",
+            "description": "Schema-validation issues. Only set on `validation_error`\nresponses. Each entry has a `path` array and a `message`.\n",
+            "items": {
+              "type": "object"
+            }
+          }
+        }
+      }
+    },
+    "responses": {
+      "Unauthorized": {
+        "description": "The PAT is missing, malformed, expired, or revoked. The body always\nreports `error: \"invalid_token\"` regardless of the underlying reason.\n",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            },
+            "example": {
+              "error": "invalid_token",
+              "message": "Authentication failed. Provide a valid PAT in the Authorization header."
+            }
+          }
+        }
+      },
+      "PlanRequired": {
+        "description": "PAT is valid but the account is on the free plan. All v1 endpoints\nexcept `/me` require a paid plan.\n",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            },
+            "example": {
+              "error": "plan_required",
+              "message": "This action requires a paid Voicegram plan. Upgrade at https://voicegram.io/dashboard/billing/change-plan."
+            }
+          }
+        }
+      },
+      "NotFound": {
+        "description": "Returned whether the subscription does not exist or belongs to a\ndifferent account.\n",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            },
+            "example": {
+              "error": "not_found"
+            }
+          }
+        }
+      },
+      "RateLimited": {
+        "description": "Per-account rate limit exceeded. Back off and retry.\n",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            },
+            "example": {
+              "error": "rate_limited",
+              "message": "Too many requests. Try again in a moment."
+            }
+          }
+        }
+      },
+      "InternalError": {
+        "description": "Unexpected server error. Safe to retry.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            },
+            "example": {
+              "error": "internal_error"
+            }
+          }
+        }
+      }
+    }
+  },
+  "security": [
+    {
+      "PersonalAccessToken": []
+    }
+  ],
+  "tags": [
+    {
+      "name": "account",
+      "description": "Authenticated account inspection"
+    },
+    {
+      "name": "channels",
+      "description": "Domains and campaigns owned by the account"
+    },
+    {
+      "name": "voicegrams",
+      "description": "Completed Voicegrams (sample data for trigger setup)"
+    },
+    {
+      "name": "webhooks",
+      "description": "Webhook subscriptions and their lifecycle"
+    }
+  ]
+}
