@@ -1,6 +1,6 @@
 # APIs — L
 
-Browsing 130 APIs starting with **L**.
+Browsing 131 APIs starting with **L**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · **L** · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -116,6 +116,7 @@ Browsing 130 APIs starting with **L**.
 | [loops.so](../../../../apis/openapi/loops.so) | [main](../../../../apis/openapi/loops.so/main) |
 | [lotadata.com](../../../../apis/openapi/lotadata.com) | [lotadata](../../../../apis/openapi/lotadata.com/lotadata) · [main](../../../../apis/openapi/lotadata.com/main) |
 | [lottolensph.com](../../../../apis/openapi/lottolensph.com) | [public-data](../../../../apis/openapi/lottolensph.com/public-data) |
+| [loyalty.dog](../../../../apis/openapi/loyalty.dog) | [main](../../../../apis/openapi/loyalty.dog/main) |
 | [loyaltylion.com](../../../../apis/openapi/loyaltylion.com) | [main](../../../../apis/openapi/loyaltylion.com/main) |
 | [loyalzoo.com](../../../../apis/openapi/loyalzoo.com) | [main](../../../../apis/openapi/loyalzoo.com/main) |
 | [lsarespond.com](../../../../apis/openapi/lsarespond.com) | [main](../../../../apis/openapi/lsarespond.com/main) |
