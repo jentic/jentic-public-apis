@@ -1,0 +1,457 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "MailProbe API",
+    "version": "1.2.0",
+    "description": "Real-time email verification REST API, hosted in the EU (France, OVHcloud), GDPR-compliant. Every address is checked live — syntax, DNS MX lookup, SMTP handshake — and **no verification result is ever cached or stored**: each request re-probes and costs 1 credit per address actually probed.\n\nAuthentication is by API key (`Authorization: Bearer mp_live_...`), created from the dashboard. Two endpoints: `POST /api/v1/verify` (1 to 20 addresses per call) and `GET /api/v1/credits`.\n\nEvery result carries both the raw SMTP verdict (`result`) and an actionable rollup (`status`) plus a deterministic 0-100 `score`, so the scoring rubric is auditable rather than a black box.",
+    "termsOfService": "https://mailprobe.dev/terms/",
+    "contact": {
+      "name": "MailProbe",
+      "url": "https://mailprobe.dev/about/"
+    },
+    "x-jentic-source-url": "https://mailprobe.dev/openapi.json"
+  },
+  "servers": [
+    {
+      "url": "https://mailprobe.dev",
+      "description": "Production"
+    }
+  ],
+  "paths": {
+    "/api/v1/verify": {
+      "post": {
+        "tags": [
+          "Verification"
+        ],
+        "summary": "Verify one or more email addresses",
+        "description": "Verifies 1 to 20 addresses in a single synchronous call and always returns an array, in the same order as the input. **One credit is charged per address actually probed.** The whole request is deducted up front and the difference is refunded when it returns, so duplicates (the same address normalised, probed once and copied to every occurrence), syntactically invalid entries and non-string entries cost nothing. If the client disconnects before the results are delivered, the addresses not yet probed are refunded — probes already sent are charged, whatever their verdict.\n\nAddresses are grouped by domain (sequential within a domain to avoid RCPT floods, up to 20 domains in parallel) and de-duplicated within the request. Nothing is cached across requests.\n\nA request answers within about 95 seconds, however slow or silent the mail servers are. An address that has no verdict yet at that point comes back `unknown` with reason `timeout`, at no charge. Send it again later. To get the answer sooner, set `timeout` in the body.",
+        "operationId": "verifyEmails",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VerifyRequest"
+              },
+              "examples": {
+                "single": {
+                  "summary": "One address",
+                  "value": {
+                    "emails": [
+                      "contact@mailprobe.dev"
+                    ]
+                  }
+                },
+                "bulk": {
+                  "summary": "Several addresses",
+                  "value": {
+                    "emails": [
+                      "contact@mailprobe.dev",
+                      "hello@stripe.com",
+                      "noreply@gmial.com"
+                    ]
+                  }
+                },
+                "timed": {
+                  "summary": "An answer within 25 seconds",
+                  "value": {
+                    "emails": [
+                      "contact@mailprobe.dev"
+                    ],
+                    "timeout": 25
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "One entry per submitted address, in input order.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/VerifyEntry"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "402": {
+            "$ref": "#/components/responses/NoCredits"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/ServerError"
+          }
+        }
+      }
+    },
+    "/api/v1/credits": {
+      "get": {
+        "tags": [
+          "Account"
+        ],
+        "summary": "Check credit balance",
+        "description": "Returns the remaining credit balance. Credits are valid for 12 months from the most recent purchase; an expired balance returns `0`.",
+        "operationId": "getCredits",
+        "responses": {
+          "200": {
+            "description": "Current balance",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Credits"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "API key in the `mp_live_...` format, created from the dashboard. Header: `Authorization: Bearer mp_live_...`."
+      }
+    },
+    "schemas": {
+      "VerifyRequest": {
+        "type": "object",
+        "required": [
+          "emails"
+        ],
+        "properties": {
+          "emails": {
+            "type": "array",
+            "description": "Addresses to verify. Entries are lower-cased and trimmed before probing. Up to 20 addresses per call; longer lists belong in the dashboard batch screen, which runs them in the background and retries deferrals. The JSON body is capped at 50 kB, far above 20 addresses of ordinary length.",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "maxItems": 20,
+            "example": [
+              "contact@mailprobe.dev",
+              "hello@stripe.com"
+            ]
+          },
+          "timeout": {
+            "type": "integer",
+            "description": "Seconds after which the request answers, whatever is still being probed. Use it when something in front of your code gives up before 95 seconds: a gateway, a sign-up form, an automation step with a time limit. An address that has no verdict yet at that point comes back `unknown` with reason `timeout`, at no charge.",
+            "minimum": 5,
+            "maximum": 95,
+            "default": 95,
+            "example": 25
+          }
+        }
+      },
+      "VerifyEntry": {
+        "description": "A verification result, or — when the submitted entry was not a JSON string — an `InvalidEntry` placeholder that keeps the array aligned with the input.",
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/VerifyResult"
+          },
+          {
+            "$ref": "#/components/schemas/InvalidEntry"
+          }
+        ]
+      },
+      "VerifyResult": {
+        "type": "object",
+        "properties": {
+          "email": {
+            "type": "string",
+            "description": "The submitted address, lower-cased and trimmed.",
+            "example": "contact@mailprobe.dev"
+          },
+          "result": {
+            "type": "string",
+            "description": "Raw verdict from the verification pipeline.",
+            "enum": [
+              "deliverable",
+              "undeliverable",
+              "catch-all",
+              "unknown"
+            ],
+            "example": "deliverable"
+          },
+          "status": {
+            "type": "string",
+            "description": "Actionable rollup above `result` — the field most integrations filter on. `valid` = deliverable and clean; `invalid` = bad syntax, no MX, or rejected; `risky` = accepted but uncertain (catch-all, role-based, disposable, or a provider that blocks probing such as Microsoft consumer domains); `unknown` = could not be determined by our probe: transient (network-level failure, unresolved MX, greylisting) or a sender-policy rejection that will recur. Filtering out `risky` discards deliverable Microsoft mailboxes — score them instead.",
+            "enum": [
+              "valid",
+              "risky",
+              "invalid",
+              "unknown"
+            ],
+            "example": "valid"
+          },
+          "score": {
+            "type": "integer",
+            "description": "Deterministic 0-100 confidence value derived only from the signals in this response — no model, no stored data. Rough bands: 90+ deliverable and clean, ~65 probe-blocking provider (well-formed address on a live major-provider MX), ~55 catch-all, ~50 greylisted, <=15 disposable, 0 invalid. Role-based and suspected-typo addresses are penalised.",
+            "minimum": 0,
+            "maximum": 100,
+            "example": 92
+          },
+          "catch_all": {
+            "type": "boolean",
+            "description": "The domain accepts every address, so the mailbox cannot be confirmed individually.",
+            "example": false
+          },
+          "reason": {
+            "type": "string",
+            "description": "Why the verdict is not a plain `deliverable`, `null` otherwise. `accept_all` = catch-all domain; `greylisting` is a temporary (4xx) deferral at RCPT TO: the server evaluated the recipient and asked us to come back, so the mailbox likely exists. `deferred` is a temporary (4xx) refusal earlier in the conversation (banner, EHLO or MAIL FROM) — the server turned us away before we could ask about the mailbox, so it tells you nothing about the address and scores lower. Both are worth retrying and both carry `retry_after`. `provider_blocks_probe` is a server where probing is structurally impossible, so the address could not be judged: either a provider known in advance to block probes, or any server answering `530 Authentication required` — it accepts no unauthenticated transaction from anyone, which says nothing about our sender and nothing about the mailbox. `no_banner`, `ehlo_rejected` and `mail_from_rejected` mean the server refused our probe permanently (5xx) at that step and will refuse it again; `unexpected_code` is a permanent (5xx) refusal that named no cause, or a reply outside every known class (neither 250/251, nor 4xx, nor 5xx), and is worth reporting to us; `mailbox_full` = the server confirmed the mailbox but it is over quota (4.2.2), so nothing can be delivered today; `policy_rejected` = the receiving server refused the sender (our IP, HELO or MAIL FROM) with a 5.7.x status — it says nothing about the mailbox. The enhanced status decides, not the reply code: a `571` or a non-standard 5xx carrying 5.7.x is the same refusal as a `554 5.7.1`; `mx_unresolved` = the MX host could not be resolved: transient when `result` is `unknown` (our resolver got no answer, retry later), permanent when `result` is `undeliverable` (DNS says the host does not exist or has no address).",
+            "nullable": true,
+            "enum": [
+              "accept_all",
+              "connection_error",
+              "deferred",
+              "ehlo_rejected",
+              "greylisting",
+              "invalid_syntax",
+              "mail_from_rejected",
+              "mailbox_full",
+              "mx_private_ip",
+              "mx_unresolved",
+              "no_banner",
+              "no_mx",
+              "policy_rejected",
+              "protocol_error",
+              "provider_blocks_probe",
+              "timeout",
+              "unexpected_code",
+              null
+            ],
+            "example": null
+          },
+          "retry_after": {
+            "type": "integer",
+            "description": "Suggested wait, in seconds, whenever the server answered with a temporary (4xx) deferral at any step — greylisting, busy server, temporary sender block. `null` when no retry is advised.",
+            "nullable": true,
+            "example": null
+          },
+          "smtp_code": {
+            "type": "integer",
+            "description": "SMTP reply code observed on the RCPT probe, `null` when no handshake took place.",
+            "nullable": true,
+            "example": 250
+          },
+          "smtp_enhanced_code": {
+            "type": "string",
+            "description": "Enhanced status code (RFC 3463) the server sent alongside the reply, exactly as written — `null` when it sent none. It is what disambiguates `smtp_code`, which cannot: a bare `550` is `5.1.1` when the mailbox does not exist and `5.7.x` when the server refused the sender (our IP, HELO or MAIL FROM) and said nothing about the mailbox. Class `4` values are temporary — `4.2.2` is the over-quota mailbox reported as `mailbox_full`.",
+            "nullable": true,
+            "example": null
+          },
+          "syntax": {
+            "type": "boolean",
+            "description": "The address is RFC-valid.",
+            "example": true
+          },
+          "mx_found": {
+            "type": "boolean",
+            "description": "The domain publishes usable MX records.",
+            "example": true
+          },
+          "smtp_check": {
+            "type": "boolean",
+            "description": "An SMTP conversation actually took place (false when the server was unreachable).",
+            "example": true
+          },
+          "disposable": {
+            "type": "boolean",
+            "description": "Domain listed as disposable / throwaway.",
+            "example": false
+          },
+          "role_based": {
+            "type": "boolean",
+            "description": "Local part is a role alias (info, support, contact…) rather than a person.",
+            "example": false
+          },
+          "free_provider": {
+            "type": "boolean",
+            "description": "Domain belongs to a free consumer mailbox provider.",
+            "example": false
+          },
+          "did_you_mean": {
+            "type": "string",
+            "description": "Suggested correction for a likely typo (e.g. `gmial.com` -> `gmail.com`), `null` when the domain looks intentional.",
+            "nullable": true,
+            "example": null
+          },
+          "mx_records": {
+            "type": "array",
+            "description": "MX hostnames found for the domain, in priority order, capped at the first 10. Empty when none.",
+            "items": {
+              "type": "string"
+            },
+            "example": [
+              "gmail-smtp-in.l.google.com"
+            ]
+          }
+        }
+      },
+      "InvalidEntry": {
+        "type": "object",
+        "description": "Returned in place of a result when the submitted entry was not a JSON string. It has no `result` field, and the credit for that slot is still consumed.",
+        "required": [
+          "error"
+        ],
+        "properties": {
+          "email": {
+            "description": "The offending entry, echoed back as submitted — any JSON value, since only strings are verifiable."
+          },
+          "error": {
+            "type": "string",
+            "enum": [
+              "invalid"
+            ]
+          }
+        }
+      },
+      "Credits": {
+        "type": "object",
+        "properties": {
+          "credits": {
+            "type": "integer",
+            "description": "Credits remaining. `0` when the balance has expired.",
+            "example": 847
+          }
+        }
+      },
+      "Error": {
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "type": "string",
+            "description": "Human-readable message."
+          },
+          "code": {
+            "type": "string",
+            "description": "Stable machine-readable code. Present on every error raised by the API handlers; absent on the two responses produced by the global error handler (413 and an unexpected 500).",
+            "enum": [
+              "INVALID_INPUT",
+              "TOO_MANY",
+              "UNAUTHORIZED",
+              "NO_CREDITS",
+              "PAID_ONLY_DOMAIN",
+              "RATE_LIMITED",
+              "INTERNAL_ERROR"
+            ]
+          }
+        }
+      }
+    },
+    "responses": {
+      "BadRequest": {
+        "description": "Missing or empty `emails` array, or a `timeout` that is not a whole number from 5 to 95 (`INVALID_INPUT`), or more than 20 entries (`TOO_MANY`). No credit is charged.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "Unauthorized": {
+        "description": "Missing `Authorization` header, or a key that is not a valid `mp_live_...` (`UNAUTHORIZED`).",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "NoCredits": {
+        "description": "Balance too low for the whole batch, or expired (`NO_CREDITS`). The message states how many credits are needed and how many remain. Credits are never partially consumed: either the full batch is charged or nothing is.\n\nAlso returned when the request includes an address at a domain that can only be verified with purchased credits, from an account that has never bought any (`PAID_ONLY_DOMAIN`): free credits do not cover that domain. The message names it. The whole request is refused and nothing is charged.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "PayloadTooLarge": {
+        "description": "JSON body above 50 kB. Raised by the body parser, so this response carries no `code` field. Split the batch.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "RateLimited": {
+        "description": "More than 60 requests per minute for this API key, or more than 300 requests per minute from the same IP address, all keys combined (`RATE_LIMITED`). Both limits count requests, not email addresses: a 20-address batch is one request. The response carries a `Retry-After` header: the number of seconds to wait before sending the request again. Standard `RateLimit-*` headers are returned.",
+        "headers": {
+          "Retry-After": {
+            "description": "Number of seconds to wait before sending the request again: the time left until the limit resets.",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "example": 37
+            }
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "ServerError": {
+        "description": "Verification failed server-side (`INTERNAL_ERROR`). The credits for the batch are refunded.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      }
+    }
+  },
+  "security": [
+    {
+      "bearerAuth": []
+    }
+  ],
+  "tags": [
+    {
+      "name": "Verification",
+      "description": "Email address verification"
+    },
+    {
+      "name": "Account",
+      "description": "Credit balance"
+    }
+  ]
+}
