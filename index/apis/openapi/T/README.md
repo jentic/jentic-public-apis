@@ -1,6 +1,6 @@
 # APIs — T
 
-Browsing 266 APIs starting with **T**.
+Browsing 267 APIs starting with **T**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · **T** · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -60,6 +60,7 @@ Browsing 266 APIs starting with **T**.
 | [tech4h.com.br](../../../../apis/openapi/tech4h.com.br) | [main](../../../../apis/openapi/tech4h.com.br/main) |
 | [techy-api.vercel.app](../../../../apis/openapi/techy-api.vercel.app) | [main](../../../../apis/openapi/techy-api.vercel.app/main) |
 | [teiresias.gr](../../../../apis/openapi/teiresias.gr) | [main](../../../../apis/openapi/teiresias.gr/main) |
+| [teleanalyticsapi.app](../../../../apis/openapi/teleanalyticsapi.app) | [main](../../../../apis/openapi/teleanalyticsapi.app/main) |
 | [telegra.ph](../../../../apis/openapi/telegra.ph) | [main](../../../../apis/openapi/telegra.ph/main) |
 | [telegram-finder.io](../../../../apis/openapi/telegram-finder.io) | [main](../../../../apis/openapi/telegram-finder.io/main) |
 | [telegram.org](../../../../apis/openapi/telegram.org) | [main](../../../../apis/openapi/telegram.org/main) |
