@@ -1,6 +1,6 @@
 # APIs — S
 
-Browsing 738 APIs starting with **S**.
+Browsing 739 APIs starting with **S**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · **S** · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -400,6 +400,7 @@ Browsing 738 APIs starting with **S**.
 | [stability.ai](../../../../apis/openapi/stability.ai) | [main](../../../../apis/openapi/stability.ai/main) |
 | [stackexchange.com](../../../../apis/openapi/stackexchange.com) | [main](../../../../apis/openapi/stackexchange.com/main) |
 | [stadiamaps.com](../../../../apis/openapi/stadiamaps.com) | [stadiamaps-geospatial-api](../../../../apis/openapi/stadiamaps.com/stadiamaps-geospatial-api) |
+| [stadiq.app](../../../../apis/openapi/stadiq.app) | [main](../../../../apis/openapi/stadiq.app/main) |
 | [staffviz.com](../../../../apis/openapi/staffviz.com) | [main](../../../../apis/openapi/staffviz.com/main) |
 | [stafiz.net](../../../../apis/openapi/stafiz.net) | [main](../../../../apis/openapi/stafiz.net/main) |
 | [staging-biz.coinprofile.co](../../../../apis/openapi/staging-biz.coinprofile.co) | [partna](../../../../apis/openapi/staging-biz.coinprofile.co/partna) |
