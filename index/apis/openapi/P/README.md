@@ -1,6 +1,6 @@
 # APIs — P
 
-Browsing 356 APIs starting with **P**.
+Browsing 357 APIs starting with **P**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · **P** · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -356,6 +356,7 @@ Browsing 356 APIs starting with **P**.
 | [pusher.com](../../../../apis/openapi/pusher.com) | [main](../../../../apis/openapi/pusher.com/main) |
 | [pushinator.com](../../../../apis/openapi/pushinator.com) | [main](../../../../apis/openapi/pushinator.com/main) |
 | [pushover.net](../../../../apis/openapi/pushover.net) | [main](../../../../apis/openapi/pushover.net/main) |
+| [pushpad.xyz](../../../../apis/openapi/pushpad.xyz) | [main](../../../../apis/openapi/pushpad.xyz/main) |
 | [pushwoosh.com](../../../../apis/openapi/pushwoosh.com) | [main](../../../../apis/openapi/pushwoosh.com/main) |
 | [pxl.to](../../../../apis/openapi/pxl.to) | [main](../../../../apis/openapi/pxl.to/main) |
 | [pydio.com](../../../../apis/openapi/pydio.com) | [main](../../../../apis/openapi/pydio.com/main) |
