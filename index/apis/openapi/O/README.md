@@ -1,6 +1,6 @@
 # APIs — O
 
-Browsing 204 APIs starting with **O**.
+Browsing 205 APIs starting with **O**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · **O** · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -29,6 +29,7 @@ Browsing 204 APIs starting with **O**.
 | [octopus.com](../../../../apis/openapi/octopus.com) | [main](../../../../apis/openapi/octopus.com/main) |
 | [octopus.energy](../../../../apis/openapi/octopus.energy) | [main](../../../../apis/openapi/octopus.energy/main) |
 | [odds-api.net](../../../../apis/openapi/odds-api.net) | [main](../../../../apis/openapi/odds-api.net/main) |
+| [oddsrelay.io](../../../../apis/openapi/oddsrelay.io) | [main](../../../../apis/openapi/oddsrelay.io/main) |
 | [odesli.co](../../../../apis/openapi/odesli.co) | [main](../../../../apis/openapi/odesli.co/main) |
 | [offerlab.com](../../../../apis/openapi/offerlab.com) | [offerlab-api](../../../../apis/openapi/offerlab.com/offerlab-api) |
 | [officient.io](../../../../apis/openapi/officient.io) | [main](../../../../apis/openapi/officient.io/main) |
