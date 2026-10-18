@@ -1,6 +1,6 @@
 # APIs — M
 
-Browsing 307 APIs starting with **M**.
+Browsing 308 APIs starting with **M**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · **M** · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -239,6 +239,7 @@ Browsing 307 APIs starting with **M**.
 | [mongodb.com](../../../../apis/openapi/mongodb.com) | [main](../../../../apis/openapi/mongodb.com/main) |
 | [mono.co](../../../../apis/openapi/mono.co) | [main](../../../../apis/openapi/mono.co/main) |
 | [monobank.ua](../../../../apis/openapi/monobank.ua) | [main](../../../../apis/openapi/monobank.ua/main) |
+| [monodesk.com](../../../../apis/openapi/monodesk.com) | [main](../../../../apis/openapi/monodesk.com/main) |
 | [monsitools.com](../../../../apis/openapi/monsitools.com) | [main](../../../../apis/openapi/monsitools.com/main) |
 | [monto.ai](../../../../apis/openapi/monto.ai) | [main](../../../../apis/openapi/monto.ai/main) |
 | [montonio.com](../../../../apis/openapi/montonio.com) | [main](../../../../apis/openapi/montonio.com/main) |
