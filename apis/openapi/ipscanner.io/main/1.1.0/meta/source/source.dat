@@ -1,0 +1,1122 @@
+openapi: 3.0.3
+info:
+  title: IPScanner API
+  description: >-
+    IP Detection API: network-class detection (VPN, proxy, Tor, hosting,
+    datacenter, mobile, residential), geolocation, ASN/network ownership, WHOIS,
+    AI-agent verification and location attestation.
+
+
+    Authenticated routes take `Authorization: Bearer <api_key>`. Get a key at
+    https://ipscanner.io/signup. The free tier is 30,000 requests a month, up to
+    1,000 a day and 100 an hour. Paid plans have no daily cap. One subscription
+    covers every product, and every metered call spends the same monthly
+    allowance.
+
+
+    `GET /v1/demo/{ip}` needs no key at all, so an integration can be tried
+    before an account exists:
+
+
+    `curl https://ipscanner.io/v1/demo/8.8.8.8`
+  version: 1.1.0
+  contact:
+    name: IPScanner
+    url: https://ipscanner.io
+servers:
+  - url: https://ipscanner.io
+    description: Production
+tags:
+  - name: Public
+    description: No API key required. Rate limited per IP.
+  - name: Detection
+    description: Network class, anonymisation and risk scoring for an address.
+  - name: Geolocation
+    description: Where an address is, and who owns the network it sits on.
+  - name: WHOIS
+    description: Registration records for a domain.
+  - name: Email
+    description: Signup email checks (syntax, throwaway domains, MX, typos, role addresses).
+  - name: Agentscan
+    description: AI-agent and crawler verdicts. Bodies are snake_case.
+  - name: Provenance
+    description: Jurisdiction attestation with a hash-chained audit record. Bodies are snake_case.
+  - name: Account
+    description: Your plan, quota and usage.
+paths:
+  /v1/demo/{ip}:
+    get:
+      tags: [Public]
+      summary: Keyless demo lookup
+      description: >-
+        The full combined lookup for one address with no API key: network class
+        verdict, purity score, VPN/proxy/Tor flags, geolocation and ASN. The body
+        is identical to `POST /v1/ip/lookup`, so what you see here is what the
+        keyed endpoint returns.
+
+
+        Rate limited per IP (100 requests per 24 hours, `DEMO_LIMIT`). Responses
+        are sent with `Cache-Control: no-store` and an `X-IPS-Demo: true` header.
+      operationId: demoLookup
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/IP'
+      responses:
+        '200':
+          description: Combined lookup result
+          headers:
+            X-IPS-Demo:
+              description: Always `true` on this route.
+              schema: { type: string, example: 'true' }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LookupResult'
+        '400':
+          $ref: '#/components/responses/InvalidIP'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/ServerError'
+  /v1/myip:
+    get:
+      tags: [Public]
+      summary: Caller's IP info
+      description: >-
+        Returns the caller's IPv4/IPv6 plus geolocation and ASN data. Public,
+        no auth. Rate limited per IP (60 req/hour).
+      operationId: getMyIP
+      security: []
+      responses:
+        '200':
+          description: IP info
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MyIPResponse'
+        '400':
+          $ref: '#/components/responses/InvalidIP'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/ServerError'
+  /v1/crawlers/verify:
+    post:
+      tags: [Public]
+      summary: Verify a crawler claim
+      description: >-
+        Is this address really the crawler its user agent claims to be? Checks
+        forward-confirmed reverse DNS, the operator's published egress ranges and
+        the operator ASN, and reports which checks ran.
+
+
+        No API key. Rate limited per IP (5 requests per hour,
+        `CRAWLER_VERIFY_LIMIT`). `POST /v1/agentscan/verify` is the same answer
+        against your account allowance.
+      operationId: verifyCrawler
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CrawlerVerifyRequest'
+      responses:
+        '200':
+          description: Verification result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CrawlerVerifyResponse'
+        '400':
+          $ref: '#/components/responses/InvalidIP'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/ServerError'
+  /v1/asn/directory:
+    get:
+      tags: [Public]
+      summary: ASN directory index and search
+      description: >-
+        The autonomous systems in the GeoLite2-ASN database, either largest
+        first or filtered by a search term. Backs the public directory at
+        https://ipscanner.io/asn.
+
+
+        With `q`, it matches the organisation name and the number itself, so
+        `comcast`, `15169` and `AS15169` all work; an exact number match is
+        always the first result. Without `q`, it returns the `top` largest
+        networks ordered `by` total IPv4 addresses or by prefix count.
+
+
+        No API key. Rate limited per IP (600 requests per hour,
+        `ASN_DIR_LIMIT`). Answers are derived from a static database, so they
+        are cacheable for an hour.
+      operationId: asnDirectory
+      security: []
+      parameters:
+        - name: top
+          in: query
+          description: How many networks to return (1-1000). Ignored when `q` is set.
+          schema: { type: integer, default: 100, minimum: 1, maximum: 1000 }
+          example: 200
+        - name: by
+          in: query
+          description: Ordering for the top list.
+          schema: { type: string, enum: [addresses, prefixes], default: addresses }
+        - name: q
+          in: query
+          description: Search the organisation name or the ASN.
+          schema: { type: string }
+          example: comcast
+        - name: limit
+          in: query
+          description: How many search results to return (1-100). Only used with `q`.
+          schema: { type: integer, default: 20, minimum: 1, maximum: 100 }
+      responses:
+        '200':
+          description: Matching autonomous systems
+          headers:
+            Cache-Control:
+              schema: { type: string, example: 'public, max-age=3600' }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AsnDirectoryList'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/ServerError'
+  /v1/asn/directory/{asn}:
+    get:
+      tags: [Public]
+      summary: One autonomous system
+      description: >-
+        Everything the directory knows about one network: the organisation, how
+        many IPv4 and IPv6 prefixes it announces, how many IPv4 addresses that
+        adds up to, a network type, up to 12 of its largest prefixes, and how
+        many of its prefixes sit inside the X4BNet VPN and datacenter range
+        lists.
+
+
+        The number may be written either way round: `AS15169` and `15169` are
+        the same request.
+
+
+        No API key. Rate limited per IP (600 requests per hour,
+        `ASN_DIR_LIMIT`).
+      operationId: asnDirectoryEntry
+      security: []
+      parameters:
+        - name: asn
+          in: path
+          required: true
+          description: Autonomous system number, with or without the `AS` prefix.
+          schema: { type: string }
+          example: AS15169
+      responses:
+        '200':
+          description: The autonomous system
+          headers:
+            Cache-Control:
+              schema: { type: string, example: 'public, max-age=3600' }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AsnDirectoryEntry'
+        '400':
+          description: The number could not be read as an ASN
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: No such autonomous system in the database
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/ServerError'
+  /v1/ip/lookup:
+    post:
+      tags: [Detection]
+      summary: Combined lookup
+      description: >-
+        One target, every answer: network class verdict, purity score,
+        VPN/proxy/Tor flags, geolocation, ASN and (for hostnames) WHOIS. The
+        target may be an IPv4 or IPv6 address, a CIDR range, a hostname or a URL.
+
+
+        A sub-lookup that fails is named in `degraded` rather than failing the
+        request: WHOIS being down should not cost you the geolocation.
+      operationId: ipLookup
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [target]
+              properties:
+                target:
+                  type: string
+                  description: IP, CIDR, hostname or URL.
+                  example: 8.8.8.8
+      responses:
+        '200':
+          description: Combined lookup result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LookupResult'
+        '400':
+          description: Unparseable or unresolved target
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/ServerError'
+  /v1/vpn/{ip}:
+    get:
+      tags: [Detection]
+      summary: VPN detection
+      description: >-
+        Network class and risk score for an address. `isVpn` is true only for the
+        anonymising classes (`vpn`, `residential_proxy`, `tor`); a cloud or
+        hosting address reports `networkClass: hosting` with `isVpn: false`.
+      operationId: getVpnStatus
+      parameters:
+        - $ref: '#/components/parameters/IP'
+      responses:
+        '200':
+          description: VPN detection result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VpnResponse'
+        '400':
+          $ref: '#/components/responses/InvalidIP'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/ServerError'
+  /v1/proxy/{ip}:
+    get:
+      tags: [Detection]
+      summary: Proxy detection
+      description: >-
+        Network class and risk score for an address. `isProxy` is true only for
+        the anonymising classes (`vpn`, `residential_proxy`, `tor`).
+      operationId: getProxyStatus
+      parameters:
+        - $ref: '#/components/parameters/IP'
+      responses:
+        '200':
+          description: Proxy detection result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProxyResponse'
+        '400':
+          $ref: '#/components/responses/InvalidIP'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/ServerError'
+  /v1/geo/{ip}:
+    get:
+      tags: [Geolocation]
+      summary: Geolocation
+      description: Geolocation data for an IP address.
+      operationId: getGeolocation
+      parameters:
+        - $ref: '#/components/parameters/IP'
+      responses:
+        '200':
+          description: Geolocation data
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GeolocationResponse'
+        '400':
+          $ref: '#/components/responses/InvalidIP'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/ServerError'
+  /v1/asn/{ip}:
+    get:
+      tags: [Geolocation]
+      summary: ASN data
+      description: ASN / network ownership data for an IP address.
+      operationId: getAsnData
+      parameters:
+        - $ref: '#/components/parameters/IP'
+      responses:
+        '200':
+          description: ASN data
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AsnResponse'
+        '400':
+          $ref: '#/components/responses/InvalidIP'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/ServerError'
+  /v1/whois/{domain}:
+    get:
+      tags: [WHOIS]
+      summary: WHOIS lookup
+      description: WHOIS record for a domain.
+      operationId: getWhoisInfo
+      parameters:
+        - name: domain
+          in: path
+          required: true
+          description: Domain name (e.g. example.com)
+          schema:
+            type: string
+          example: example.com
+      responses:
+        '200':
+          description: WHOIS record
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WhoisResponse'
+        '400':
+          description: Invalid domain
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/ServerError'
+  /v1/email/check:
+    post:
+      tags: [Email]
+      summary: Email check
+      description: >-
+        Checks an address before you accept a signup: syntax, throwaway domains,
+        whether the domain receives mail (MX), typos of big webmail domains and role
+        mailboxes. The mailbox itself is not probed (mailbox is always not_checked).
+        One request per address. The address is not stored.
+      operationId: checkEmail
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email: { type: string, maxLength: 320, example: jane@outlok.com }
+      responses:
+        '200':
+          description: Email check
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmailCheck'
+        '400':
+          description: Missing or oversized email (invalid_request)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+    get:
+      tags: [Email]
+      summary: Email check (query string)
+      description: The same check with the address in ?email=.
+      operationId: checkEmailGet
+      parameters:
+        - name: email
+          in: query
+          required: true
+          schema: { type: string, maxLength: 320 }
+          example: jane@outlok.com
+      responses:
+        '200':
+          description: Email check
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmailCheck'
+        '400':
+          description: Missing or oversized email (invalid_request)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+  /v1/agentscan/check:
+    post:
+      tags: [Agentscan]
+      summary: Agent verdict
+      description: >-
+        Classify one inbound request as human, AI agent, verified crawler or
+        impostor, and say what to do about it.
+
+
+        Agentscan request and response bodies are snake_case; the IP Detection
+        surface above is camelCase. That split is deliberate and is not being
+        harmonised.
+      operationId: agentscanCheck
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AgentscanCheckRequest'
+      responses:
+        '200':
+          description: Agent verdict
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentscanCheckResponse'
+        '400':
+          $ref: '#/components/responses/InvalidIP'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/ServerError'
+  /v1/provenance/check:
+    post:
+      tags: [Provenance]
+      summary: Location attestation
+      description: >-
+        Classify the connection's origin, apply the jurisdiction policy, and
+        write a hash-chained attestation record. Returns the verdict plus the
+        attestation id, which `GET /v1/provenance/export` can later produce
+        signed evidence for.
+
+
+        Request and response bodies are snake_case.
+      operationId: provenanceCheck
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProvenanceCheckRequest'
+      responses:
+        '200':
+          description: Attestation result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProvenanceCheckResponse'
+        '400':
+          $ref: '#/components/responses/InvalidIP'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/ServerError'
+  /v1/user/limits:
+    get:
+      tags: [Account]
+      summary: Account limits & usage
+      description: >-
+        Account type, monthly limit, current usage, remaining and reset date. The
+        limit is one pooled allowance shared by every product, and the billing
+        window is anchored to your signup day of month, not the calendar month.
+      operationId: getUserLimits
+      responses:
+        '200':
+          description: Account limits
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserLimitsResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/ServerError'
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: 'Authorization: Bearer <api_key>'
+  parameters:
+    IP:
+      name: ip
+      in: path
+      required: true
+      description: IPv4 or IPv6 address
+      schema:
+        type: string
+      example: 8.8.8.8
+  responses:
+    InvalidIP:
+      description: Invalid IP address
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Unauthorized:
+      description: Missing or invalid API key
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    RateLimited:
+      description: >-
+        A limit ran out. `reason` names it (hourly_limit, daily_quota,
+        monthly_quota, insufficient_for_batch) and `retryAfter` says when it
+        resets. The X-RateLimit-* headers describe the limit that was hit.
+      headers:
+        Retry-After:
+          schema: { type: integer }
+        X-RateLimit-Limit:
+          schema: { type: integer }
+        X-RateLimit-Remaining:
+          schema: { type: integer }
+        X-RateLimit-Reset:
+          schema: { type: integer }
+        X-RateLimit-Daily-Limit:
+          schema: { type: integer }
+        X-RateLimit-Daily-Remaining:
+          schema: { type: integer }
+        X-RateLimit-Daily-Reset:
+          schema: { type: integer }
+        X-RateLimit-Hourly-Limit:
+          schema: { type: integer }
+        X-RateLimit-Hourly-Remaining:
+          schema: { type: integer }
+        X-RateLimit-Hourly-Reset:
+          schema: { type: integer }
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/RateLimitedResponse'
+    ServerError:
+      description: Server error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+  schemas:
+    EmailCheck:
+      type: object
+      description: The answer of an email check.
+      properties:
+        email: { type: string, example: jane@outlok.com }
+        status:
+          type: string
+          enum: [valid, invalid, risky, unknown]
+          example: risky
+        reason:
+          type: string
+          nullable: true
+          enum: [syntax, no_mx, null_mx, disposable, typo, role, dns_error, quota, null]
+          example: typo
+        suggestion: { type: string, nullable: true, example: jane@outlook.com }
+        domain: { type: string, example: outlok.com }
+        checks:
+          $ref: '#/components/schemas/EmailChecks'
+        mailbox: { type: string, enum: [not_checked], example: not_checked }
+    EmailChecks:
+      type: object
+      properties:
+        syntax: { type: boolean }
+        mx: { type: boolean, nullable: true, description: 'null when DNS was not asked or did not answer' }
+        disposable: { type: boolean }
+        role: { type: boolean }
+        freeProvider: { type: boolean }
+    AsnDirectorySummary:
+      type: object
+      description: One autonomous system as it appears in a list.
+      properties:
+        asn: { type: integer, example: 7922 }
+        label: { type: string, example: AS7922 }
+        org: { type: string, example: COMCAST-7922 }
+        networkType:
+          $ref: '#/components/schemas/AsnNetworkType'
+        ipv4Prefixes: { type: integer, example: 17456 }
+        ipv6Prefixes: { type: integer, example: 45593 }
+        prefixes:
+          type: integer
+          description: Both families added together.
+          example: 63049
+        addresses:
+          type: integer
+          format: int64
+          description: Total IPv4 addresses across every prefix. IPv6 is deliberately not counted; the numbers are meaningless at that scale.
+          example: 67534775
+    AsnDirectoryList:
+      type: object
+      properties:
+        total:
+          type: integer
+          description: Autonomous systems in the database, not in this response.
+          example: 79002
+        count: { type: integer, example: 3 }
+        by:
+          type: string
+          enum: [addresses, prefixes]
+          description: Present on the top list only.
+        query:
+          type: string
+          description: Present on a search only.
+          example: comcast
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/AsnDirectorySummary'
+    AsnDirectoryEntry:
+      type: object
+      properties:
+        asn: { type: integer, example: 15169 }
+        label: { type: string, example: AS15169 }
+        org: { type: string, example: GOOGLE }
+        networkType:
+          $ref: '#/components/schemas/AsnNetworkType'
+        ipv4Prefixes: { type: integer, example: 162 }
+        ipv6Prefixes: { type: integer, example: 131 }
+        prefixes: { type: integer, example: 293 }
+        addresses: { type: integer, format: int64, example: 2725632 }
+        samplePrefixes:
+          type: array
+          description: Up to 12 prefixes, IPv4 largest first, then IPv6.
+          items:
+            type: object
+            properties:
+              prefix: { type: string, example: 35.208.0.0/13 }
+              version: { type: integer, enum: [4, 6], example: 4 }
+              addresses:
+                type: integer
+                format: int64
+                description: IPv4 only; omitted for IPv6.
+                example: 524288
+        vpnRangePrefixes:
+          type: integer
+          description: How many of this network's IPv4 prefixes start inside the X4BNet VPN range list.
+          example: 0
+        datacenterRangePrefixes:
+          type: integer
+          description: The same count against the X4BNet datacenter range list.
+          example: 122
+        rangesLoaded:
+          type: boolean
+          description: >-
+            Whether the two counts above mean anything. The range lists are
+            fetched at startup, so a freshly restarted service can hold a
+            complete index and no range data, and a zero would otherwise read
+            as an answer.
+          example: true
+    AsnNetworkType:
+      type: string
+      description: >-
+        What kind of network this is, read from the organisation name and from
+        the operator table the detection engine uses. `unknown` is the honest
+        answer for most of the long tail and is not a failure.
+      enum: [hosting, isp, mobile, vpn, tor, education, government, unknown]
+      example: hosting
+    NetworkClass:
+      type: string
+      description: >-
+        What the address is. `vpn`, `residential_proxy` and `tor` are the
+        anonymising classes and are the only ones that set `anonymized` (and
+        `isVpn` / `isProxy`). `hosting` and `datacenter` say the address lives in
+        somebody's infrastructure, which is a fact about ownership, not about
+        hiding.
+      enum:
+        - residential_clean
+        - mobile
+        - hosting
+        - datacenter
+        - vpn
+        - residential_proxy
+        - tor
+        - unknown
+      example: datacenter
+    MyIPResponse:
+      type: object
+      properties:
+        ipv4: { type: string, example: 8.8.8.8 }
+        ipv6: { type: string, example: '2001:4860:4860::8888' }
+        country: { type: string, example: United States }
+        countryCode: { type: string, example: US }
+        city: { type: string, example: Mountain View }
+        region: { type: string, example: California }
+        postalCode: { type: string, example: '94035' }
+        latitude: { type: number, format: double, example: 37.386 }
+        longitude: { type: number, format: double, example: -122.0838 }
+        timezone: { type: string, example: America/Los_Angeles }
+        accuracyRadius: { type: integer, example: 1000 }
+        asn: { type: string, example: AS15169 }
+        asnName: { type: string, example: Google LLC }
+        asnType: { type: string, example: hosting }
+        asnCountry: { type: string, example: US }
+    VpnResponse:
+      type: object
+      properties:
+        ip: { type: string, example: 8.8.8.8 }
+        isVpn:
+          type: boolean
+          description: True only for `vpn`, `residential_proxy` and `tor`.
+          example: false
+        isTor: { type: boolean, example: false }
+        networkClass:
+          $ref: '#/components/schemas/NetworkClass'
+        anonymized:
+          type: boolean
+          description: True when the class means the traffic is deliberately anonymised.
+          example: false
+        provider: { type: string, example: GOOGLE }
+        riskScore: { type: integer, example: 60 }
+        purity:
+          $ref: '#/components/schemas/Purity'
+        deductionCount:
+          type: integer
+          description: Locked (below Starter) responses only. How many deductions the withheld purity holds.
+          example: 2
+      example:
+        ip: 8.8.8.8
+        isVpn: false
+        isTor: false
+        networkClass: datacenter
+        anonymized: false
+        provider: GOOGLE
+        riskScore: 60
+    ProxyResponse:
+      type: object
+      properties:
+        ip: { type: string, example: 8.8.8.8 }
+        isProxy:
+          type: boolean
+          description: True only for `vpn`, `residential_proxy` and `tor`.
+          example: false
+        isTor: { type: boolean, example: false }
+        networkClass:
+          $ref: '#/components/schemas/NetworkClass'
+        anonymized:
+          type: boolean
+          description: True when the class means the traffic is deliberately anonymised.
+          example: false
+        provider: { type: string, example: GOOGLE }
+        riskScore: { type: integer, example: 60 }
+        purity:
+          $ref: '#/components/schemas/Purity'
+        deductionCount:
+          type: integer
+          description: Locked (below Starter) responses only. How many deductions the withheld purity holds.
+          example: 2
+      example:
+        ip: 8.8.8.8
+        isProxy: false
+        isTor: false
+        networkClass: datacenter
+        anonymized: false
+        provider: GOOGLE
+        riskScore: 60
+    Target:
+      type: object
+      description: The input, parsed.
+      properties:
+        raw: { type: string, example: 8.8.8.8 }
+        kind:
+          type: string
+          enum: [ipv4, ipv6, cidr, hostname]
+          example: ipv4
+        ip: { type: string, example: 8.8.8.8 }
+        hostname: { type: string, example: dns.google }
+        network: { type: string, example: 8.8.8.0/24 }
+        addresses:
+          type: integer
+          format: int64
+          description: >-
+            How many addresses a CIDR covers. Omitted for ranges wider than
+            65,536 hosts, where the number stops being something you can act on.
+          example: 256
+    ReservedRange:
+      type: object
+      description: Why an address is not publicly routable.
+      properties:
+        reserved: { type: boolean, example: false }
+        label: { type: string, example: loopback }
+        detail: { type: string, example: 'RFC 1122: the host itself' }
+    Verdict:
+      type: object
+      properties:
+        classification:
+          $ref: '#/components/schemas/NetworkClass'
+        anonymized: { type: boolean, example: false }
+        confidence: { type: number, format: float, example: 0.9 }
+        method:
+          type: string
+          description: What produced the verdict (range hit, ip_state, asn, reserved).
+          example: range:datacenter
+    Purity:
+      type: object
+      description: Composite cleanliness score, 0-100, higher is cleaner.
+      properties:
+        score: { type: integer, example: 62 }
+        grade: { type: string, enum: ['S+', S, A, B, C], example: B }
+        verdict: { type: string, enum: [clean, suspect, dirty], example: suspect }
+        deductions:
+          type: array
+          items:
+            type: object
+            properties:
+              factor: { type: string, example: network_origin }
+              points: { type: integer, description: Points removed from 100 (a stale-sighting refund is negative)., example: 30 }
+              detail: { type: string, example: datacenter address }
+    LookupResult:
+      type: object
+      description: >-
+        The combined answer for one target, returned by both `GET /v1/demo/{ip}`
+        and `POST /v1/ip/lookup`.
+      properties:
+        target:
+          $ref: '#/components/schemas/Target'
+        reserved:
+          $ref: '#/components/schemas/ReservedRange'
+        verdict:
+          $ref: '#/components/schemas/Verdict'
+        purity:
+          $ref: '#/components/schemas/Purity'
+        deductionCount:
+          type: integer
+          description: Locked (below Starter) responses only. How many deductions the withheld purity holds.
+          example: 2
+        isVpn: { type: boolean, example: false }
+        isProxy: { type: boolean, example: false }
+        isTor: { type: boolean, example: false }
+        provider: { type: string, example: GOOGLE }
+        riskScore: { type: integer, example: 60 }
+        networkType:
+          type: string
+          description: ASN type axis (hosting, isp, vpn, education, government, mobile).
+          example: hosting
+        geo:
+          $ref: '#/components/schemas/GeolocationResponse'
+        asn:
+          $ref: '#/components/schemas/AsnResponse'
+        whois:
+          $ref: '#/components/schemas/WhoisResponse'
+        degraded:
+          type: array
+          description: Sub-lookups that failed. A partial answer beats a 500.
+          items: { type: string }
+          example: [whois]
+        at: { type: string, format: date-time, example: '2026-09-06T10:15:00Z' }
+    GeolocationResponse:
+      type: object
+      properties:
+        ip: { type: string, example: 8.8.8.8 }
+        country: { type: string, example: United States }
+        countryCode: { type: string, example: US }
+        city: { type: string, example: Mountain View }
+        region: { type: string, example: California }
+        postalCode: { type: string, example: '94035' }
+        latitude: { type: number, format: double, example: 37.386 }
+        longitude: { type: number, format: double, example: -122.0838 }
+        timezone: { type: string, example: America/Los_Angeles }
+        accuracyRadius: { type: integer, example: 1000 }
+    AsnResponse:
+      type: object
+      properties:
+        ip: { type: string, example: 8.8.8.8 }
+        asn: { type: string, example: AS15169 }
+        name: { type: string, example: Google LLC }
+        type: { type: string, example: hosting }
+        country: { type: string, example: US }
+    WhoisResponse:
+      type: object
+      properties:
+        domain: { type: string, example: example.com }
+        registrar: { type: string, example: 'RESERVED-Internet Assigned Numbers Authority' }
+        registeredOn: { type: string, example: '1995-08-14' }
+        expiresOn: { type: string, example: '2025-08-13' }
+        lastUpdated: { type: string, example: '2024-08-14' }
+        nameservers:
+          type: array
+          items: { type: string }
+        status:
+          type: array
+          items: { type: string }
+        privacyProtection: { type: boolean }
+    CrawlerVerifyRequest:
+      type: object
+      description: Give an IP plus either a directory slug or the user agent from the log line.
+      required: [ip]
+      properties:
+        ip: { type: string, example: 66.249.66.1 }
+        bot:
+          type: string
+          description: Directory slug from the crawler catalogue.
+          example: googlebot
+        user_agent:
+          type: string
+          example: 'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)'
+    CrawlerVerifyResponse:
+      type: object
+      properties:
+        ip: { type: string, example: 66.249.66.1 }
+        slug: { type: string, example: googlebot }
+        crawler: { type: string, example: Googlebot }
+        userAgent: { type: string }
+        outcome:
+          type: string
+          description: >-
+            `unverifiable` is not a soft `spoofed`. `spoofed` requires that every
+            check which could run, ran, and all of them refuted the claim; one
+            unreachable operator file disqualifies it outright.
+          enum: [verified, spoofed, unverifiable]
+          example: verified
+        method: { type: string, example: rdns }
+        summary: { type: string }
+        checks:
+          type: array
+          items:
+            type: object
+            properties:
+              name: { type: string, example: reverse_dns }
+              status: { type: string, example: pass }
+              detail: { type: string }
+        networkOrigin:
+          $ref: '#/components/schemas/NetworkClass'
+        anonymized: { type: boolean }
+        asn: { type: string, example: AS15169 }
+        asnName: { type: string, example: Google LLC }
+        country: { type: string, example: US }
+        hostname: { type: string, example: crawl-66-249-66-1.googlebot.com }
+        docs: { type: string }
+        checkedAt: { type: string, format: date-time }
+    AgentscanCheckRequest:
+      type: object
+      description: snake_case, as the whole Agentscan surface is.
+      required: [ip]
+      properties:
+        request_id: { type: string, example: req_01H9 }
+        ip: { type: string, example: 66.249.66.1 }
+        user_agent: { type: string, example: 'Mozilla/5.0 (compatible; GPTBot/1.0)' }
+        ja4: { type: string }
+        headers:
+          type: object
+          additionalProperties: { type: string }
+        headless_flags:
+          type: object
+          additionalProperties: { type: boolean }
+    AgentscanCheckResponse:
+      type: object
+      properties:
+        class:
+          type: string
+          enum: [human, known_bot, ai_agent, malicious_automation]
+          example: known_bot
+        confidence: { type: number, format: float, example: 0.95 }
+        action: { type: string, enum: [allow, flag, block], example: allow }
+        signals:
+          type: object
+          description: >-
+            network_origin, anonymized, headless, headless_flags,
+            header_consistency, ai_crawler, ai_ident, ai_vendor, allowlist_type,
+            allowlist_verified, ja4.
+          additionalProperties: true
+    ProvenanceCheckRequest:
+      type: object
+      description: snake_case, as the whole Provenance surface is.
+      required: [ip, claimed_jurisdiction]
+      properties:
+        ip: { type: string, example: 8.8.8.8 }
+        claimed_jurisdiction: { type: string, example: DE }
+        request_context:
+          type: object
+          additionalProperties: true
+    ProvenanceCheckResponse:
+      type: object
+      properties:
+        network_origin:
+          $ref: '#/components/schemas/NetworkClass'
+        anonymized: { type: boolean, example: false }
+        method: { type: string, example: range:datacenter }
+        confidence: { type: number, format: float, example: 0.9 }
+        policy_action: { type: string, example: allow }
+        attestation_id: { type: integer, format: int64, example: 4821 }
+    UserLimitsResponse:
+      type: object
+      properties:
+        accountType: { type: string, example: Free }
+        limit:
+          type: integer
+          description: Monthly request allowance, pooled across every product.
+          example: 30000
+        usage: { type: integer, example: 412 }
+        remaining: { type: integer, example: 29588 }
+        resetDate: { type: string, example: '2026-10-15' }
+      example:
+        accountType: Free
+        limit: 30000
+        usage: 412
+        remaining: 29588
+        resetDate: '2026-10-15'
+    ErrorResponse:
+      type: object
+      properties:
+        error: { type: string, example: invalid_ip }
+        message: { type: string, example: Invalid IP address format }
+        details: {}
+    RateLimitedResponse:
+      type: object
+      properties:
+        error: { type: string, example: rate_limit_exceeded }
+        reason:
+          type: string
+          enum: [hourly_limit, daily_quota, monthly_quota, insufficient_for_batch]
+          example: daily_quota
+        message: { type: string, example: "You have used today's 1,000 requests. The Starter plan has no daily cap." }
+        plan: { type: string, example: Free }
+        limit: { type: integer, example: 1000 }
+        usage: { type: integer, example: 1000 }
+        remaining: { type: integer, example: 0 }
+        needed: { type: integer, description: Only for insufficient_for_batch. }
+        resetDate: { type: string, format: date, example: '2026-10-07' }
+        resetAt: { type: string, format: date-time, example: '2026-10-07T00:00:00Z' }
+        retryAfter: { type: integer, example: 3600 }
+        softBlock: { type: boolean, example: true }
+        upgrade:
+          type: object
+          properties:
+            recommendedPlan: { type: string, example: Starter }
+            url: { type: string, example: https://ipscanner.io/pricing }
+            message: { type: string }
+security:
+  - bearerAuth: []
