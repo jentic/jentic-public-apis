@@ -1,6 +1,6 @@
 # APIs — C
 
-Browsing 482 APIs starting with **C**.
+Browsing 483 APIs starting with **C**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · **C** · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -211,6 +211,7 @@ Browsing 482 APIs starting with **C**.
 | [clockworkrecruiting.com](../../../../apis/openapi/clockworkrecruiting.com) | [main](../../../../apis/openapi/clockworkrecruiting.com/main) |
 | [cloro.dev](../../../../apis/openapi/cloro.dev) | [main](../../../../apis/openapi/cloro.dev/main) |
 | [close.com](../../../../apis/openapi/close.com) | [close-crm-api](../../../../apis/openapi/close.com/close-crm-api) |
+| [closedloop.sh](../../../../apis/openapi/closedloop.sh) | [main](../../../../apis/openapi/closedloop.sh/main) |
 | [closum.com](../../../../apis/openapi/closum.com) | [main](../../../../apis/openapi/closum.com/main) |
 | [cloud-elements.com](../../../../apis/openapi/cloud-elements.com) | [ecwid](../../../../apis/openapi/cloud-elements.com/ecwid) |
 | [cloud.acronis.com](../../../../apis/openapi/cloud.acronis.com) | [cyber-protect-cloud-api](../../../../apis/openapi/cloud.acronis.com/cyber-protect-cloud-api) |
