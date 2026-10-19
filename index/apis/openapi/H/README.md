@@ -1,6 +1,6 @@
 # APIs — H
 
-Browsing 141 APIs starting with **H**.
+Browsing 142 APIs starting with **H**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · **H** · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -30,6 +30,7 @@ Browsing 141 APIs starting with **H**.
 | [harvis.dev](../../../../apis/openapi/harvis.dev) | [main](../../../../apis/openapi/harvis.dev/main) |
 | [hashicorp.com](../../../../apis/openapi/hashicorp.com) | [nomad](../../../../apis/openapi/hashicorp.com/nomad) |
 | [hashn.com](../../../../apis/openapi/hashn.com) | [main](../../../../apis/openapi/hashn.com/main) |
+| [hastewire.com](../../../../apis/openapi/hastewire.com) | [main](../../../../apis/openapi/hastewire.com/main) |
 | [hasura.io](../../../../apis/openapi/hasura.io) | [main](../../../../apis/openapi/hasura.io/main) |
 | [haterpicks.app](../../../../apis/openapi/haterpicks.app) | [main](../../../../apis/openapi/haterpicks.app/main) |
 | [hatz.ai](../../../../apis/openapi/hatz.ai) | [main](../../../../apis/openapi/hatz.ai/main) |
