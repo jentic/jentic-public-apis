@@ -1,6 +1,6 @@
 # APIs — J
 
-Browsing 48 APIs starting with **J**.
+Browsing 49 APIs starting with **J**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · **J** · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -20,6 +20,7 @@ Browsing 48 APIs starting with **J**.
 | [jeyaya.com](../../../../apis/openapi/jeyaya.com) | [main](../../../../apis/openapi/jeyaya.com/main) |
 | [jibble.io](../../../../apis/openapi/jibble.io) | [main](../../../../apis/openapi/jibble.io/main) |
 | [jid.com](../../../../apis/openapi/jid.com) | [main](../../../../apis/openapi/jid.com/main) |
+| [jigsawstack.com](../../../../apis/openapi/jigsawstack.com) | [main](../../../../apis/openapi/jigsawstack.com/main) |
 | [jina.ai](../../../../apis/openapi/jina.ai) | [jina-ai](../../../../apis/openapi/jina.ai/jina-ai) |
 | [jirafe.com](../../../../apis/openapi/jirafe.com) | [jirafe-events](../../../../apis/openapi/jirafe.com/jirafe-events) · [main](../../../../apis/openapi/jirafe.com/main) |
 | [jobadder.com](../../../../apis/openapi/jobadder.com) | [main](../../../../apis/openapi/jobadder.com/main) |
