@@ -1,6 +1,6 @@
 # APIs — R
 
-Browsing 271 APIs starting with **R**.
+Browsing 272 APIs starting with **R**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · **R** · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -171,6 +171,7 @@ Browsing 271 APIs starting with **R**.
 | [rev.ai](../../../../apis/openapi/rev.ai) | [asynchronous-speech-to-text-api-documentation](../../../../apis/openapi/rev.ai/asynchronous-speech-to-text-api-documentation) · [main](../../../../apis/openapi/rev.ai/main) |
 | [rev.io](../../../../apis/openapi/rev.io) | [revio-api](../../../../apis/openapi/rev.io/revio-api) |
 | [revaluate.com](../../../../apis/openapi/revaluate.com) | [main](../../../../apis/openapi/revaluate.com/main) |
+| [revdesk.com](../../../../apis/openapi/revdesk.com) | [main](../../../../apis/openapi/revdesk.com/main) |
 | [revelator.com](../../../../apis/openapi/revelator.com) | [main](../../../../apis/openapi/revelator.com/main) |
 | [reveldigital.com](../../../../apis/openapi/reveldigital.com) | [main](../../../../apis/openapi/reveldigital.com/main) |
 | [revenium.io](../../../../apis/openapi/revenium.io) | [main](../../../../apis/openapi/revenium.io/main) |
