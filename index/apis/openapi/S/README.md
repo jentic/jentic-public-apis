@@ -1,6 +1,6 @@
 # APIs — S
 
-Browsing 741 APIs starting with **S**.
+Browsing 742 APIs starting with **S**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · **S** · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -150,6 +150,7 @@ Browsing 741 APIs starting with **S**.
 | [sendspark.com](../../../../apis/openapi/sendspark.com) | [main](../../../../apis/openapi/sendspark.com/main) |
 | [sendx.io](../../../../apis/openapi/sendx.io) | [main](../../../../apis/openapi/sendx.io/main) |
 | [sendzen.io](../../../../apis/openapi/sendzen.io) | [main](../../../../apis/openapi/sendzen.io/main) |
+| [senecaxconnect.com](../../../../apis/openapi/senecaxconnect.com) | [main](../../../../apis/openapi/senecaxconnect.com/main) |
 | [senseon.io](../../../../apis/openapi/senseon.io) | [main](../../../../apis/openapi/senseon.io/main) |
 | [sensible.so](../../../../apis/openapi/sensible.so) | [main](../../../../apis/openapi/sensible.so/main) |
 | [sentinel-hub.com](../../../../apis/openapi/sentinel-hub.com) | [main](../../../../apis/openapi/sentinel-hub.com/main) |
