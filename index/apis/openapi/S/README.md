@@ -1,6 +1,6 @@
 # APIs — S
 
-Browsing 740 APIs starting with **S**.
+Browsing 741 APIs starting with **S**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · **S** · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -371,6 +371,7 @@ Browsing 740 APIs starting with **S**.
 | [split.io](../../../../apis/openapi/split.io) | [main](../../../../apis/openapi/split.io/main) |
 | [splitwise.com](../../../../apis/openapi/splitwise.com) | [main](../../../../apis/openapi/splitwise.com/main) |
 | [splunk.com](../../../../apis/openapi/splunk.com) | [main](../../../../apis/openapi/splunk.com/main) |
+| [spoke.app](../../../../apis/openapi/spoke.app) | [main](../../../../apis/openapi/spoke.app/main) |
 | [spoki.it](../../../../apis/openapi/spoki.it) | [main](../../../../apis/openapi/spoki.it/main) |
 | [spoo.me](../../../../apis/openapi/spoo.me) | [main](../../../../apis/openapi/spoo.me/main) |
 | [spoonacular.com](../../../../apis/openapi/spoonacular.com) | [main](../../../../apis/openapi/spoonacular.com/main) |
