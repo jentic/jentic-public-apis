@@ -1,6 +1,6 @@
 # APIs — W
 
-Browsing 94 APIs starting with **W**.
+Browsing 95 APIs starting with **W**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · **W** · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -82,6 +82,7 @@ Browsing 94 APIs starting with **W**.
 | [wordassociations.net](../../../../apis/openapi/wordassociations.net) | [main](../../../../apis/openapi/wordassociations.net/main) |
 | [wordcloudapi.com](../../../../apis/openapi/wordcloudapi.com) | [main](../../../../apis/openapi/wordcloudapi.com/main) |
 | [wordnik.com](../../../../apis/openapi/wordnik.com) | [main](../../../../apis/openapi/wordnik.com/main) |
+| [wordsintomusic.com](../../../../apis/openapi/wordsintomusic.com) | [main](../../../../apis/openapi/wordsintomusic.com/main) |
 | [wordsmith.ai](../../../../apis/openapi/wordsmith.ai) | [main](../../../../apis/openapi/wordsmith.ai/main) |
 | [workable.com](../../../../apis/openapi/workable.com) | [main](../../../../apis/openapi/workable.com/main) |
 | [workato.com](../../../../apis/openapi/workato.com) | [main](../../../../apis/openapi/workato.com/main) |
