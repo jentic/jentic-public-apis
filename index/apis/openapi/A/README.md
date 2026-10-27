@@ -1,6 +1,6 @@
 # APIs — A
 
-Browsing 477 APIs starting with **A**.
+Browsing 478 APIs starting with **A**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · **A** · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -82,6 +82,7 @@ Browsing 477 APIs starting with **A**.
 | [affirm.com](../../../../apis/openapi/affirm.com) | [main](../../../../apis/openapi/affirm.com/main) |
 | [afosto.com](../../../../apis/openapi/afosto.com) | [afosto-api](../../../../apis/openapi/afosto.com/afosto-api) |
 | [africacompliancedata.com](../../../../apis/openapi/africacompliancedata.com) | [main](../../../../apis/openapi/africacompliancedata.com/main) |
+| [africanmarketos.com](../../../../apis/openapi/africanmarketos.com) | [main](../../../../apis/openapi/africanmarketos.com/main) |
 | [afterbanks.com](../../../../apis/openapi/afterbanks.com) | [afterbanks-api](../../../../apis/openapi/afterbanks.com/afterbanks-api) · [afterbanks.com](../../../../apis/openapi/afterbanks.com/afterbanks.com) |
 | [afterpay.com](../../../../apis/openapi/afterpay.com) | [main](../../../../apis/openapi/afterpay.com/main) |
 | [aftership.com](../../../../apis/openapi/aftership.com) | [main](../../../../apis/openapi/aftership.com/main) |
