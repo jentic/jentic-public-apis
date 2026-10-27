@@ -1,0 +1,1263 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Cobra · API de facturación electrónica SRI",
+    "version": "1.0.0",
+    "description": "Emite comprobantes electrónicos autorizados por el SRI de Ecuador (factura, nota de crédito, nota de débito, retención) con una API key. Motor propio (firma XAdES + transmisión al SRI); la firma .p12 nunca sale del servidor. Autenticación por header `X-API-Key`; permisos por scope; ambiente sandbox por llave.",
+    "contact": {
+      "name": "Cobra",
+      "url": "https://facturacobra.com"
+    },
+    "x-jentic-source-url": "https://facturacobra.com/api/v1/openapi.json"
+  },
+  "servers": [
+    {
+      "url": "https://facturacobra.com/api/v1",
+      "description": "Producción / sandbox (según la llave)"
+    }
+  ],
+  "paths": {
+    "/whoami": {
+      "get": {
+        "summary": "Identidad del tenant y capacidades de la llave",
+        "tags": [
+          "Cuenta"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "api_version": {
+                      "type": "string"
+                    },
+                    "ruc": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "razon_social": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "ambiente": {
+                      "type": "integer",
+                      "enum": [
+                        1,
+                        2
+                      ]
+                    },
+                    "sandbox": {
+                      "type": "boolean"
+                    },
+                    "sri_activo": {
+                      "type": "boolean"
+                    },
+                    "scopes": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "API key faltante o inválida",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sri-lookup/{identificacion}": {
+      "get": {
+        "summary": "Consultar RUC/cédula en el padrón del SRI",
+        "tags": [
+          "Consultas"
+        ],
+        "parameters": [
+          {
+            "name": "identificacion",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK (found:false si no existe o el SRI no responde; nunca 5xx)"
+          },
+          "403": {
+            "description": "Falta el scope 'read'",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/documents": {
+      "get": {
+        "summary": "Listar comprobantes",
+        "tags": [
+          "Comprobantes"
+        ],
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 50,
+              "maximum": 200
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 0
+            }
+          },
+          {
+            "name": "tipo",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "01",
+                "04",
+                "05",
+                "06",
+                "07",
+                "08"
+              ]
+            }
+          },
+          {
+            "name": "estado",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "desde",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
+          },
+          {
+            "name": "hasta",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "403": {
+            "description": "Falta el scope 'read'",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Emitir un comprobante (factura, NC, ND o retención)",
+        "tags": [
+          "Comprobantes"
+        ],
+        "description": "Crea y emite al SRI en una llamada. `idempotency_key` obligatorio. El comprador se DERIVA/valida; los totales se recalculan server-side. Para NC/ND envía `doc_modificado_*`; para retención (06) envía `retention_items` y un sujeto retenido identificado.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "idempotency_key"
+                ],
+                "properties": {
+                  "tipo_comprobante": {
+                    "type": "string",
+                    "enum": [
+                      "01",
+                      "04",
+                      "05",
+                      "06"
+                    ],
+                    "default": "01"
+                  },
+                  "idempotency_key": {
+                    "type": "string",
+                    "minLength": 8,
+                    "maxLength": 64
+                  },
+                  "fecha_emision": {
+                    "type": "string",
+                    "format": "date",
+                    "description": "Default: hoy (Ecuador)."
+                  },
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/Comprador"
+                    }
+                  ],
+                  "items": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/components/schemas/Item"
+                    },
+                    "description": "Factura/NC/ND."
+                  },
+                  "retention_items": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/components/schemas/RetentionItem"
+                    },
+                    "description": "Sólo retención (06)."
+                  },
+                  "doc_modificado_tipo": {
+                    "type": "string",
+                    "description": "NC/ND: tipo del documento modificado (01)."
+                  },
+                  "doc_modificado_numero": {
+                    "type": "string",
+                    "description": "NC/ND: EEE-PPP-SSSSSSSSS (con guiones)."
+                  },
+                  "doc_modificado_fecha": {
+                    "type": "string",
+                    "format": "date"
+                  },
+                  "doc_modificado_razon": {
+                    "type": "string"
+                  },
+                  "periodo_fiscal": {
+                    "type": "string",
+                    "description": "Retención: MM/YYYY."
+                  }
+                }
+              },
+              "examples": {
+                "factura": {
+                  "summary": "Factura a consumidor final",
+                  "value": {
+                    "tipo_comprobante": "01",
+                    "idempotency_key": "fac-2026-0001",
+                    "comprador_tipo_id": "07",
+                    "items": [
+                      {
+                        "descripcion": "Servicio",
+                        "cantidad": 1,
+                        "precio_unitario": 10,
+                        "iva_codigo_porcentaje": "4"
+                      }
+                    ]
+                  }
+                },
+                "retencion": {
+                  "summary": "Retención renta 2% sobre $100",
+                  "value": {
+                    "tipo_comprobante": "06",
+                    "idempotency_key": "ret-2026-0001",
+                    "comprador_tipo_id": "04",
+                    "comprador_identificacion": "1790016919001",
+                    "comprador_razon_social": "PROVEEDOR SA",
+                    "periodo_fiscal": "07/2026",
+                    "retention_items": [
+                      {
+                        "codigo_impuesto": "1",
+                        "codigo_retencion": "312",
+                        "base_imponible": 100,
+                        "porcentaje_retener": 2,
+                        "tipo_doc_sustento": "01",
+                        "numero_doc_sustento": "001-001-000000456",
+                        "fecha_emision_sustento": "2026-07-10",
+                        "sustento_iva_codigo": "4"
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Replay idempotente (documento ya existía)"
+          },
+          "201": {
+            "description": "Emitido (revisa emit.status = authorized)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "tipo_comprobante": {
+                      "type": "string"
+                    },
+                    "numero": {
+                      "type": "string",
+                      "nullable": true,
+                      "example": "001-001-000000010"
+                    },
+                    "clave_acceso": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "draft",
+                        "authorized",
+                        "rejected",
+                        "error",
+                        "queued",
+                        "cancelled"
+                      ]
+                    },
+                    "numero_autorizacion": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "importe_total": {
+                      "type": "string"
+                    },
+                    "emit": {
+                      "type": "object",
+                      "properties": {
+                        "success": {
+                          "type": "boolean"
+                        },
+                        "status": {
+                          "type": "string"
+                        },
+                        "error": {
+                          "type": "string",
+                          "nullable": true
+                        }
+                      }
+                    },
+                    "advertencias": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "description": "Avisos NO bloqueantes. Ej.: se usó IVA 8% (feriado turístico) fuera de una fecha decretada cargada en Cobra."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validación (comprador, %, formato, etc.)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Cuota del plan agotada",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Falta el scope 'emit'",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Firma inactiva, sin punto de emisión, o el SRI devolvió/rechazó",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/documents/{id}": {
+      "get": {
+        "summary": "Detalle de un comprobante",
+        "tags": [
+          "Comprobantes"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "404": {
+            "description": "No encontrado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/documents/{id}/status": {
+      "get": {
+        "summary": "Estado de autorización",
+        "tags": [
+          "Comprobantes"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "404": {
+            "description": "No encontrado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/documents/{id}/anular": {
+      "post": {
+        "summary": "Anular un comprobante (reglas SRI 2025-2026)",
+        "tags": [
+          "Comprobantes"
+        ],
+        "description": "Evalúa y registra la anulación según las reglas del SRI: bloquea facturas a consumidor final (firmes desde 1-ene-2026), respeta el plazo (hasta el día 7 del mes siguiente a la emisión) y, fuera de plazo, indica emitir una Nota de Crédito. NO envía nada al SRI (no existe API de anulación): el contribuyente la completa en el portal SRI en línea; la respuesta incluye la guía.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "reason"
+                ],
+                "properties": {
+                  "reason": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Anulación registrada (vía portal SRI)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "estado": {
+                      "type": "string",
+                      "example": "cancelled"
+                    },
+                    "document_id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "numero": {
+                      "type": "string",
+                      "example": "001-001-000000042"
+                    },
+                    "via": {
+                      "type": "string",
+                      "enum": [
+                        "portal_sri"
+                      ]
+                    },
+                    "plazo_hasta": {
+                      "type": "string",
+                      "example": "2026-08-07",
+                      "description": "Día 7 del mes siguiente a la emisión"
+                    },
+                    "portal_url": {
+                      "type": "string"
+                    },
+                    "siguiente_paso": {
+                      "type": "string"
+                    },
+                    "aviso": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Motivo faltante, o el comprobante no está autorizado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Falta el scope 'annul'",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Ya anulado o fuera de plazo (requiere Nota de Crédito)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "motivo": {
+                      "type": "string",
+                      "enum": [
+                        "ya_anulado",
+                        "fuera_de_plazo"
+                      ]
+                    },
+                    "via": {
+                      "type": "string",
+                      "enum": [
+                        "nota_credito"
+                      ],
+                      "nullable": true
+                    },
+                    "requiere_nota_credito": {
+                      "type": "boolean"
+                    },
+                    "es_consumidor_final": {
+                      "type": "boolean"
+                    },
+                    "plazo_hasta": {
+                      "type": "string",
+                      "nullable": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Factura a consumidor final: firme desde el 1-ene-2026, no se puede anular ni acreditar",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "motivo": {
+                      "type": "string",
+                      "enum": [
+                        "consumidor_final"
+                      ]
+                    },
+                    "es_consumidor_final": {
+                      "type": "boolean",
+                      "example": true
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/contacts": {
+      "get": {
+        "summary": "Listar contactos",
+        "tags": [
+          "Contactos"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "403": {
+            "description": "Falta el scope 'read'",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Crear/actualizar contacto",
+        "tags": [
+          "Contactos"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Comprador"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Creado"
+          },
+          "400": {
+            "description": "Validación",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Falta el scope 'contacts:write'",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/products": {
+      "get": {
+        "summary": "Listar productos",
+        "tags": [
+          "Productos"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "403": {
+            "description": "Falta el scope 'read'",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Crear producto",
+        "tags": [
+          "Productos"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "descripcion"
+                ],
+                "properties": {
+                  "descripcion": {
+                    "type": "string"
+                  },
+                  "precio_unitario": {
+                    "type": "number"
+                  },
+                  "iva_codigo_porcentaje": {
+                    "type": "string",
+                    "default": "4"
+                  },
+                  "codigo_principal": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Creado"
+          },
+          "400": {
+            "description": "Validación",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Falta el scope 'products:write'",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/webhooks": {
+      "get": {
+        "summary": "Listar webhooks",
+        "tags": [
+          "Webhooks"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "403": {
+            "description": "Falta el scope 'read'",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Registrar un webhook de autorización",
+        "tags": [
+          "Webhooks"
+        ],
+        "description": "Cuando un comprobante llega a estado terminal (authorized/rejected) —típicamente por el path asíncrono de contingencia/retry— Cobra hace POST a esta url. El cuerpo va firmado: header `X-Cobra-Signature: sha256=<hex>` = HMAC-SHA256(secret, `${X-Cobra-Timestamp}.${body}`). El `secret` se devuelve UNA sola vez al registrar. Evento: `{ event, document_id, tipo_comprobante, numero, clave_acceso, estado, numero_autorizacion, timestamp }`.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "url"
+                ],
+                "properties": {
+                  "url": {
+                    "type": "string",
+                    "format": "uri",
+                    "description": "https:// (o http://127.0.0.1 para pruebas)."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Creado (incluye el secret una sola vez)"
+          },
+          "400": {
+            "description": "url inválida",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Falta el scope 'webhooks:write'",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/webhooks/{id}": {
+      "delete": {
+        "summary": "Eliminar un webhook",
+        "tags": [
+          "Webhooks"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Eliminado"
+          },
+          "403": {
+            "description": "Falta el scope 'webhooks:write'",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No encontrado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "ApiKeyAuth": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-API-Key",
+        "description": "Formato mfact_<prefijo>_<secreto>. Genera tus llaves en Cobra. Usa una llave con ambiente=1 (sandbox) para pruebas."
+      }
+    },
+    "schemas": {
+      "Comprador": {
+        "type": "object",
+        "required": [
+          "comprador_razon_social"
+        ],
+        "properties": {
+          "comprador_tipo_id": {
+            "type": "string",
+            "enum": [
+              "04",
+              "05",
+              "06",
+              "07",
+              "08"
+            ],
+            "description": "Opcional: se DERIVA del identificador. 04=RUC, 05=cédula, 06=pasaporte, 07=consumidor final, 08=id. exterior."
+          },
+          "comprador_identificacion": {
+            "type": "string",
+            "example": "1790016919001"
+          },
+          "comprador_razon_social": {
+            "type": "string",
+            "example": "CLIENTE S.A."
+          },
+          "comprador_direccion": {
+            "type": "string"
+          },
+          "comprador_email": {
+            "type": "string",
+            "format": "email"
+          },
+          "comprador_telefono": {
+            "type": "string"
+          }
+        }
+      },
+      "Item": {
+        "type": "object",
+        "required": [
+          "descripcion",
+          "cantidad",
+          "precio_unitario"
+        ],
+        "properties": {
+          "descripcion": {
+            "type": "string",
+            "example": "Servicio de consultoría"
+          },
+          "cantidad": {
+            "type": "number",
+            "example": 1
+          },
+          "precio_unitario": {
+            "type": "number",
+            "description": "Sin IVA.",
+            "example": 10
+          },
+          "descuento": {
+            "type": "number",
+            "default": 0
+          },
+          "codigo_principal": {
+            "type": "string"
+          },
+          "iva_codigo_porcentaje": {
+            "type": "string",
+            "enum": [
+              "0",
+              "4",
+              "5",
+              "6",
+              "7",
+              "8"
+            ],
+            "default": "4",
+            "description": "4=15% (default), 0=0%, 5=5%, 6=no objeto, 7=exento, 8=8% feriados turísticos (solo en fechas decretadas; responsabilidad del emisor)."
+          }
+        }
+      },
+      "RetentionItem": {
+        "type": "object",
+        "required": [
+          "codigo_impuesto",
+          "codigo_retencion",
+          "base_imponible",
+          "porcentaje_retener",
+          "tipo_doc_sustento",
+          "numero_doc_sustento",
+          "fecha_emision_sustento"
+        ],
+        "properties": {
+          "codigo_impuesto": {
+            "type": "string",
+            "enum": [
+              "1",
+              "2",
+              "6"
+            ],
+            "description": "1=Renta, 2=IVA, 6=ISD."
+          },
+          "codigo_retencion": {
+            "type": "string",
+            "example": "312"
+          },
+          "base_imponible": {
+            "type": "number",
+            "example": 100
+          },
+          "porcentaje_retener": {
+            "type": "number",
+            "description": "Debe coincidir con la parametrización del SRI (p.ej. 312=2%).",
+            "example": 2
+          },
+          "tipo_doc_sustento": {
+            "type": "string",
+            "example": "01"
+          },
+          "numero_doc_sustento": {
+            "type": "string",
+            "description": "Formato EEE-PPP-SSSSSSSSS (con guiones).",
+            "example": "001-001-000000456"
+          },
+          "fecha_emision_sustento": {
+            "type": "string",
+            "format": "date",
+            "example": "2026-07-10"
+          },
+          "sustento_iva_codigo": {
+            "type": "string",
+            "default": "0",
+            "description": "Código de IVA del documento sustento (0=sin IVA, 4=15%…)."
+          }
+        }
+      },
+      "DocumentoResponse": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "tipo_comprobante": {
+            "type": "string"
+          },
+          "numero": {
+            "type": "string",
+            "nullable": true,
+            "example": "001-001-000000010"
+          },
+          "clave_acceso": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "draft",
+              "authorized",
+              "rejected",
+              "error",
+              "queued",
+              "cancelled"
+            ]
+          },
+          "numero_autorizacion": {
+            "type": "string",
+            "nullable": true
+          },
+          "importe_total": {
+            "type": "string"
+          },
+          "emit": {
+            "type": "object",
+            "properties": {
+              "success": {
+                "type": "boolean"
+              },
+              "status": {
+                "type": "string"
+              },
+              "error": {
+                "type": "string",
+                "nullable": true
+              }
+            }
+          },
+          "advertencias": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Avisos NO bloqueantes. Ej.: se usó IVA 8% (feriado turístico) fuera de una fecha decretada cargada en Cobra."
+          }
+        }
+      },
+      "Error": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  },
+  "security": [
+    {
+      "ApiKeyAuth": []
+    }
+  ]
+}
