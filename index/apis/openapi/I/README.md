@@ -1,6 +1,6 @@
 # APIs — I
 
-Browsing 123 APIs starting with **I**.
+Browsing 124 APIs starting with **I**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · **I** · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -15,6 +15,7 @@ Browsing 123 APIs starting with **I**.
 | [id4i.de](../../../../apis/openapi/id4i.de) | [main](../../../../apis/openapi/id4i.de/main) |
 | [ideaconsult.net](../../../../apis/openapi/ideaconsult.net) | [enanomapper](../../../../apis/openapi/ideaconsult.net/enanomapper) · [nanoreg](../../../../apis/openapi/ideaconsult.net/nanoreg) |
 | [ideal-postcodes.co.uk](../../../../apis/openapi/ideal-postcodes.co.uk) | [main](../../../../apis/openapi/ideal-postcodes.co.uk/main) |
+| [ideiasnamesa.com.br](../../../../apis/openapi/ideiasnamesa.com.br) | [main](../../../../apis/openapi/ideiasnamesa.com.br/main) |
 | [idenfy.com](../../../../apis/openapi/idenfy.com) | [main](../../../../apis/openapi/idenfy.com/main) |
 | [idexo.com](../../../../apis/openapi/idexo.com) | [main](../../../../apis/openapi/idexo.com/main) |
 | [idomoo.com](../../../../apis/openapi/idomoo.com) | [main](../../../../apis/openapi/idomoo.com/main) |

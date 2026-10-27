@@ -1,6 +1,6 @@
 # APIs — R
 
-Browsing 273 APIs starting with **R**.
+Browsing 274 APIs starting with **R**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · **R** · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -17,6 +17,7 @@ Browsing 273 APIs starting with **R**.
 | [raindrop.io](../../../../apis/openapi/raindrop.io) | [main](../../../../apis/openapi/raindrop.io/main) |
 | [rainviewer.com](../../../../apis/openapi/rainviewer.com) | [main](../../../../apis/openapi/rainviewer.com/main) |
 | [raisely.com](../../../../apis/openapi/raisely.com) | [raisely-api](../../../../apis/openapi/raisely.com/raisely-api) |
+| [raktadan.com](../../../../apis/openapi/raktadan.com) | [main](../../../../apis/openapi/raktadan.com/main) |
 | [ramp.com](../../../../apis/openapi/ramp.com) | [main](../../../../apis/openapi/ramp.com/main) |
 | [rampnetwork.com](../../../../apis/openapi/rampnetwork.com) | [ramp-network-rest-api](../../../../apis/openapi/rampnetwork.com/ramp-network-rest-api) |
 | [rancher.com](../../../../apis/openapi/rancher.com) | [main](../../../../apis/openapi/rancher.com/main) |

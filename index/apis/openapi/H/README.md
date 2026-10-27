@@ -1,6 +1,6 @@
 # APIs — H
 
-Browsing 142 APIs starting with **H**.
+Browsing 143 APIs starting with **H**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · **H** · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -123,6 +123,7 @@ Browsing 142 APIs starting with **H**.
 | [hub.suprsend.com](../../../../apis/openapi/hub.suprsend.com) | [main](../../../../apis/openapi/hub.suprsend.com/main) |
 | [hubapi.com](../../../../apis/openapi/hubapi.com) | [20 APIs](../../../../apis/openapi/hubapi.com) |
 | [hubhopper.com](../../../../apis/openapi/hubhopper.com) | [main](../../../../apis/openapi/hubhopper.com/main) |
+| [hubitat.com](../../../../apis/openapi/hubitat.com) | [main](../../../../apis/openapi/hubitat.com/main) |
 | [hubspot.com](../../../../apis/openapi/hubspot.com) | [93 APIs](../../../../apis/openapi/hubspot.com) |
 | [huddlekit.com](../../../../apis/openapi/huddlekit.com) | [main](../../../../apis/openapi/huddlekit.com/main) |
 | [huggingface.co](../../../../apis/openapi/huggingface.co) | [main](../../../../apis/openapi/huggingface.co/main) |
