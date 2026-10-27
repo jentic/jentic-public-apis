@@ -1,6 +1,6 @@
 # APIs — D
 
-Browsing 219 APIs starting with **D**.
+Browsing 221 APIs starting with **D**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · **D** · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -51,6 +51,7 @@ Browsing 219 APIs starting with **D**.
 | [dati.gov.it](../../../../apis/openapi/dati.gov.it) | [main](../../../../apis/openapi/dati.gov.it/main) |
 | [dayforce.com](../../../../apis/openapi/dayforce.com) | [main](../../../../apis/openapi/dayforce.com/main) |
 | [dayschedule.com](../../../../apis/openapi/dayschedule.com) | [main](../../../../apis/openapi/dayschedule.com/main) |
+| [daystruct.ai](../../../../apis/openapi/daystruct.ai) | [main](../../../../apis/openapi/daystruct.ai/main) |
 | [db.com](../../../../apis/openapi/db.com) | [main](../../../../apis/openapi/db.com/main) |
 | [dbfahrplanapi](../../../../apis/openapi/dbfahrplanapi) | [main](../../../../apis/openapi/dbfahrplanapi/main) |
 | [dbsecureapi](../../../../apis/openapi/dbsecureapi) | [main](../../../../apis/openapi/dbsecureapi/main) |
@@ -69,6 +70,7 @@ Browsing 219 APIs starting with **D**.
 | [deepgram.com](../../../../apis/openapi/deepgram.com) | [main](../../../../apis/openapi/deepgram.com/main) |
 | [deepsearch.app](../../../../apis/openapi/deepsearch.app) | [main](../../../../apis/openapi/deepsearch.app/main) |
 | [deepseek.com](../../../../apis/openapi/deepseek.com) | [main](../../../../apis/openapi/deepseek.com/main) |
+| [deepvalues.ai](../../../../apis/openapi/deepvalues.ai) | [main](../../../../apis/openapi/deepvalues.ai/main) |
 | [defastra.com](../../../../apis/openapi/defastra.com) | [main](../../../../apis/openapi/defastra.com/main) |
 | [defguard.net](../../../../apis/openapi/defguard.net) | [main](../../../../apis/openapi/defguard.net/main) |
 | [defici.com](../../../../apis/openapi/defici.com) | [main](../../../../apis/openapi/defici.com/main) |

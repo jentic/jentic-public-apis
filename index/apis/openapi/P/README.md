@@ -1,6 +1,6 @@
 # APIs — P
 
-Browsing 368 APIs starting with **P**.
+Browsing 370 APIs starting with **P**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · **P** · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -151,7 +151,9 @@ Browsing 368 APIs starting with **P**.
 | [pgamerx.com](../../../../apis/openapi/pgamerx.com) | [main](../../../../apis/openapi/pgamerx.com/main) |
 | [phantasm.digital](../../../../apis/openapi/phantasm.digital) | [main](../../../../apis/openapi/phantasm.digital/main) |
 | [phantauth.net](../../../../apis/openapi/phantauth.net) | [main](../../../../apis/openapi/phantauth.net/main) · [phantauth](../../../../apis/openapi/phantauth.net/phantauth) |
+| [phare.io](../../../../apis/openapi/phare.io) | [main](../../../../apis/openapi/phare.io/main) |
 | [phareio](../../../../apis/openapi/phareio) | [main](../../../../apis/openapi/phareio/main) |
+| [pharos.watch](../../../../apis/openapi/pharos.watch) | [main](../../../../apis/openapi/pharos.watch/main) |
 | [pharosdata.io](../../../../apis/openapi/pharosdata.io) | [main](../../../../apis/openapi/pharosdata.io/main) |
 | [phaxio.com](../../../../apis/openapi/phaxio.com) | [main](../../../../apis/openapi/phaxio.com/main) |
 | [phenixid.net](../../../../apis/openapi/phenixid.net) | [main](../../../../apis/openapi/phenixid.net/main) |
