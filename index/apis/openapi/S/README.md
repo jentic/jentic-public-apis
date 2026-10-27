@@ -1,6 +1,6 @@
 # APIs — S
 
-Browsing 743 APIs starting with **S**.
+Browsing 745 APIs starting with **S**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · **S** · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -431,6 +431,7 @@ Browsing 743 APIs starting with **S**.
 | [stax.com](../../../../apis/openapi/stax.com) | [main](../../../../apis/openapi/stax.com/main) |
 | [stc.com.sa](../../../../apis/openapi/stc.com.sa) | [stc](../../../../apis/openapi/stc.com.sa/stc) |
 | [steadywrk.app](../../../../apis/openapi/steadywrk.app) | [main](../../../../apis/openapi/steadywrk.app/main) |
+| [steakhouseapi.xyz](../../../../apis/openapi/steakhouseapi.xyz) | [main](../../../../apis/openapi/steakhouseapi.xyz/main) |
 | [stealthseminar.com](../../../../apis/openapi/stealthseminar.com) | [stealthseminar-api](../../../../apis/openapi/stealthseminar.com/stealthseminar-api) |
 | [steampowered.com](../../../../apis/openapi/steampowered.com) | [main](../../../../apis/openapi/steampowered.com/main) |
 | [stedi.com](../../../../apis/openapi/stedi.com) | [7 APIs](../../../../apis/openapi/stedi.com) |
@@ -485,6 +486,7 @@ Browsing 743 APIs starting with **S**.
 | [supercell.com](../../../../apis/openapi/supercell.com) | [brawl-stars](../../../../apis/openapi/supercell.com/brawl-stars) · [clash-of-clans](../../../../apis/openapi/supercell.com/clash-of-clans) · [clash-royale](../../../../apis/openapi/supercell.com/clash-royale) |
 | [superfeedr.com](../../../../apis/openapi/superfeedr.com) | [main](../../../../apis/openapi/superfeedr.com/main) |
 | [superforms.co](../../../../apis/openapi/superforms.co) | [main](../../../../apis/openapi/superforms.co/main) |
+| [superfuds.pandoty.com](../../../../apis/openapi/superfuds.pandoty.com) | [main](../../../../apis/openapi/superfuds.pandoty.com/main) |
 | [supergood.ai](../../../../apis/openapi/supergood.ai) | [main](../../../../apis/openapi/supergood.ai/main) |
 | [superheroapi.com](../../../../apis/openapi/superheroapi.com) | [main](../../../../apis/openapi/superheroapi.com/main) · [superheroes](../../../../apis/openapi/superheroapi.com/superheroes) |
 | [superset.sh](../../../../apis/openapi/superset.sh) | [main](../../../../apis/openapi/superset.sh/main) |

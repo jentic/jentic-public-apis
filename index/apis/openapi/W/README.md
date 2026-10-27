@@ -1,6 +1,6 @@
 # APIs — W
 
-Browsing 95 APIs starting with **W**.
+Browsing 97 APIs starting with **W**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · **W** · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -39,6 +39,8 @@ Browsing 95 APIs starting with **W**.
 | [webflow.com](../../../../apis/openapi/webflow.com) | [lucidtech-api](../../../../apis/openapi/webflow.com/lucidtech-api) · [main](../../../../apis/openapi/webflow.com/main) · [webflow](../../../../apis/openapi/webflow.com/webflow) · [webflow-api](../../../../apis/openapi/webflow.com/webflow-api) |
 | [webinarjam.com](../../../../apis/openapi/webinarjam.com) | [main](../../../../apis/openapi/webinarjam.com/main) |
 | [webostv.lge.com](../../../../apis/openapi/webostv.lge.com) | [main](../../../../apis/openapi/webostv.lge.com/main) |
+| [websamart.xyz](../../../../apis/openapi/websamart.xyz) | [main](../../../../apis/openapi/websamart.xyz/main) |
+| [webscraper.io](../../../../apis/openapi/webscraper.io) | [main](../../../../apis/openapi/webscraper.io/main) |
 | [webscraping.ai](../../../../apis/openapi/webscraping.ai) | [main](../../../../apis/openapi/webscraping.ai/main) |
 | [webshipper.io](../../../../apis/openapi/webshipper.io) | [main](../../../../apis/openapi/webshipper.io/main) |
 | [webull.com](../../../../apis/openapi/webull.com) | [main](../../../../apis/openapi/webull.com/main) |
