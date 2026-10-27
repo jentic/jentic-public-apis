@@ -1,0 +1,502 @@
+openapi: 3.1.0
+info:
+  title: DatoCapital API
+  version: "3.0"
+  summary: Commercial company-data REST API.
+  description: |
+    Read-only access to companies, directors, and filings across the
+    major European business registries plus a long tail of offshore
+    jurisdictions.
+
+    Authenticate with a bearer token (`Authorization: Bearer dc_…`).
+    Most endpoints return JSON; errors follow RFC 9457 problem
+    documents on `application/problem+json`.
+
+  contact:
+    name: DatoCapital
+    url: https://datocapital.com
+
+servers:
+  - url: https://api.datocapital.com
+    description: Production
+
+security:
+  - bearer: []
+
+tags:
+  - name: Companies
+    description: Look up and search company records.
+  - name: Filings
+    description: Per-company filing history.
+  - name: Individuals
+    description: Officers, directors, shareholders.
+  - name: Reference
+    description: Static catalogs (countries, types).
+  - name: Suggest
+    description: Typeahead.
+  - name: Account
+    description: Caller identity, plan, entitlements.
+  - name: Health
+    description: Operational endpoints (no auth required).
+
+paths:
+  /v3/health:
+    get:
+      tags: [Health]
+      summary: Liveness probe.
+      security: []
+      responses:
+        "200": { description: alive, content: { application/json: { schema: { $ref: '#/components/schemas/Health' } } } }
+        "429": { $ref: '#/components/responses/RateLimited' }
+
+  /v3/ready:
+    get:
+      tags: [Health]
+      summary: Readiness probe (checks DB).
+      security: []
+      responses:
+        "200": { description: ready }
+        "503": { description: not ready }
+
+  /v3/whoami:
+    get:
+      tags: [Account]
+      summary: Caller identity, current plan, full entitlement summary.
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WhoAmI'
+        "401": { $ref: '#/components/responses/Unauthorized' }
+
+  /v3/reference/countries:
+    get:
+      tags: [Reference]
+      summary: Country catalog.
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/Country' }
+
+  /v3/companies:
+    get:
+      tags: [Companies]
+      summary: List or search companies.
+      description: |
+        Two paths:
+        - **Filter mode** when `q` is absent: filter by `country`,
+          `company_number`, `company_type_code`, `status`, `superseded`,
+          `incorporation_from`/`incorporation_to`, geo (`near`/`bbox`),
+          paginated by name.
+        - **Search mode** when `q` is present: full-text on
+          company name, optional `country` filter, ranked by score.
+      parameters:
+        - { name: q,                          in: query, schema: { type: string }, description: Full-text query. 2-200 chars. }
+        - { name: country,                    in: query, schema: { type: string, pattern: "^[A-Za-z]{2}$" } }
+        - { name: company_number,             in: query, schema: { type: string }, description: SQL mode only. }
+        - { name: company_number_secondary,   in: query, schema: { type: string }, description: SQL mode only. }
+        - { name: company_type_code,          in: query, schema: { type: string }, description: SQL mode only. }
+        - { name: status,                     in: query, schema: { type: string, enum: [open, closed] }, description: SQL mode only. }
+        - { name: superseded,                 in: query, schema: { type: boolean }, description: SQL mode only. }
+        - { name: incorporation_from,         in: query, schema: { type: string, format: date }, description: SQL mode only. }
+        - { name: incorporation_to,           in: query, schema: { type: string, format: date }, description: SQL mode only. }
+        - { name: near,                       in: query, schema: { type: string }, description: "lat,lon center for radius search (SQL mode)." }
+        - { name: radius,                     in: query, schema: { type: number }, description: "Required with `near`." }
+        - { name: radius_unit,                in: query, schema: { type: string, enum: [m, km, mi], default: m } }
+        - { name: bbox,                       in: query, schema: { type: string }, description: "minLon,minLat,maxLon,maxLat (GeoJSON order). Max 5° per side." }
+        - { name: language,                   in: query, schema: { type: string, enum: [en, es, fr, nl], default: en }, description: "Localised label resolution for status." }
+        - { $ref: '#/components/parameters/pageSize' }
+        - { $ref: '#/components/parameters/cursor' }
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CompanyList' }
+        "400": { $ref: '#/components/responses/ValidationFailed' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/PlanInsufficient' }
+        "429": { $ref: '#/components/responses/RateLimited' }
+
+  /v3/companies/{uec}:
+    get:
+      tags: [Companies]
+      summary: Single company profile.
+      parameters:
+        - { name: uec, in: path, required: true, schema: { type: string, pattern: "^\\d{1,19}$" } }
+        - { name: language, in: query, schema: { type: string, enum: [en, es, fr, nl], default: en } }
+        - { name: expand, in: query, schema: { type: string }, description: "Comma-separated related data to embed. Supported: `filings` (first page, newest first; continue at the sub-resource URL). Unknown values return 400." }
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Company' }
+        "404": { $ref: '#/components/responses/NotFound' }
+
+  /v3/companies/{uec}/filings:
+    get:
+      tags: [Filings]
+      summary: Filings for a company (most recent first).
+      parameters:
+        - { name: uec, in: path, required: true, schema: { type: string, pattern: "^\\d{1,19}$" } }
+        - { name: from_date, in: query, schema: { type: string, format: date } }
+        - { name: to_date,   in: query, schema: { type: string, format: date } }
+        - { name: language,  in: query, schema: { type: string, enum: [en, es], default: en } }
+        - { $ref: '#/components/parameters/pageSize' }
+        - { $ref: '#/components/parameters/cursor' }
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FilingList' }
+        "404": { $ref: '#/components/responses/NotFound' }
+
+  /v3/{country}/{company_number}:
+    get:
+      tags: [Companies]
+      summary: Resolve (country, registry id) to canonical UEC profile.
+      description: 302 redirects to `/v3/companies/{uec}` when a current public match exists.
+      parameters:
+        - { name: country, in: path, required: true, schema: { type: string, pattern: "^[A-Za-z]{2}$" } }
+        - { name: company_number, in: path, required: true, schema: { type: string, pattern: "^[A-Za-z0-9.-]{1,64}$" } }
+      responses:
+        "302":
+          description: Found — Location header points at /v3/companies/{uec}
+          headers:
+            Location: { schema: { type: string } }
+        "404": { $ref: '#/components/responses/NotFound' }
+
+  /v3/individuals:
+    get:
+      tags: [Individuals]
+      summary: Full-text person search.
+      parameters:
+        - { name: q,                    in: query, required: true, schema: { type: string } }
+        - { name: country,              in: query, schema: { type: string, pattern: "^[A-Za-z]{2}$" } }
+        - { name: country_of_residence, in: query, schema: { type: string, pattern: "^[A-Za-z]{2}$" } }
+        - { $ref: '#/components/parameters/pageSize' }
+        - { $ref: '#/components/parameters/cursor' }
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/IndividualList' }
+
+  /v3/individuals/{id}:
+    get:
+      tags: [Individuals]
+      summary: Single individual profile by opaque id.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, pattern: "^[A-Za-z0-9_-]{1,32}$" } }
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Individual' }
+        "404": { $ref: '#/components/responses/NotFound' }
+
+  /v3/suggest:
+    get:
+      tags: [Suggest]
+      summary: Typeahead.
+      parameters:
+        - { name: kind, in: query, required: true, schema: { type: string, enum: [company, individual] } }
+        - { name: q,    in: query, required: true, schema: { type: string, minLength: 2 } }
+        - { name: max_results, in: query, schema: { type: integer, minimum: 1, maximum: 25, default: 10 } }
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        kind:  { type: string }
+                        label: { type: string }
+
+components:
+  securitySchemes:
+    bearer:
+      type: http
+      scheme: bearer
+      bearerFormat: opaque
+      description: |
+        DatoCapital API key. Format `dc_live_…` or `dc_test_…`. See
+        the [Authentication guide](/docs/authentication).
+
+  parameters:
+    pageSize:
+      name: page_size
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 100, default: 25 }
+    cursor:
+      name: cursor
+      in: query
+      schema: { type: string }
+      description: Opaque token taken from a prior response's `next_cursor`.
+
+  responses:
+    ValidationFailed:
+      description: 400 — bad parameter shape or value.
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    Unauthorized:
+      description: 401 — missing or invalid bearer token.
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    PlanInsufficient:
+      description: 403 — endpoint requires a higher plan. `X-Required-Plan` header carries the unlock plan.
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+      headers:
+        X-Required-Plan:
+          schema: { type: string }
+    NotFound:
+      description: 404 — id is unknown to the public surface.
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    RateLimited:
+      description: 429 — per-user-minute window exceeded. `Retry-After` in seconds.
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+      headers:
+        Retry-After:        { schema: { type: integer } }
+        X-RateLimit-Limit:  { schema: { type: integer } }
+        X-RateLimit-Remaining: { schema: { type: integer } }
+        X-RateLimit-Reset:  { schema: { type: integer } }
+
+  schemas:
+    Health:
+      type: object
+      properties:
+        status: { type: string, example: ok }
+
+    Country:
+      type: object
+      properties:
+        code:        { type: string, example: ES }
+        name_en:     { type: string, example: Spain }
+        name_es:     { type: string, example: España }
+
+    CompanyType:
+      type: object
+      properties:
+        id:          { type: string, example: "0" }
+        code:        { type: string, example: SL }
+        name_local:  { type: string, example: SOCIEDAD LIMITADA }
+        country:     { type: string, example: ES }
+
+    CompanyStatus:
+      type: object
+      properties:
+        id:         { type: string, example: "1" }
+        name_local: { type: string, example: Active }
+        is_closed:  { type: boolean }
+
+    Address:
+      type: object
+      properties:
+        line1:       { type: string }
+        line2:       { type: string }
+        postal_code: { type: string }
+        city:        { type: string }
+        region:      { type: string }
+        country:     { type: string, example: ES }
+        latitude:    { type: number }
+        longitude:   { type: number }
+
+    Supersession:
+      type: object
+      properties:
+        uec:    { type: string }
+        reason: { type: string, enum: [name_change, address_change, duplicate_name, transformation, dissolution, extinction, different_company_number] }
+        url:    { type: string }
+
+    Company:
+      type: object
+      properties:
+        uec:                       { type: string, example: "9243433317131893" }
+        name:                      { type: string }
+        name_original:             { type: string }
+        name_commercial:           { type: string }
+        country:                   { type: string }
+        country_of_origin:         { type: string }
+        company_number:            { type: string }
+        company_number_secondary:  { type: string }
+        incorporation_date:        { type: string, format: date }
+        published_on:              { type: string, format: date }
+        dissolution_date:          { type: string, format: date }
+        company_type:              { $ref: '#/components/schemas/CompanyType' }
+        status:                    { $ref: '#/components/schemas/CompanyStatus' }
+        registered_address:        { $ref: '#/components/schemas/Address' }
+        website:                   { type: string }
+        principal_activity:        { type: string }
+        corporate_purpose:         { type: string }
+        subscribed_capital:        { type: number }
+        paid_in_capital:           { type: number }
+        superseded_by:             { $ref: '#/components/schemas/Supersession' }
+        url:                       { type: string }
+        representatives_url:       { type: string }
+        filings_url:               { type: string }
+        connections_url:           { type: string }
+        sources_url:               { type: string }
+
+    CompanyList:
+      type: object
+      properties:
+        data:           { type: array, items: { $ref: '#/components/schemas/Company' } }
+        next_cursor:    { type: string, nullable: true }
+        has_more:       { type: boolean }
+        total_estimate: { type: integer, description: Search-mode only (when `q` is set). }
+
+    Individual:
+      type: object
+      properties:
+        id:                    { type: string }
+        name:                  { type: string }
+        name_corrected:        { type: string }
+        first_name:            { type: string }
+        last_name:             { type: string }
+        second_last_name:      { type: string }
+        country:               { type: string }
+        country_of_residence:  { type: string }
+        nationality:           { type: string }
+        birth_year:            { type: integer }
+        number_of_positions:   { type: integer }
+        number_of_companies:   { type: integer }
+        number_of_records:     { type: integer }
+        first_appointment:     { type: string, format: date }
+        last_appointment:      { type: string, format: date }
+        first_resignation:     { type: string, format: date }
+        last_resignation:      { type: string, format: date }
+        url:                   { type: string }
+        positions_url:         { type: string }
+
+    IndividualList:
+      type: object
+      properties:
+        data:           { type: array, items: { $ref: '#/components/schemas/Individual' } }
+        next_cursor:    { type: string, nullable: true }
+        has_more:       { type: boolean }
+        total_estimate: { type: integer }
+
+    FilingType:
+      type: object
+      properties:
+        id:   { type: string }
+        name: { type: string }
+
+    InscriptionType:
+      type: object
+      properties:
+        id:   { type: string }
+        name: { type: string }
+
+    Inscription:
+      type: object
+      properties:
+        id:               { type: string }
+        type:             { $ref: '#/components/schemas/InscriptionType' }
+        year:             { type: integer }
+        reference_number: { type: string }
+        text:             { type: string }
+
+    Filing:
+      type: object
+      properties:
+        id:               { type: string }
+        filing_date:      { type: string, format: date }
+        publication_date: { type: string, format: date }
+        type:             { $ref: '#/components/schemas/FilingType' }
+        description:      { type: string }
+        reference_number: { type: string }
+        inscription:      { $ref: '#/components/schemas/Inscription' }
+        url:              { type: string }
+
+    FilingList:
+      type: object
+      properties:
+        data:        { type: array, items: { $ref: '#/components/schemas/Filing' } }
+        next_cursor: { type: string, nullable: true }
+        has_more:    { type: boolean }
+
+    WhoAmI:
+      type: object
+      properties:
+        user_id:  { type: integer }
+        key_mode: { type: string, enum: [live, test] }
+        plan:
+          type: object
+          properties:
+            code:    { type: string }
+            name:    { type: string }
+            rank:    { type: integer }
+            limits:  { type: object, additionalProperties: { type: integer, nullable: true } }
+            features: { type: object, additionalProperties: { type: boolean } }
+            pricing:
+              type: object
+              description: |
+                `monthly_cents` is the flat subscription fee.
+                `per_request_cents` is the overage fee charged for each
+                request beyond `limits.max_requests_per_month`; null
+                means the plan is hard-capped at the monthly quota and
+                returns 429 instead of metering the overage.
+              properties:
+                currency:          { type: string, example: EUR }
+                monthly_cents:     { type: integer, example: 4900 }
+                per_request_cents: { type: integer, nullable: true, example: null }
+        entitlements:
+          type: object
+          properties:
+            fields:
+              type: array
+              items:
+                type: object
+                properties:
+                  entity:     { type: string }
+                  field:      { type: string }
+                  country:    { type: string }
+                  min_plan:   { type: string }
+                  accessible: { type: boolean }
+            endpoints:
+              type: array
+              items:
+                type: object
+                properties:
+                  endpoint:   { type: string }
+                  country:    { type: string }
+                  min_plan:   { type: string }
+                  accessible: { type: boolean }
+
+    Problem:
+      type: object
+      properties:
+        type:       { type: string, format: uri }
+        title:      { type: string }
+        status:     { type: integer }
+        detail:     { type: string }
+        instance:   { type: string }
+        request_id: { type: string }
