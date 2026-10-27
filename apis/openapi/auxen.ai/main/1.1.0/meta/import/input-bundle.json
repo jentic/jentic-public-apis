@@ -1,0 +1,3644 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Auxen Headless API",
+    "version": "1.1.0",
+    "description": "Programmatic API for deploying and managing private open-weight model\nendpoints on Auxen. Anything a human can do in the dashboard, an agent\ncan do via this API.\n\n**Two key types:**\n- `auxen_live_…` / `auxen_test_…` — your account-level **agent management**\n  key. Authorizes deploying, switching models, and billing operations.\n- `auxk_…` — a per-deployment **inference** key returned in the `api_key`\n  field of every deployment object. Authorizes inference calls on that\n  deployment only. Hand it to downstream services without giving up\n  management rights.\n\n**Billing:**\nAll Auxen deployments are billed **pay-as-you-go** from a prepaid USD credit\nbalance, per minute of active time; billing stops when a deployment is\npaused or deleted. Throughput levels (Standard, Double, Quad, Max)\nincrease simultaneous request handling at the same model quality. Top up\nthe balance with `POST /v1/billing/add-credits`.\n\n**2026 renames:** `/v1/provision` → `/v1/deploy`, `/v1/instances` →\n`/v1/deployments`, `/scale` → `/throughput`, `/wake` → `/resume`.\nOld routes keep working until 2027-04-02 and send `Deprecation`,\n`Sunset`, and `Link` headers. Responses carry new and old field names\nside by side (`deployment_id` + `instance_id`, `throughput` +\n`capacity`, `rate_per_hour` + `hourly_rate`, `ready_estimate` +\n`estimated_ready_at`). Migration guide: https://auxen.ai/docs/api/migration",
+    "contact": {
+      "email": "hello@auxen.ai",
+      "url": "https://auxen.ai/contact"
+    },
+    "x-jentic-source-url": "https://api.auxen.ai/openapi.json"
+  },
+  "servers": [
+    {
+      "url": "https://api.auxen.ai",
+      "description": "Production"
+    }
+  ],
+  "paths": {
+    "/v1/models": {
+      "get": {
+        "summary": "List models",
+        "tags": [
+          "Models"
+        ],
+        "security": [
+          {
+            "AgentKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "tier",
+            "in": "query",
+            "schema": {
+              "enum": [
+                "fast",
+                "balanced",
+                "powerful",
+                "maximum"
+              ]
+            }
+          },
+          {
+            "name": "include_legacy",
+            "in": "query",
+            "schema": {
+              "type": "boolean",
+              "default": false
+            },
+            "description": "Also list legacy (2024-generation) models. They remain deployable until 2027-04-02."
+          },
+          {
+            "name": "size_group",
+            "in": "query",
+            "schema": {
+              "enum": [
+                "small",
+                "medium",
+                "large",
+                "xl"
+              ]
+            }
+          },
+          {
+            "name": "plan",
+            "in": "query",
+            "schema": {
+              "enum": [
+                "shared",
+                "dedicated",
+                "business",
+                "enterprise"
+              ]
+            },
+            "description": "Filter to models included in this plan or below."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "const": true
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "models": {
+                          "type": "array",
+                          "items": {
+                            "$ref": "#/components/schemas/Model"
+                          }
+                        }
+                      }
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/Meta"
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "data",
+                    "meta"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      }
+    },
+    "/v1/models/{modelId}": {
+      "get": {
+        "summary": "Get a single model",
+        "tags": [
+          "Models"
+        ],
+        "security": [
+          {
+            "AgentKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "modelId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "qwen3.5-9b"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "const": true
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "model": {
+                          "$ref": "#/components/schemas/Model"
+                        }
+                      }
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/Meta"
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "data",
+                    "meta"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/v1/deploy": {
+      "post": {
+        "summary": "Deploy a model",
+        "description": "Returns immediately with `status: deploying`. Poll `GET /v1/deployments/{deploymentId}` until `status: ready`, then use the returned `endpoint` + `api_key` for inference.",
+        "tags": [
+          "Deployments"
+        ],
+        "security": [
+          {
+            "AgentKey": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "model"
+                ],
+                "properties": {
+                  "model": {
+                    "type": "string",
+                    "description": "Model ID from GET /v1/models",
+                    "example": "qwen3.5-9b"
+                  },
+                  "throughput": {
+                    "oneOf": [
+                      {
+                        "enum": [
+                          "standard",
+                          "double",
+                          "quad",
+                          "max"
+                        ]
+                      },
+                      {
+                        "type": "integer",
+                        "enum": [
+                          1,
+                          2,
+                          4,
+                          8
+                        ]
+                      }
+                    ],
+                    "description": "Throughput level. More throughput handles more simultaneous requests at the same answer quality. Double, Quad, and Max cost 1.9×, 3.75×, and 7.5× the Standard rate. Numbers 1/2/4/8 are accepted as aliases.",
+                    "default": "standard"
+                  },
+                  "capacity": {
+                    "type": "integer",
+                    "enum": [
+                      1,
+                      2,
+                      4,
+                      8
+                    ],
+                    "deprecated": true,
+                    "description": "Deprecated alias of `throughput`; returned until 2027-04-02."
+                  },
+                  "billing": {
+                    "enum": [
+                      "pay_as_you_go",
+                      "on_demand"
+                    ],
+                    "default": "pay_as_you_go",
+                    "description": "Optional. `on_demand` is a back-compat alias for `pay_as_you_go`."
+                  },
+                  "label": {
+                    "type": "string",
+                    "maxLength": 120
+                  },
+                  "webhook_url": {
+                    "type": "string",
+                    "format": "uri",
+                    "description": "URL Auxen POSTs this deployment's lifecycle events to."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Accepted — deployment started.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "const": true
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "deployment_id": {
+                          "type": "string",
+                          "example": "inst_xxxxxxxxxxxx"
+                        },
+                        "instance_id": {
+                          "type": "string",
+                          "deprecated": true,
+                          "description": "Deprecated alias of `deployment_id`; returned until 2027-04-02."
+                        },
+                        "status": {
+                          "const": "deploying"
+                        },
+                        "legacy_status": {
+                          "const": "provisioning"
+                        },
+                        "model": {
+                          "type": "string"
+                        },
+                        "billing": {
+                          "const": "pay_as_you_go"
+                        },
+                        "throughput": {
+                          "enum": [
+                            "standard",
+                            "double",
+                            "quad",
+                            "max"
+                          ]
+                        },
+                        "throughput_multiplier": {
+                          "type": "integer",
+                          "enum": [
+                            1,
+                            2,
+                            4,
+                            8
+                          ]
+                        },
+                        "capacity": {
+                          "type": "integer",
+                          "deprecated": true,
+                          "description": "Deprecated alias of `throughput_multiplier`; returned until 2027-04-02."
+                        },
+                        "rate_per_hour": {
+                          "type": "string",
+                          "example": "$0.20/hour"
+                        },
+                        "hourly_rate": {
+                          "type": "number",
+                          "deprecated": true,
+                          "description": "Deprecated alias of `rate_per_hour`; returned until 2027-04-02."
+                        },
+                        "ready_estimate": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "estimated_ready_at": {
+                          "type": "string",
+                          "format": "date-time",
+                          "deprecated": true,
+                          "description": "Deprecated alias of `ready_estimate`; returned until 2027-04-02."
+                        },
+                        "polling_url": {
+                          "type": "string",
+                          "format": "uri"
+                        }
+                      }
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/Meta"
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "data",
+                    "meta"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation failure (missing model, bad throughput)."
+          },
+          "402": {
+            "description": "Insufficient credits."
+          }
+        }
+      }
+    },
+    "/v1/deployments": {
+      "get": {
+        "summary": "List your deployments",
+        "tags": [
+          "Deployments"
+        ],
+        "security": [
+          {
+            "AgentKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "schema": {
+              "enum": [
+                "deploying",
+                "ready",
+                "paused",
+                "warming",
+                "switching",
+                "suspended",
+                "error",
+                "deleted"
+              ]
+            },
+            "description": "Pre-2026 status values are also accepted."
+          },
+          {
+            "name": "billing",
+            "in": "query",
+            "schema": {
+              "enum": [
+                "subscription",
+                "pay_as_you_go",
+                "on_demand"
+              ]
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "const": true
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "deployments": {
+                          "type": "array",
+                          "items": {
+                            "$ref": "#/components/schemas/Deployment"
+                          }
+                        },
+                        "instances": {
+                          "type": "array",
+                          "items": {
+                            "$ref": "#/components/schemas/Deployment"
+                          },
+                          "deprecated": true,
+                          "description": "Deprecated alias of `deployments`; returned until 2027-04-02."
+                        }
+                      }
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/Meta"
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "data",
+                    "meta"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/deployments/{deploymentId}": {
+      "get": {
+        "summary": "Get a deployment",
+        "tags": [
+          "Deployments"
+        ],
+        "security": [
+          {
+            "AgentKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "deploymentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^inst_[0-9a-f]+$"
+            },
+            "example": "inst_07d7eab4fabc"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "const": true
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "deployment": {
+                          "$ref": "#/components/schemas/Deployment"
+                        },
+                        "instance": {
+                          "$ref": "#/components/schemas/Deployment",
+                          "deprecated": true,
+                          "description": "Deprecated alias of `deployment`; returned until 2027-04-02."
+                        }
+                      }
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/Meta"
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "data",
+                    "meta"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      },
+      "delete": {
+        "summary": "Delete a deployment",
+        "description": "Stops billing immediately. The endpoint and API key stop working permanently.",
+        "tags": [
+          "Deployments"
+        ],
+        "security": [
+          {
+            "AgentKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "deploymentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^inst_[0-9a-f]+$"
+            },
+            "example": "inst_07d7eab4fabc"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK — `status: deleted`."
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      },
+      "patch": {
+        "summary": "Update a deployment's label / webhook",
+        "tags": [
+          "Deployments"
+        ],
+        "security": [
+          {
+            "AgentKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "deploymentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^inst_[0-9a-f]+$"
+            },
+            "example": "inst_07d7eab4fabc"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "label": {
+                    "type": "string",
+                    "maxLength": 120
+                  },
+                  "webhook_url": {
+                    "type": "string",
+                    "nullable": true,
+                    "format": "uri"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/v1/deployments/{deploymentId}/throughput": {
+      "post": {
+        "summary": "Change a deployment's throughput",
+        "description": "Sets Standard / Double / Quad / Max. Same model and answer quality; more simultaneous requests and a higher per-hour rate. The endpoint and API key are unchanged. Pay-as-you-go only.",
+        "tags": [
+          "Deployments"
+        ],
+        "security": [
+          {
+            "AgentKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "deploymentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^inst_[0-9a-f]+$"
+            },
+            "example": "inst_07d7eab4fabc"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "throughput",
+                  "confirm"
+                ],
+                "properties": {
+                  "throughput": {
+                    "oneOf": [
+                      {
+                        "enum": [
+                          "standard",
+                          "double",
+                          "quad",
+                          "max"
+                        ]
+                      },
+                      {
+                        "type": "integer",
+                        "enum": [
+                          1,
+                          2,
+                          4,
+                          8
+                        ]
+                      }
+                    ],
+                    "description": "Throughput level. More throughput handles more simultaneous requests at the same answer quality. Double, Quad, and Max cost 1.9×, 3.75×, and 7.5× the Standard rate. Numbers 1/2/4/8 are accepted as aliases."
+                  },
+                  "capacity": {
+                    "type": "integer",
+                    "enum": [
+                      1,
+                      2,
+                      4,
+                      8
+                    ],
+                    "deprecated": true,
+                    "description": "Deprecated alias of `throughput`; returned until 2027-04-02."
+                  },
+                  "confirm": {
+                    "type": "boolean",
+                    "const": true,
+                    "description": "Acknowledges the billing change."
+                  }
+                }
+              },
+              "example": {
+                "throughput": "double",
+                "confirm": true
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          }
+        }
+      }
+    },
+    "/v1/deployments/{deploymentId}/switch-model": {
+      "post": {
+        "summary": "Switch the model on a deployment",
+        "description": "Same-plan switches only. Starts the new model and returns a `new_deployment_id` (about 3 minutes; the endpoint URL and api_key change).",
+        "tags": [
+          "Deployments"
+        ],
+        "security": [
+          {
+            "AgentKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "deploymentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^inst_[0-9a-f]+$"
+            },
+            "example": "inst_07d7eab4fabc"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "model"
+                ],
+                "properties": {
+                  "model": {
+                    "type": "string",
+                    "example": "qwen3.6-35b-a3b"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Accepted — switch started."
+          },
+          "400": {
+            "description": "Plan mismatch or invalid model."
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          }
+        }
+      }
+    },
+    "/v1/deployments/{deploymentId}/knowledge-base": {
+      "get": {
+        "summary": "List documents in a deployment's knowledge base",
+        "tags": [
+          "Deployments"
+        ],
+        "security": [
+          {
+            "AgentKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "deploymentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^inst_[0-9a-f]+$"
+            },
+            "example": "inst_07d7eab4fabc"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      },
+      "post": {
+        "summary": "Add documents to a deployment's knowledge base",
+        "description": "Either upload files (multipart/form-data, field `files`, up to 50 × 25 MB) — they're added to your library and attached — or send JSON `{ document_ids: [...] }` to attach documents already in your library. Indexing runs in the background.",
+        "tags": [
+          "Deployments"
+        ],
+        "security": [
+          {
+            "AgentKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "deploymentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^inst_[0-9a-f]+$"
+            },
+            "example": "inst_07d7eab4fabc"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "files": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "format": "binary"
+                    }
+                  }
+                }
+              }
+            },
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "document_ids": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "format": "uuid"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Accepted"
+          },
+          "400": {
+            "description": "No files or document_ids."
+          }
+        }
+      }
+    },
+    "/v1/deployments/{deploymentId}/diagnostics": {
+      "get": {
+        "summary": "Diagnose a deployment",
+        "description": "Last-24h request volume, error rate and latency, plus recommendations. Keeps two levers separate: increase throughput (more simultaneous requests, same quality) vs move to a more capable model (better answers).",
+        "tags": [
+          "Deployments"
+        ],
+        "security": [
+          {
+            "AgentKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "deploymentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^inst_[0-9a-f]+$"
+            },
+            "example": "inst_07d7eab4fabc"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/v1/deployments/{deploymentId}/pause": {
+      "post": {
+        "summary": "Pause a deployment",
+        "description": "Stops active-time billing immediately. The model and knowledge base are kept for resume.",
+        "tags": [
+          "Scheduling"
+        ],
+        "security": [
+          {
+            "AgentKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "deploymentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^inst_[0-9a-f]+$"
+            },
+            "example": "inst_07d7eab4fabc"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK — `status: paused`."
+          },
+          "400": {
+            "description": "Not ready."
+          }
+        }
+      }
+    },
+    "/v1/deployments/{deploymentId}/resume": {
+      "post": {
+        "summary": "Resume a paused deployment",
+        "description": "Returns 202 with `ready_at` estimate (about 3 minutes of warm-up). Poll `GET /v1/deployments/{deploymentId}` or subscribe to `deployment.resumed`. Idempotent on a ready deployment.",
+        "tags": [
+          "Scheduling"
+        ],
+        "security": [
+          {
+            "AgentKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "deploymentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^inst_[0-9a-f]+$"
+            },
+            "example": "inst_07d7eab4fabc"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Already ready."
+          },
+          "202": {
+            "description": "Warming up."
+          }
+        }
+      }
+    },
+    "/v1/deployments/{deploymentId}/schedule": {
+      "get": {
+        "summary": "Get a deployment's schedule",
+        "tags": [
+          "Scheduling"
+        ],
+        "security": [
+          {
+            "AgentKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "deploymentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^inst_[0-9a-f]+$"
+            },
+            "example": "inst_07d7eab4fabc"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      },
+      "put": {
+        "summary": "Set a deployment's schedule",
+        "tags": [
+          "Scheduling"
+        ],
+        "security": [
+          {
+            "AgentKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "deploymentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^inst_[0-9a-f]+$"
+            },
+            "example": "inst_07d7eab4fabc"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "mode"
+                ],
+                "properties": {
+                  "mode": {
+                    "enum": [
+                      "always_on",
+                      "business_hours",
+                      "as_needed"
+                    ]
+                  },
+                  "config": {
+                    "type": "object"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/v1/deployments/{deploymentId}/spending-cap": {
+      "patch": {
+        "summary": "Set or clear a per-deployment spending cap",
+        "tags": [
+          "Billing"
+        ],
+        "security": [
+          {
+            "AgentKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "deploymentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^inst_[0-9a-f]+$"
+            },
+            "example": "inst_07d7eab4fabc"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "cap_usd": {
+                    "type": "number",
+                    "nullable": true,
+                    "description": "USD cap. When accumulated_cost crosses it, the deployment is suspended. Pass null to clear."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/v1/deployments/{deploymentId}/system-prompt": {
+      "post": {
+        "summary": "Set or clear the per-deployment system prompt",
+        "description": "When set, overrides the account-level default. Empty string or null clears the override.",
+        "tags": [
+          "Deployments"
+        ],
+        "security": [
+          {
+            "AgentKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "deploymentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^inst_[0-9a-f]+$"
+            },
+            "example": "inst_07d7eab4fabc"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "system_prompt": {
+                    "type": "string",
+                    "nullable": true,
+                    "maxLength": 5000
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/v1/billing/balance": {
+      "get": {
+        "summary": "Get account billing snapshot",
+        "tags": [
+          "Billing"
+        ],
+        "security": [
+          {
+            "AgentKey": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "const": true
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "credits": {
+                          "type": "object",
+                          "properties": {
+                            "balance": {
+                              "type": "number"
+                            },
+                            "currency": {
+                              "const": "USD"
+                            }
+                          }
+                        },
+                        "subscriptions": {
+                          "type": "object",
+                          "properties": {
+                            "active_count": {
+                              "type": "integer"
+                            },
+                            "monthly_total": {
+                              "type": "number"
+                            }
+                          }
+                        },
+                        "on_demand": {
+                          "type": "object",
+                          "properties": {
+                            "active_deployments": {
+                              "type": "integer"
+                            },
+                            "active_instances": {
+                              "type": "integer",
+                              "deprecated": true,
+                              "description": "Deprecated alias of `active_deployments`; returned until 2027-04-02."
+                            },
+                            "month_to_date": {
+                              "type": "number"
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/Meta"
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "data",
+                    "meta"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/billing/add-credits": {
+      "post": {
+        "summary": "Top up USD credits",
+        "description": "Returns a Stripe Checkout URL. Open it in a browser to complete payment; the balance updates after the webhook fires. Minimum $10, maximum $10,000 per checkout.",
+        "tags": [
+          "Billing"
+        ],
+        "security": [
+          {
+            "AgentKey": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "amount"
+                ],
+                "properties": {
+                  "amount": {
+                    "type": "number",
+                    "minimum": 10,
+                    "maximum": 10000
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "const": true
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "checkout_url": {
+                          "type": "string",
+                          "format": "uri"
+                        },
+                        "session_id": {
+                          "type": "string"
+                        },
+                        "amount_usd": {
+                          "type": "number"
+                        }
+                      }
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/Meta"
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "data",
+                    "meta"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Amount out of bounds."
+          }
+        }
+      }
+    },
+    "/v1/billing/auto-recharge": {
+      "get": {
+        "summary": "Read auto-recharge settings",
+        "tags": [
+          "Billing"
+        ],
+        "security": [
+          {
+            "AgentKey": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      },
+      "patch": {
+        "summary": "Update auto-recharge settings",
+        "description": "Requires a saved Stripe payment method (collected on the first POST /v1/billing/add-credits Checkout completion).",
+        "tags": [
+          "Billing"
+        ],
+        "security": [
+          {
+            "AgentKey": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "enabled": {
+                    "type": "boolean"
+                  },
+                  "threshold_usd": {
+                    "type": "number"
+                  },
+                  "amount_usd": {
+                    "type": "number"
+                  },
+                  "max_monthly_usd": {
+                    "type": "number"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/v1/{deploymentId}/chat": {
+      "post": {
+        "summary": "Inference (Auxen-native)",
+        "tags": [
+          "Inference"
+        ],
+        "security": [
+          {
+            "DeploymentKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "deploymentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^inst_[0-9a-f]+$"
+            },
+            "example": "inst_07d7eab4fabc"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "message"
+                ],
+                "properties": {
+                  "message": {
+                    "type": "string",
+                    "example": "Hello!"
+                  },
+                  "system": {
+                    "type": "string"
+                  },
+                  "history": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "role": {
+                          "enum": [
+                            "user",
+                            "assistant",
+                            "system"
+                          ]
+                        },
+                        "content": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  },
+                  "stream": {
+                    "type": "boolean",
+                    "default": false
+                  },
+                  "options": {
+                    "type": "object",
+                    "properties": {
+                      "temperature": {
+                        "type": "number"
+                      },
+                      "num_predict": {
+                        "type": "integer"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK (non-streaming)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "const": true
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "message": {
+                          "type": "string"
+                        },
+                        "model": {
+                          "type": "string"
+                        },
+                        "usage": {
+                          "type": "object",
+                          "properties": {
+                            "prompt_tokens": {
+                              "type": "integer"
+                            },
+                            "completion_tokens": {
+                              "type": "integer"
+                            },
+                            "total_tokens": {
+                              "type": "integer"
+                            }
+                          }
+                        },
+                        "response_time_ms": {
+                          "type": "integer"
+                        }
+                      }
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/Meta"
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "data",
+                    "meta"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "409": {
+            "description": "Deployment not ready yet — poll until status is ready."
+          }
+        }
+      }
+    },
+    "/v1/{deploymentId}/v1/chat/completions": {
+      "post": {
+        "summary": "Inference (OpenAI-compatible)",
+        "description": "Drop-in replacement for `POST https://api.openai.com/v1/chat/completions`. Point any OpenAI SDK at `https://api.auxen.ai/v1/{deploymentId}/v1` as the base URL and use the deployment's `auxk_` key — no other code changes required. Supports streaming via `stream: true`.",
+        "tags": [
+          "Inference"
+        ],
+        "security": [
+          {
+            "DeploymentKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "deploymentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^inst_[0-9a-f]+$"
+            },
+            "example": "inst_07d7eab4fabc"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "messages"
+                ],
+                "properties": {
+                  "messages": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "role": {
+                          "enum": [
+                            "user",
+                            "assistant",
+                            "system"
+                          ]
+                        },
+                        "content": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  },
+                  "stream": {
+                    "type": "boolean"
+                  },
+                  "temperature": {
+                    "type": "number"
+                  },
+                  "max_tokens": {
+                    "type": "integer"
+                  },
+                  "top_p": {
+                    "type": "number"
+                  },
+                  "seed": {
+                    "type": "integer"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Standard OpenAI chat.completion envelope."
+          }
+        }
+      }
+    },
+    "/v1/webhooks": {
+      "get": {
+        "summary": "List registered webhooks",
+        "tags": [
+          "Webhooks"
+        ],
+        "security": [
+          {
+            "AgentKey": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      },
+      "post": {
+        "summary": "Register a webhook",
+        "description": "Returns the webhook record + a one-time `secret` (HMAC-SHA256 over the raw body, header `x-auxen-signature: sha256=…`). Each delivery includes a unique `delivery_id` for replay protection. Deliveries carry the event name you subscribed with in `event` and the `X-Auxen-Event` header. Pre-2026 event names remain valid until 2027-04-02 (listed as deprecated in the schema); the migration guide maps each to its deployment.* name: https://auxen.ai/docs/api/migration",
+        "tags": [
+          "Webhooks"
+        ],
+        "security": [
+          {
+            "AgentKey": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "url",
+                  "events"
+                ],
+                "properties": {
+                  "url": {
+                    "type": "string",
+                    "format": "uri"
+                  },
+                  "events": {
+                    "type": "array",
+                    "items": {
+                      "anyOf": [
+                        {
+                          "enum": [
+                            "deployment.ready",
+                            "deployment.error",
+                            "deployment.deleted",
+                            "deployment.throughput_changed",
+                            "deployment.relocated",
+                            "deployment.suspended",
+                            "deployment.resumed",
+                            "deployment.idle",
+                            "deployment.paused",
+                            "deployment.warming",
+                            "deployment.schedule_changed",
+                            "billing.low_credits",
+                            "billing.auto_recharge_succeeded",
+                            "billing.auto_recharge_failed",
+                            "billing.spending_limit_alert",
+                            "knowledge_base.indexed",
+                            "model.update_available"
+                          ]
+                        },
+                        {
+                          "enum": [
+                            "instance.ready",
+                            "instance.error",
+                            "instance.destroyed",
+                            "instance.auto_scaled",
+                            "instance.host_migrated",
+                            "instance.suspended",
+                            "instance.resumed",
+                            "instance.idle",
+                            "instance.paused",
+                            "instance.warming",
+                            "instance.schedule_changed"
+                          ],
+                          "deprecated": true,
+                          "description": "Pre-2026 event names; accepted until 2027-04-02."
+                        }
+                      ]
+                    }
+                  },
+                  "secret": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created"
+          }
+        }
+      }
+    },
+    "/v1/webhooks/{webhookId}": {
+      "delete": {
+        "summary": "Delete a webhook",
+        "tags": [
+          "Webhooks"
+        ],
+        "security": [
+          {
+            "AgentKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "webhookId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/v1/webhooks/{webhookId}/deliveries": {
+      "get": {
+        "summary": "List recent webhook deliveries",
+        "tags": [
+          "Webhooks"
+        ],
+        "security": [
+          {
+            "AgentKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "webhookId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/v1/webhooks/{webhookId}/test": {
+      "post": {
+        "summary": "Fire a test delivery",
+        "description": "Sends a synthetic event. Defaults to the first event name the webhook subscribes to.",
+        "tags": [
+          "Webhooks"
+        ],
+        "security": [
+          {
+            "AgentKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "webhookId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Delivered or queued for retry."
+          }
+        }
+      }
+    },
+    "/v1/provision": {
+      "post": {
+        "summary": "Deploy a model (deprecated path)",
+        "description": "Deprecated alias of `POST /v1/deploy`; works until 2027-04-02. Returns the pre-2026 `status` values and error codes, with the new values in `deployment_status` and `renamed_to`, plus every new field name alongside the old one. Responses include `Deprecation`, `Sunset`, and `Link` headers. See https://auxen.ai/docs/api/migration.",
+        "tags": [
+          "Deprecated"
+        ],
+        "security": [
+          {
+            "AgentKey": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "model"
+                ],
+                "properties": {
+                  "model": {
+                    "type": "string",
+                    "description": "Model ID from GET /v1/models",
+                    "example": "qwen3.5-9b"
+                  },
+                  "throughput": {
+                    "oneOf": [
+                      {
+                        "enum": [
+                          "standard",
+                          "double",
+                          "quad",
+                          "max"
+                        ]
+                      },
+                      {
+                        "type": "integer",
+                        "enum": [
+                          1,
+                          2,
+                          4,
+                          8
+                        ]
+                      }
+                    ],
+                    "description": "Throughput level. More throughput handles more simultaneous requests at the same answer quality. Double, Quad, and Max cost 1.9×, 3.75×, and 7.5× the Standard rate. Numbers 1/2/4/8 are accepted as aliases.",
+                    "default": "standard"
+                  },
+                  "capacity": {
+                    "type": "integer",
+                    "enum": [
+                      1,
+                      2,
+                      4,
+                      8
+                    ],
+                    "deprecated": true,
+                    "description": "Deprecated alias of `throughput`; returned until 2027-04-02."
+                  },
+                  "billing": {
+                    "enum": [
+                      "pay_as_you_go",
+                      "on_demand"
+                    ],
+                    "default": "pay_as_you_go",
+                    "description": "Optional. `on_demand` is a back-compat alias for `pay_as_you_go`."
+                  },
+                  "label": {
+                    "type": "string",
+                    "maxLength": 120
+                  },
+                  "webhook_url": {
+                    "type": "string",
+                    "format": "uri",
+                    "description": "URL Auxen POSTs this deployment's lifecycle events to."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Accepted — deployment started.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "const": true
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "deployment_id": {
+                          "type": "string",
+                          "example": "inst_xxxxxxxxxxxx"
+                        },
+                        "instance_id": {
+                          "type": "string",
+                          "deprecated": true,
+                          "description": "Deprecated alias of `deployment_id`; returned until 2027-04-02."
+                        },
+                        "status": {
+                          "const": "deploying"
+                        },
+                        "legacy_status": {
+                          "const": "provisioning"
+                        },
+                        "model": {
+                          "type": "string"
+                        },
+                        "billing": {
+                          "const": "pay_as_you_go"
+                        },
+                        "throughput": {
+                          "enum": [
+                            "standard",
+                            "double",
+                            "quad",
+                            "max"
+                          ]
+                        },
+                        "throughput_multiplier": {
+                          "type": "integer",
+                          "enum": [
+                            1,
+                            2,
+                            4,
+                            8
+                          ]
+                        },
+                        "capacity": {
+                          "type": "integer",
+                          "deprecated": true,
+                          "description": "Deprecated alias of `throughput_multiplier`; returned until 2027-04-02."
+                        },
+                        "rate_per_hour": {
+                          "type": "string",
+                          "example": "$0.20/hour"
+                        },
+                        "hourly_rate": {
+                          "type": "number",
+                          "deprecated": true,
+                          "description": "Deprecated alias of `rate_per_hour`; returned until 2027-04-02."
+                        },
+                        "ready_estimate": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "estimated_ready_at": {
+                          "type": "string",
+                          "format": "date-time",
+                          "deprecated": true,
+                          "description": "Deprecated alias of `ready_estimate`; returned until 2027-04-02."
+                        },
+                        "polling_url": {
+                          "type": "string",
+                          "format": "uri"
+                        }
+                      }
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/Meta"
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "data",
+                    "meta"
+                  ]
+                }
+              }
+            },
+            "headers": {
+              "Deprecation": {
+                "schema": {
+                  "type": "string",
+                  "const": "true"
+                }
+              },
+              "Sunset": {
+                "schema": {
+                  "type": "string",
+                  "example": "Fri, 02 Apr 2027 00:00:00 GMT"
+                }
+              },
+              "Link": {
+                "schema": {
+                  "type": "string",
+                  "example": "<https://auxen.ai/docs/api/migration>; rel=\"deprecation\""
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation failure (missing model, bad throughput).",
+            "headers": {
+              "Deprecation": {
+                "schema": {
+                  "type": "string",
+                  "const": "true"
+                }
+              },
+              "Sunset": {
+                "schema": {
+                  "type": "string",
+                  "example": "Fri, 02 Apr 2027 00:00:00 GMT"
+                }
+              },
+              "Link": {
+                "schema": {
+                  "type": "string",
+                  "example": "<https://auxen.ai/docs/api/migration>; rel=\"deprecation\""
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Insufficient credits.",
+            "headers": {
+              "Deprecation": {
+                "schema": {
+                  "type": "string",
+                  "const": "true"
+                }
+              },
+              "Sunset": {
+                "schema": {
+                  "type": "string",
+                  "example": "Fri, 02 Apr 2027 00:00:00 GMT"
+                }
+              },
+              "Link": {
+                "schema": {
+                  "type": "string",
+                  "example": "<https://auxen.ai/docs/api/migration>; rel=\"deprecation\""
+                }
+              }
+            }
+          }
+        },
+        "deprecated": true
+      }
+    },
+    "/v1/instances": {
+      "get": {
+        "summary": "List your deployments (deprecated path)",
+        "tags": [
+          "Deprecated"
+        ],
+        "security": [
+          {
+            "AgentKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "schema": {
+              "enum": [
+                "deploying",
+                "ready",
+                "paused",
+                "warming",
+                "switching",
+                "suspended",
+                "error",
+                "deleted"
+              ]
+            },
+            "description": "Pre-2026 status values are also accepted."
+          },
+          {
+            "name": "billing",
+            "in": "query",
+            "schema": {
+              "enum": [
+                "subscription",
+                "pay_as_you_go",
+                "on_demand"
+              ]
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "const": true
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "deployments": {
+                          "type": "array",
+                          "items": {
+                            "$ref": "#/components/schemas/Deployment"
+                          }
+                        },
+                        "instances": {
+                          "type": "array",
+                          "items": {
+                            "$ref": "#/components/schemas/Deployment"
+                          },
+                          "deprecated": true,
+                          "description": "Deprecated alias of `deployments`; returned until 2027-04-02."
+                        }
+                      }
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/Meta"
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "data",
+                    "meta"
+                  ]
+                }
+              }
+            },
+            "headers": {
+              "Deprecation": {
+                "schema": {
+                  "type": "string",
+                  "const": "true"
+                }
+              },
+              "Sunset": {
+                "schema": {
+                  "type": "string",
+                  "example": "Fri, 02 Apr 2027 00:00:00 GMT"
+                }
+              },
+              "Link": {
+                "schema": {
+                  "type": "string",
+                  "example": "<https://auxen.ai/docs/api/migration>; rel=\"deprecation\""
+                }
+              }
+            }
+          }
+        },
+        "deprecated": true,
+        "description": "Deprecated alias of `GET /v1/deployments`; works until 2027-04-02. Returns the pre-2026 `status` values and error codes, with the new values in `deployment_status` and `renamed_to`, plus every new field name alongside the old one. Responses include `Deprecation`, `Sunset`, and `Link` headers. See https://auxen.ai/docs/api/migration."
+      }
+    },
+    "/v1/instances/{instanceId}": {
+      "get": {
+        "summary": "Get a deployment (deprecated path)",
+        "tags": [
+          "Deprecated"
+        ],
+        "security": [
+          {
+            "AgentKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "instanceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^inst_[0-9a-f]+$"
+            },
+            "example": "inst_07d7eab4fabc"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "const": true
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "deployment": {
+                          "$ref": "#/components/schemas/Deployment"
+                        },
+                        "instance": {
+                          "$ref": "#/components/schemas/Deployment",
+                          "deprecated": true,
+                          "description": "Deprecated alias of `deployment`; returned until 2027-04-02."
+                        }
+                      }
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/Meta"
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "data",
+                    "meta"
+                  ]
+                }
+              }
+            },
+            "headers": {
+              "Deprecation": {
+                "schema": {
+                  "type": "string",
+                  "const": "true"
+                }
+              },
+              "Sunset": {
+                "schema": {
+                  "type": "string",
+                  "example": "Fri, 02 Apr 2027 00:00:00 GMT"
+                }
+              },
+              "Link": {
+                "schema": {
+                  "type": "string",
+                  "example": "<https://auxen.ai/docs/api/migration>; rel=\"deprecation\""
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        },
+        "deprecated": true,
+        "description": "Deprecated alias of `GET /v1/deployments/{deploymentId}`; works until 2027-04-02. Returns the pre-2026 `status` values and error codes, with the new values in `deployment_status` and `renamed_to`, plus every new field name alongside the old one. Responses include `Deprecation`, `Sunset`, and `Link` headers. See https://auxen.ai/docs/api/migration."
+      },
+      "delete": {
+        "summary": "Delete a deployment (deprecated path)",
+        "description": "Deprecated alias of `DELETE /v1/deployments/{deploymentId}`; works until 2027-04-02. Returns the pre-2026 `status` values and error codes, with the new values in `deployment_status` and `renamed_to`, plus every new field name alongside the old one. Responses include `Deprecation`, `Sunset`, and `Link` headers. See https://auxen.ai/docs/api/migration.",
+        "tags": [
+          "Deprecated"
+        ],
+        "security": [
+          {
+            "AgentKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "instanceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^inst_[0-9a-f]+$"
+            },
+            "example": "inst_07d7eab4fabc"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK — `status: deleted`.",
+            "headers": {
+              "Deprecation": {
+                "schema": {
+                  "type": "string",
+                  "const": "true"
+                }
+              },
+              "Sunset": {
+                "schema": {
+                  "type": "string",
+                  "example": "Fri, 02 Apr 2027 00:00:00 GMT"
+                }
+              },
+              "Link": {
+                "schema": {
+                  "type": "string",
+                  "example": "<https://auxen.ai/docs/api/migration>; rel=\"deprecation\""
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        },
+        "deprecated": true
+      },
+      "patch": {
+        "summary": "Update a deployment's label / webhook (deprecated path)",
+        "tags": [
+          "Deprecated"
+        ],
+        "security": [
+          {
+            "AgentKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "instanceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^inst_[0-9a-f]+$"
+            },
+            "example": "inst_07d7eab4fabc"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "label": {
+                    "type": "string",
+                    "maxLength": 120
+                  },
+                  "webhook_url": {
+                    "type": "string",
+                    "nullable": true,
+                    "format": "uri"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "headers": {
+              "Deprecation": {
+                "schema": {
+                  "type": "string",
+                  "const": "true"
+                }
+              },
+              "Sunset": {
+                "schema": {
+                  "type": "string",
+                  "example": "Fri, 02 Apr 2027 00:00:00 GMT"
+                }
+              },
+              "Link": {
+                "schema": {
+                  "type": "string",
+                  "example": "<https://auxen.ai/docs/api/migration>; rel=\"deprecation\""
+                }
+              }
+            }
+          }
+        },
+        "deprecated": true,
+        "description": "Deprecated alias of `PATCH /v1/deployments/{deploymentId}`; works until 2027-04-02. Returns the pre-2026 `status` values and error codes, with the new values in `deployment_status` and `renamed_to`, plus every new field name alongside the old one. Responses include `Deprecation`, `Sunset`, and `Link` headers. See https://auxen.ai/docs/api/migration."
+      }
+    },
+    "/v1/instances/{instanceId}/scale": {
+      "post": {
+        "summary": "Change a deployment's throughput (deprecated path)",
+        "description": "Deprecated alias of `POST /v1/deployments/{deploymentId}/throughput`; works until 2027-04-02. Returns the pre-2026 `status` values and error codes, with the new values in `deployment_status` and `renamed_to`, plus every new field name alongside the old one. Responses include `Deprecation`, `Sunset`, and `Link` headers. See https://auxen.ai/docs/api/migration.",
+        "tags": [
+          "Deprecated"
+        ],
+        "security": [
+          {
+            "AgentKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "instanceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^inst_[0-9a-f]+$"
+            },
+            "example": "inst_07d7eab4fabc"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "throughput",
+                  "confirm"
+                ],
+                "properties": {
+                  "throughput": {
+                    "oneOf": [
+                      {
+                        "enum": [
+                          "standard",
+                          "double",
+                          "quad",
+                          "max"
+                        ]
+                      },
+                      {
+                        "type": "integer",
+                        "enum": [
+                          1,
+                          2,
+                          4,
+                          8
+                        ]
+                      }
+                    ],
+                    "description": "Throughput level. More throughput handles more simultaneous requests at the same answer quality. Double, Quad, and Max cost 1.9×, 3.75×, and 7.5× the Standard rate. Numbers 1/2/4/8 are accepted as aliases."
+                  },
+                  "capacity": {
+                    "type": "integer",
+                    "enum": [
+                      1,
+                      2,
+                      4,
+                      8
+                    ],
+                    "deprecated": true,
+                    "description": "Deprecated alias of `throughput`; returned until 2027-04-02."
+                  },
+                  "confirm": {
+                    "type": "boolean",
+                    "const": true,
+                    "description": "Acknowledges the billing change."
+                  }
+                }
+              },
+              "example": {
+                "throughput": "double",
+                "confirm": true
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "headers": {
+              "Deprecation": {
+                "schema": {
+                  "type": "string",
+                  "const": "true"
+                }
+              },
+              "Sunset": {
+                "schema": {
+                  "type": "string",
+                  "example": "Fri, 02 Apr 2027 00:00:00 GMT"
+                }
+              },
+              "Link": {
+                "schema": {
+                  "type": "string",
+                  "example": "<https://auxen.ai/docs/api/migration>; rel=\"deprecation\""
+                }
+              }
+            }
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          }
+        },
+        "deprecated": true
+      }
+    },
+    "/v1/instances/{instanceId}/switch-model": {
+      "post": {
+        "summary": "Switch the model on a deployment (deprecated path)",
+        "description": "Deprecated alias of `POST /v1/deployments/{deploymentId}/switch-model`; works until 2027-04-02. Returns the pre-2026 `status` values and error codes, with the new values in `deployment_status` and `renamed_to`, plus every new field name alongside the old one. Responses include `Deprecation`, `Sunset`, and `Link` headers. See https://auxen.ai/docs/api/migration.",
+        "tags": [
+          "Deprecated"
+        ],
+        "security": [
+          {
+            "AgentKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "instanceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^inst_[0-9a-f]+$"
+            },
+            "example": "inst_07d7eab4fabc"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "model"
+                ],
+                "properties": {
+                  "model": {
+                    "type": "string",
+                    "example": "qwen3.6-35b-a3b"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Accepted — switch started.",
+            "headers": {
+              "Deprecation": {
+                "schema": {
+                  "type": "string",
+                  "const": "true"
+                }
+              },
+              "Sunset": {
+                "schema": {
+                  "type": "string",
+                  "example": "Fri, 02 Apr 2027 00:00:00 GMT"
+                }
+              },
+              "Link": {
+                "schema": {
+                  "type": "string",
+                  "example": "<https://auxen.ai/docs/api/migration>; rel=\"deprecation\""
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Plan mismatch or invalid model.",
+            "headers": {
+              "Deprecation": {
+                "schema": {
+                  "type": "string",
+                  "const": "true"
+                }
+              },
+              "Sunset": {
+                "schema": {
+                  "type": "string",
+                  "example": "Fri, 02 Apr 2027 00:00:00 GMT"
+                }
+              },
+              "Link": {
+                "schema": {
+                  "type": "string",
+                  "example": "<https://auxen.ai/docs/api/migration>; rel=\"deprecation\""
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          }
+        },
+        "deprecated": true
+      }
+    },
+    "/v1/instances/{instanceId}/pause": {
+      "post": {
+        "summary": "Pause a deployment (deprecated path)",
+        "description": "Deprecated alias of `POST /v1/deployments/{deploymentId}/pause`; works until 2027-04-02. Returns the pre-2026 `status` values and error codes, with the new values in `deployment_status` and `renamed_to`, plus every new field name alongside the old one. Responses include `Deprecation`, `Sunset`, and `Link` headers. See https://auxen.ai/docs/api/migration.",
+        "tags": [
+          "Deprecated"
+        ],
+        "security": [
+          {
+            "AgentKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "instanceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^inst_[0-9a-f]+$"
+            },
+            "example": "inst_07d7eab4fabc"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK — `status: paused`.",
+            "headers": {
+              "Deprecation": {
+                "schema": {
+                  "type": "string",
+                  "const": "true"
+                }
+              },
+              "Sunset": {
+                "schema": {
+                  "type": "string",
+                  "example": "Fri, 02 Apr 2027 00:00:00 GMT"
+                }
+              },
+              "Link": {
+                "schema": {
+                  "type": "string",
+                  "example": "<https://auxen.ai/docs/api/migration>; rel=\"deprecation\""
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Not ready.",
+            "headers": {
+              "Deprecation": {
+                "schema": {
+                  "type": "string",
+                  "const": "true"
+                }
+              },
+              "Sunset": {
+                "schema": {
+                  "type": "string",
+                  "example": "Fri, 02 Apr 2027 00:00:00 GMT"
+                }
+              },
+              "Link": {
+                "schema": {
+                  "type": "string",
+                  "example": "<https://auxen.ai/docs/api/migration>; rel=\"deprecation\""
+                }
+              }
+            }
+          }
+        },
+        "deprecated": true
+      }
+    },
+    "/v1/instances/{instanceId}/wake": {
+      "post": {
+        "summary": "Resume a paused deployment (deprecated path)",
+        "description": "Deprecated alias of `POST /v1/deployments/{deploymentId}/resume`; works until 2027-04-02. Returns the pre-2026 `status` values and error codes, with the new values in `deployment_status` and `renamed_to`, plus every new field name alongside the old one. Responses include `Deprecation`, `Sunset`, and `Link` headers. See https://auxen.ai/docs/api/migration.",
+        "tags": [
+          "Deprecated"
+        ],
+        "security": [
+          {
+            "AgentKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "instanceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^inst_[0-9a-f]+$"
+            },
+            "example": "inst_07d7eab4fabc"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Already ready.",
+            "headers": {
+              "Deprecation": {
+                "schema": {
+                  "type": "string",
+                  "const": "true"
+                }
+              },
+              "Sunset": {
+                "schema": {
+                  "type": "string",
+                  "example": "Fri, 02 Apr 2027 00:00:00 GMT"
+                }
+              },
+              "Link": {
+                "schema": {
+                  "type": "string",
+                  "example": "<https://auxen.ai/docs/api/migration>; rel=\"deprecation\""
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Warming up.",
+            "headers": {
+              "Deprecation": {
+                "schema": {
+                  "type": "string",
+                  "const": "true"
+                }
+              },
+              "Sunset": {
+                "schema": {
+                  "type": "string",
+                  "example": "Fri, 02 Apr 2027 00:00:00 GMT"
+                }
+              },
+              "Link": {
+                "schema": {
+                  "type": "string",
+                  "example": "<https://auxen.ai/docs/api/migration>; rel=\"deprecation\""
+                }
+              }
+            }
+          }
+        },
+        "deprecated": true
+      }
+    },
+    "/v1/instances/{instanceId}/schedule": {
+      "get": {
+        "summary": "Get a deployment's schedule (deprecated path)",
+        "tags": [
+          "Deprecated"
+        ],
+        "security": [
+          {
+            "AgentKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "instanceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^inst_[0-9a-f]+$"
+            },
+            "example": "inst_07d7eab4fabc"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "headers": {
+              "Deprecation": {
+                "schema": {
+                  "type": "string",
+                  "const": "true"
+                }
+              },
+              "Sunset": {
+                "schema": {
+                  "type": "string",
+                  "example": "Fri, 02 Apr 2027 00:00:00 GMT"
+                }
+              },
+              "Link": {
+                "schema": {
+                  "type": "string",
+                  "example": "<https://auxen.ai/docs/api/migration>; rel=\"deprecation\""
+                }
+              }
+            }
+          }
+        },
+        "deprecated": true,
+        "description": "Deprecated alias of `GET /v1/deployments/{deploymentId}/schedule`; works until 2027-04-02. Returns the pre-2026 `status` values and error codes, with the new values in `deployment_status` and `renamed_to`, plus every new field name alongside the old one. Responses include `Deprecation`, `Sunset`, and `Link` headers. See https://auxen.ai/docs/api/migration."
+      },
+      "put": {
+        "summary": "Set a deployment's schedule (deprecated path)",
+        "tags": [
+          "Deprecated"
+        ],
+        "security": [
+          {
+            "AgentKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "instanceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^inst_[0-9a-f]+$"
+            },
+            "example": "inst_07d7eab4fabc"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "mode"
+                ],
+                "properties": {
+                  "mode": {
+                    "enum": [
+                      "always_on",
+                      "business_hours",
+                      "as_needed"
+                    ]
+                  },
+                  "config": {
+                    "type": "object"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "headers": {
+              "Deprecation": {
+                "schema": {
+                  "type": "string",
+                  "const": "true"
+                }
+              },
+              "Sunset": {
+                "schema": {
+                  "type": "string",
+                  "example": "Fri, 02 Apr 2027 00:00:00 GMT"
+                }
+              },
+              "Link": {
+                "schema": {
+                  "type": "string",
+                  "example": "<https://auxen.ai/docs/api/migration>; rel=\"deprecation\""
+                }
+              }
+            }
+          }
+        },
+        "deprecated": true,
+        "description": "Deprecated alias of `PUT /v1/deployments/{deploymentId}/schedule`; works until 2027-04-02. Returns the pre-2026 `status` values and error codes, with the new values in `deployment_status` and `renamed_to`, plus every new field name alongside the old one. Responses include `Deprecation`, `Sunset`, and `Link` headers. See https://auxen.ai/docs/api/migration."
+      }
+    },
+    "/v1/instances/{instanceId}/spending-cap": {
+      "patch": {
+        "summary": "Set or clear a per-deployment spending cap (deprecated path)",
+        "tags": [
+          "Deprecated"
+        ],
+        "security": [
+          {
+            "AgentKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "instanceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^inst_[0-9a-f]+$"
+            },
+            "example": "inst_07d7eab4fabc"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "cap_usd": {
+                    "type": "number",
+                    "nullable": true,
+                    "description": "USD cap. When accumulated_cost crosses it, the deployment is suspended. Pass null to clear."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "headers": {
+              "Deprecation": {
+                "schema": {
+                  "type": "string",
+                  "const": "true"
+                }
+              },
+              "Sunset": {
+                "schema": {
+                  "type": "string",
+                  "example": "Fri, 02 Apr 2027 00:00:00 GMT"
+                }
+              },
+              "Link": {
+                "schema": {
+                  "type": "string",
+                  "example": "<https://auxen.ai/docs/api/migration>; rel=\"deprecation\""
+                }
+              }
+            }
+          }
+        },
+        "deprecated": true,
+        "description": "Deprecated alias of `PATCH /v1/deployments/{deploymentId}/spending-cap`; works until 2027-04-02. Returns the pre-2026 `status` values and error codes, with the new values in `deployment_status` and `renamed_to`, plus every new field name alongside the old one. Responses include `Deprecation`, `Sunset`, and `Link` headers. See https://auxen.ai/docs/api/migration."
+      }
+    },
+    "/v1/instances/{instanceId}/system-prompt": {
+      "post": {
+        "summary": "Set or clear the per-deployment system prompt (deprecated path)",
+        "description": "Deprecated alias of `POST /v1/deployments/{deploymentId}/system-prompt`; works until 2027-04-02. Returns the pre-2026 `status` values and error codes, with the new values in `deployment_status` and `renamed_to`, plus every new field name alongside the old one. Responses include `Deprecation`, `Sunset`, and `Link` headers. See https://auxen.ai/docs/api/migration.",
+        "tags": [
+          "Deprecated"
+        ],
+        "security": [
+          {
+            "AgentKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "instanceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^inst_[0-9a-f]+$"
+            },
+            "example": "inst_07d7eab4fabc"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "system_prompt": {
+                    "type": "string",
+                    "nullable": true,
+                    "maxLength": 5000
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "headers": {
+              "Deprecation": {
+                "schema": {
+                  "type": "string",
+                  "const": "true"
+                }
+              },
+              "Sunset": {
+                "schema": {
+                  "type": "string",
+                  "example": "Fri, 02 Apr 2027 00:00:00 GMT"
+                }
+              },
+              "Link": {
+                "schema": {
+                  "type": "string",
+                  "example": "<https://auxen.ai/docs/api/migration>; rel=\"deprecation\""
+                }
+              }
+            }
+          }
+        },
+        "deprecated": true
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "AgentKey": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "auxen_live_xxx | auxen_test_xxx",
+        "description": "Account-level key. Generate at /dashboard/api-keys."
+      },
+      "DeploymentKey": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "auxk_xxx",
+        "description": "Per-deployment key from the `api_key` field of a deployment object."
+      }
+    },
+    "schemas": {
+      "Meta": {
+        "type": "object",
+        "properties": {
+          "requestId": {
+            "type": "string",
+            "example": "req_abcdef0123456789"
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "Model": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "example": "qwen3.5-9b"
+          },
+          "name": {
+            "type": "string",
+            "example": "Qwen 3.5 9B"
+          },
+          "tier": {
+            "enum": [
+              "fast",
+              "balanced",
+              "powerful",
+              "maximum"
+            ]
+          },
+          "family": {
+            "type": "string",
+            "example": "Qwen 3.5"
+          },
+          "status": {
+            "enum": [
+              "active",
+              "legacy"
+            ],
+            "description": "Legacy models are listed only with include_legacy=true and can be deployed until 2027-04-02; after that, deploys return MODEL_DEPRECATED with replacement_model."
+          },
+          "is_default_for_tier": {
+            "type": "boolean"
+          },
+          "is_recommended": {
+            "type": "boolean"
+          },
+          "context_length": {
+            "type": "integer",
+            "example": 32768
+          },
+          "license": {
+            "type": "string",
+            "example": "Apache-2.0"
+          },
+          "hf_repo": {
+            "type": "string",
+            "example": "Qwen/Qwen3.5-9B"
+          },
+          "release_date": {
+            "type": "string",
+            "format": "date",
+            "nullable": true
+          },
+          "replacement_model": {
+            "type": "string",
+            "nullable": true
+          },
+          "rate_per_hour": {
+            "type": "string",
+            "example": "$0.20/hour"
+          },
+          "minimum_session_minutes": {
+            "type": "integer",
+            "example": 30,
+            "description": "Warm-up is free. Once a deployment is ready, each session (ready → pause or delete) is billed for at least this many minutes."
+          },
+          "size_group": {
+            "enum": [
+              "small",
+              "medium",
+              "large",
+              "xl"
+            ]
+          },
+          "parameter_count": {
+            "type": "string",
+            "example": "9.7B"
+          },
+          "speed_rating": {
+            "enum": [
+              "fast",
+              "balanced",
+              "powerful",
+              "maximum"
+            ]
+          },
+          "best_for": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "plans": {
+            "type": "object",
+            "description": "Pay-as-you-go pricing for this model at Standard throughput. The legacy `subscription` field is retained for grandfathered accounts.",
+            "properties": {
+              "pay_as_you_go": {
+                "type": "object",
+                "properties": {
+                  "hourly_cost": {
+                    "type": "number",
+                    "example": 0.15
+                  }
+                }
+              },
+              "on_demand": {
+                "deprecated": true,
+                "nullable": true,
+                "description": "Back-compat alias for `pay_as_you_go`.",
+                "type": "object",
+                "properties": {
+                  "hourly_cost": {
+                    "type": "number",
+                    "example": 0.15
+                  }
+                }
+              },
+              "subscription": {
+                "deprecated": true,
+                "description": "Legacy field. Subscription billing is grandfathered; not available for new deployments.",
+                "type": "object",
+                "properties": {
+                  "plan": {
+                    "enum": [
+                      "shared",
+                      "dedicated",
+                      "business",
+                      "enterprise"
+                    ]
+                  },
+                  "monthly_cost": {
+                    "type": "number",
+                    "example": 149
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "Deployment": {
+        "type": "object",
+        "properties": {
+          "deployment_id": {
+            "type": "string",
+            "example": "inst_07d7eab4fabc"
+          },
+          "instance_id": {
+            "type": "string",
+            "deprecated": true,
+            "description": "Deprecated alias of `deployment_id`; returned until 2027-04-02."
+          },
+          "status": {
+            "enum": [
+              "deploying",
+              "ready",
+              "paused",
+              "warming",
+              "switching",
+              "suspended",
+              "error",
+              "deleted"
+            ],
+            "description": "On /v1/deployments/* routes. (Deprecated routes return the pre-2026 value here and the new one in `deployment_status`.)"
+          },
+          "legacy_status": {
+            "type": "string",
+            "description": "Pre-2026 status value (e.g. `running` for `ready`); returned until 2027-04-02."
+          },
+          "model": {
+            "type": "string",
+            "example": "qwen3.5-9b"
+          },
+          "billing": {
+            "enum": [
+              "subscription",
+              "pay_as_you_go",
+              "on_demand"
+            ],
+            "description": "Current billing mode. `pay_as_you_go` is canonical; `on_demand` is a back-compat alias; `subscription` is legacy and applies only to grandfathered accounts."
+          },
+          "label": {
+            "type": "string",
+            "nullable": true
+          },
+          "endpoint": {
+            "type": "string",
+            "nullable": true,
+            "example": "https://api.auxen.ai/v1/inst_07d7eab4fabc",
+            "description": "Inference endpoint. OpenAI-compatible base URL is `{endpoint}/v1`."
+          },
+          "api_key": {
+            "type": "string",
+            "nullable": true,
+            "example": "auxk_…",
+            "description": "Per-deployment inference key. Use this in Authorization for /chat and /v1/chat/completions."
+          },
+          "webhook_url": {
+            "type": "string",
+            "nullable": true
+          },
+          "throughput": {
+            "enum": [
+              "standard",
+              "double",
+              "quad",
+              "max"
+            ]
+          },
+          "throughput_multiplier": {
+            "type": "integer",
+            "enum": [
+              1,
+              2,
+              4,
+              8
+            ]
+          },
+          "capacity": {
+            "type": "integer",
+            "enum": [
+              1,
+              2,
+              4,
+              8
+            ],
+            "deprecated": true,
+            "description": "Deprecated alias of `throughput_multiplier`; returned until 2027-04-02."
+          },
+          "system_prompt": {
+            "type": "string",
+            "nullable": true,
+            "description": "Per-deployment system prompt. null = inherit account default."
+          },
+          "billing_details": {
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "mode": {
+                    "const": "subscription"
+                  },
+                  "plan": {
+                    "enum": [
+                      "shared",
+                      "dedicated",
+                      "business",
+                      "enterprise"
+                    ]
+                  },
+                  "monthly_cost": {
+                    "type": "number"
+                  },
+                  "next_billing_date": {
+                    "type": "string",
+                    "nullable": true
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "mode": {
+                    "const": "pay_as_you_go"
+                  },
+                  "rate_per_hour": {
+                    "type": "string",
+                    "example": "$0.20/hour"
+                  },
+                  "hourly_rate": {
+                    "type": "number",
+                    "deprecated": true,
+                    "description": "Deprecated alias of `rate_per_hour`; returned until 2027-04-02."
+                  },
+                  "accumulated_cost": {
+                    "type": "number"
+                  },
+                  "spending_cap": {
+                    "type": "number",
+                    "nullable": true
+                  },
+                  "paused_at": {
+                    "type": "string",
+                    "nullable": true,
+                    "format": "date-time"
+                  }
+                }
+              }
+            ]
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "ready_at": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time"
+          },
+          "deleted_at": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time"
+          },
+          "destroyed_at": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time",
+            "deprecated": true,
+            "description": "Deprecated alias of `deleted_at`; returned until 2027-04-02."
+          }
+        }
+      },
+      "Error401": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "const": false
+          },
+          "error": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "example": "DEPLOYMENT_NOT_FOUND"
+              },
+              "message": {
+                "type": "string"
+              },
+              "docs": {
+                "type": "string",
+                "format": "uri"
+              },
+              "legacy_code": {
+                "type": "string",
+                "description": "On /v1/deployments/* routes: the pre-2026 name of a renamed code (e.g. INSTANCE_NOT_FOUND). Present until 2027-04-02."
+              },
+              "renamed_to": {
+                "type": "string",
+                "description": "On deprecated routes: the new name of a renamed code (e.g. DEPLOYMENT_NOT_FOUND)."
+              }
+            },
+            "required": [
+              "code",
+              "message",
+              "docs"
+            ]
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "success",
+          "error",
+          "meta"
+        ]
+      },
+      "Error402": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "const": false
+          },
+          "error": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "example": "DEPLOYMENT_NOT_FOUND"
+              },
+              "message": {
+                "type": "string"
+              },
+              "docs": {
+                "type": "string",
+                "format": "uri"
+              },
+              "legacy_code": {
+                "type": "string",
+                "description": "On /v1/deployments/* routes: the pre-2026 name of a renamed code (e.g. INSTANCE_NOT_FOUND). Present until 2027-04-02."
+              },
+              "renamed_to": {
+                "type": "string",
+                "description": "On deprecated routes: the new name of a renamed code (e.g. DEPLOYMENT_NOT_FOUND)."
+              }
+            },
+            "required": [
+              "code",
+              "message",
+              "docs"
+            ]
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "success",
+          "error",
+          "meta"
+        ]
+      },
+      "Error404": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "const": false
+          },
+          "error": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "example": "DEPLOYMENT_NOT_FOUND"
+              },
+              "message": {
+                "type": "string"
+              },
+              "docs": {
+                "type": "string",
+                "format": "uri"
+              },
+              "legacy_code": {
+                "type": "string",
+                "description": "On /v1/deployments/* routes: the pre-2026 name of a renamed code (e.g. INSTANCE_NOT_FOUND). Present until 2027-04-02."
+              },
+              "renamed_to": {
+                "type": "string",
+                "description": "On deprecated routes: the new name of a renamed code (e.g. DEPLOYMENT_NOT_FOUND)."
+              }
+            },
+            "required": [
+              "code",
+              "message",
+              "docs"
+            ]
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "success",
+          "error",
+          "meta"
+        ]
+      },
+      "Error409": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "const": false
+          },
+          "error": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "example": "DEPLOYMENT_NOT_FOUND"
+              },
+              "message": {
+                "type": "string"
+              },
+              "docs": {
+                "type": "string",
+                "format": "uri"
+              },
+              "legacy_code": {
+                "type": "string",
+                "description": "On /v1/deployments/* routes: the pre-2026 name of a renamed code (e.g. INSTANCE_NOT_FOUND). Present until 2027-04-02."
+              },
+              "renamed_to": {
+                "type": "string",
+                "description": "On deprecated routes: the new name of a renamed code (e.g. DEPLOYMENT_NOT_FOUND)."
+              }
+            },
+            "required": [
+              "code",
+              "message",
+              "docs"
+            ]
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "success",
+          "error",
+          "meta"
+        ]
+      },
+      "Error400": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "const": false
+          },
+          "error": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "example": "DEPLOYMENT_NOT_FOUND"
+              },
+              "message": {
+                "type": "string"
+              },
+              "docs": {
+                "type": "string",
+                "format": "uri"
+              },
+              "legacy_code": {
+                "type": "string",
+                "description": "On /v1/deployments/* routes: the pre-2026 name of a renamed code (e.g. INSTANCE_NOT_FOUND). Present until 2027-04-02."
+              },
+              "renamed_to": {
+                "type": "string",
+                "description": "On deprecated routes: the new name of a renamed code (e.g. DEPLOYMENT_NOT_FOUND)."
+              }
+            },
+            "required": [
+              "code",
+              "message",
+              "docs"
+            ]
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "success",
+          "error",
+          "meta"
+        ]
+      },
+      "Error429": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "const": false
+          },
+          "error": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "example": "DEPLOYMENT_NOT_FOUND"
+              },
+              "message": {
+                "type": "string"
+              },
+              "docs": {
+                "type": "string",
+                "format": "uri"
+              },
+              "legacy_code": {
+                "type": "string",
+                "description": "On /v1/deployments/* routes: the pre-2026 name of a renamed code (e.g. INSTANCE_NOT_FOUND). Present until 2027-04-02."
+              },
+              "renamed_to": {
+                "type": "string",
+                "description": "On deprecated routes: the new name of a renamed code (e.g. DEPLOYMENT_NOT_FOUND)."
+              }
+            },
+            "required": [
+              "code",
+              "message",
+              "docs"
+            ]
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "success",
+          "error",
+          "meta"
+        ]
+      }
+    },
+    "responses": {
+      "Unauthorized": {
+        "description": "Missing or invalid API key.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error401"
+            }
+          }
+        }
+      },
+      "NotFound": {
+        "description": "Resource not found.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error404"
+            }
+          }
+        }
+      },
+      "Conflict": {
+        "description": "Conflict with current resource state.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error409"
+            }
+          }
+        }
+      },
+      "RateLimited": {
+        "description": "Rate limit exceeded (1,000 req/min/key). Read `Retry-After`.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error429"
+            }
+          }
+        }
+      }
+    }
+  }
+}
