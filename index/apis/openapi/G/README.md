@@ -1,12 +1,13 @@
 # APIs — G
 
-Browsing 214 APIs starting with **G**.
+Browsing 216 APIs starting with **G**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · **G** · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
 | Vendor | APIs |
 |--------|------|
 | [g2.com](../../../../apis/openapi/g2.com) | [g2-api](../../../../apis/openapi/g2.com/g2-api) · [g2-crowd](../../../../apis/openapi/g2.com/g2-crowd) |
+| [gadget.app](../../../../apis/openapi/gadget.app) | [main](../../../../apis/openapi/gadget.app/main) |
 | [galaxyunit.app](../../../../apis/openapi/galaxyunit.app) | [main](../../../../apis/openapi/galaxyunit.app/main) |
 | [gallabox.com](../../../../apis/openapi/gallabox.com) |  |
 | [galleyrender.com](../../../../apis/openapi/galleyrender.com) | [main](../../../../apis/openapi/galleyrender.com/main) |
@@ -176,6 +177,7 @@ Browsing 214 APIs starting with **G**.
 | [grabbly.io](../../../../apis/openapi/grabbly.io) | [main](../../../../apis/openapi/grabbly.io/main) |
 | [gradient.ai](../../../../apis/openapi/gradient.ai) | [main](../../../../apis/openapi/gradient.ai/main) |
 | [grain.com](../../../../apis/openapi/grain.com) | [main](../../../../apis/openapi/grain.com/main) |
+| [grant.nu](../../../../apis/openapi/grant.nu) | [main](../../../../apis/openapi/grant.nu/main) |
 | [graph.facebook.com](../../../../apis/openapi/graph.facebook.com) | [main](../../../../apis/openapi/graph.facebook.com/main) |
 | [graph.microsoft.com](../../../../apis/openapi/graph.microsoft.com) | [main](../../../../apis/openapi/graph.microsoft.com/main) |
 | [graph.openaire.eu](../../../../apis/openapi/graph.openaire.eu) | [main](../../../../apis/openapi/graph.openaire.eu/main) |

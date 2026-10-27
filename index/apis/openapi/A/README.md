@@ -1,6 +1,6 @@
 # APIs — A
 
-Browsing 478 APIs starting with **A**.
+Browsing 481 APIs starting with **A**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · **A** · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -196,6 +196,7 @@ Browsing 478 APIs starting with **A**.
 | [alwaysdata](../../../../apis/openapi/alwaysdata) | [main](../../../../apis/openapi/alwaysdata/main) |
 | [amadeus-hospitality.com](../../../../apis/openapi/amadeus-hospitality.com) | [main](../../../../apis/openapi/amadeus-hospitality.com/main) |
 | [amadeus.com](../../../../apis/openapi/amadeus.com) | [31 APIs](../../../../apis/openapi/amadeus.com) |
+| [amana-dev.com](../../../../apis/openapi/amana-dev.com) | [main](../../../../apis/openapi/amana-dev.com/main) |
 | [amanahagent.cloud](../../../../apis/openapi/amanahagent.cloud) | [main](../../../../apis/openapi/amanahagent.cloud/main) |
 | [amara.org](../../../../apis/openapi/amara.org) | [main](../../../../apis/openapi/amara.org/main) |
 | [amazon.com](../../../../apis/openapi/amazon.com) | [main](../../../../apis/openapi/amazon.com/main) |
@@ -347,6 +348,7 @@ Browsing 478 APIs starting with **A**.
 | [apiportal.wto.org](../../../../apis/openapi/apiportal.wto.org) | [main](../../../../apis/openapi/apiportal.wto.org/main) |
 | [apiproxy.shared.lumessetalentlink.com](../../../../apis/openapi/apiproxy.shared.lumessetalentlink.com) | [main](../../../../apis/openapi/apiproxy.shared.lumessetalentlink.com/main) |
 | [apis.guru](../../../../apis/openapi/apis.guru) | [apis.guru](../../../../apis/openapi/apis.guru/apis.guru) · [apisguru](../../../../apis/openapi/apis.guru/apisguru) |
+| [apisemparar.com.br](../../../../apis/openapi/apisemparar.com.br) | [main](../../../../apis/openapi/apisemparar.com.br/main) |
 | [apisetu.gov.in](../../../../apis/openapi/apisetu.gov.in) | [asrb](../../../../apis/openapi/apisetu.gov.in/asrb) · [main](../../../../apis/openapi/apisetu.gov.in/main) |
 | [apistart01.megaapi.com.br](../../../../apis/openapi/apistart01.megaapi.com.br) | [main](../../../../apis/openapi/apistart01.megaapi.com.br/main) |
 | [apitube.io](../../../../apis/openapi/apitube.io) | [main](../../../../apis/openapi/apitube.io/main) |
@@ -425,6 +427,7 @@ Browsing 478 APIs starting with **A**.
 | [athenahealth.com](../../../../apis/openapi/athenahealth.com) | [main](../../../../apis/openapi/athenahealth.com/main) |
 | [atlasfetch.xyz](../../../../apis/openapi/atlasfetch.xyz) | [main](../../../../apis/openapi/atlasfetch.xyz/main) |
 | [atlassian.com](../../../../apis/openapi/atlassian.com) | [jira](../../../../apis/openapi/atlassian.com/jira) |
+| [atlassian.net](../../../../apis/openapi/atlassian.net) | [main](../../../../apis/openapi/atlassian.net/main) |
 | [att.com](../../../../apis/openapi/att.com) | [main](../../../../apis/openapi/att.com/main) |
 | [attentivemobile.com](../../../../apis/openapi/attentivemobile.com) | [main](../../../../apis/openapi/attentivemobile.com/main) |
 | [attestwire.com](../../../../apis/openapi/attestwire.com) | [main](../../../../apis/openapi/attestwire.com/main) |

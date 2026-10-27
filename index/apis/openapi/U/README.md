@@ -1,6 +1,6 @@
 # APIs — U
 
-Browsing 57 APIs starting with **U**.
+Browsing 58 APIs starting with **U**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · **U** · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -14,6 +14,7 @@ Browsing 57 APIs starting with **U**.
 | [uis.unesco.org](../../../../apis/openapi/uis.unesco.org) | [main](../../../../apis/openapi/uis.unesco.org/main) |
 | [ultimeter.app](../../../../apis/openapi/ultimeter.app) | [main](../../../../apis/openapi/ultimeter.app/main) |
 | [unhcr.org](../../../../apis/openapi/unhcr.org) | [main](../../../../apis/openapi/unhcr.org/main) |
+| [unicorn.com](../../../../apis/openapi/unicorn.com) | [nucs-web-planned-unavail-of-consumption-units](../../../../apis/openapi/unicorn.com/nucs-web-planned-unavail-of-consumption-units) · [nucs-web-week-ahead-ntc](../../../../apis/openapi/unicorn.com/nucs-web-week-ahead-ntc) |
 | [unicourt.com](../../../../apis/openapi/unicourt.com) | [main](../../../../apis/openapi/unicourt.com/main) · [unicourt-enterprise-apis](../../../../apis/openapi/unicourt.com/unicourt-enterprise-apis) |
 | [unified.to](../../../../apis/openapi/unified.to) | [21 APIs](../../../../apis/openapi/unified.to) |
 | [uniswap.org](../../../../apis/openapi/uniswap.org) | [main](../../../../apis/openapi/uniswap.org/main) |
