@@ -1,6 +1,6 @@
 # APIs — G
 
-Browsing 217 APIs starting with **G**.
+Browsing 218 APIs starting with **G**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · **G** · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -31,6 +31,7 @@ Browsing 217 APIs starting with **G**.
 | [geniussports.com](../../../../apis/openapi/geniussports.com) | [main](../../../../apis/openapi/geniussports.com/main) |
 | [genny.lovo.ai](../../../../apis/openapi/genny.lovo.ai) | [main](../../../../apis/openapi/genny.lovo.ai/main) |
 | [genome.ucsc.edu](../../../../apis/openapi/genome.ucsc.edu) | [main](../../../../apis/openapi/genome.ucsc.edu/main) |
+| [genomicintelligence.ai](../../../../apis/openapi/genomicintelligence.ai) | [main](../../../../apis/openapi/genomicintelligence.ai/main) |
 | [geo-parity.com](../../../../apis/openapi/geo-parity.com) | [main](../../../../apis/openapi/geo-parity.com/main) |
 | [geoapify.com](../../../../apis/openapi/geoapify.com) | [main](../../../../apis/openapi/geoapify.com/main) |
 | [geocapture.net](../../../../apis/openapi/geocapture.net) | [main](../../../../apis/openapi/geocapture.net/main) |

@@ -1,6 +1,6 @@
 # APIs — E
 
-Browsing 193 APIs starting with **E**.
+Browsing 194 APIs starting with **E**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · **E** · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -52,6 +52,7 @@ Browsing 193 APIs starting with **E**.
 | [ejadtech.sa](../../../../apis/openapi/ejadtech.sa) | [main](../../../../apis/openapi/ejadtech.sa/main) |
 | [ekho.com](../../../../apis/openapi/ekho.com) | [main](../../../../apis/openapi/ekho.com/main) |
 | [elai.io](../../../../apis/openapi/elai.io) | [elai](../../../../apis/openapi/elai.io/elai) |
+| [elaichi.ai](../../../../apis/openapi/elaichi.ai) | [main](../../../../apis/openapi/elaichi.ai/main) |
 | [elastic.co](../../../../apis/openapi/elastic.co) | [kibana](../../../../apis/openapi/elastic.co/kibana) |
 | [elasticemail.com](../../../../apis/openapi/elasticemail.com) | [main](../../../../apis/openapi/elasticemail.com/main) |
 | [elecctro.com](../../../../apis/openapi/elecctro.com) | [main](../../../../apis/openapi/elecctro.com/main) |

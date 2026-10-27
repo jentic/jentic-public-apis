@@ -1,6 +1,6 @@
 # APIs — B
 
-Browsing 252 APIs starting with **B**.
+Browsing 253 APIs starting with **B**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · **B** · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -156,6 +156,7 @@ Browsing 252 APIs starting with **B**.
 | [bluetick.io](../../../../apis/openapi/bluetick.io) | [main](../../../../apis/openapi/bluetick.io/main) |
 | [blynk.io](../../../../apis/openapi/blynk.io) | [main](../../../../apis/openapi/blynk.io/main) |
 | [boast.io](../../../../apis/openapi/boast.io) | [main](../../../../apis/openapi/boast.io/main) |
+| [bodenrichtwert.ai](../../../../apis/openapi/bodenrichtwert.ai) | [main](../../../../apis/openapi/bodenrichtwert.ai/main) |
 | [bodygram.com](../../../../apis/openapi/bodygram.com) | [main](../../../../apis/openapi/bodygram.com/main) |
 | [bokio.se](../../../../apis/openapi/bokio.se) | [main](../../../../apis/openapi/bokio.se/main) |
 | [boldsign.com](../../../../apis/openapi/boldsign.com) | [main](../../../../apis/openapi/boldsign.com/main) |

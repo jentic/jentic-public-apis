@@ -1,6 +1,6 @@
 # APIs — M
 
-Browsing 316 APIs starting with **M**.
+Browsing 319 APIs starting with **M**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · **M** · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -32,6 +32,7 @@ Browsing 316 APIs starting with **M**.
 | [mailinabox.email](../../../../apis/openapi/mailinabox.email) | [main](../../../../apis/openapi/mailinabox.email/main) |
 | [mailinapp.com](../../../../apis/openapi/mailinapp.com) | [main](../../../../apis/openapi/mailinapp.com/main) |
 | [mailjet.com](../../../../apis/openapi/mailjet.com) | [main](../../../../apis/openapi/mailjet.com/main) |
+| [mailjunky.ai](../../../../apis/openapi/mailjunky.ai) | [main](../../../../apis/openapi/mailjunky.ai/main) |
 | [mailosaur.com](../../../../apis/openapi/mailosaur.com) | [main](../../../../apis/openapi/mailosaur.com/main) |
 | [mailprobe.dev](../../../../apis/openapi/mailprobe.dev) | [main](../../../../apis/openapi/mailprobe.dev/main) |
 | [mailrambo.com](../../../../apis/openapi/mailrambo.com) | [main](../../../../apis/openapi/mailrambo.com/main) |
@@ -101,6 +102,7 @@ Browsing 316 APIs starting with **M**.
 | [mcp-ads.com](../../../../apis/openapi/mcp-ads.com) | [main](../../../../apis/openapi/mcp-ads.com/main) |
 | [mctime.com](../../../../apis/openapi/mctime.com) | [main](../../../../apis/openapi/mctime.com/main) |
 | [mdhub.ai](../../../../apis/openapi/mdhub.ai) | [main](../../../../apis/openapi/mdhub.ai/main) |
+| [meacheal.ai](../../../../apis/openapi/meacheal.ai) | [main](../../../../apis/openapi/meacheal.ai/main) |
 | [mealme](../../../../apis/openapi/mealme) | [main](../../../../apis/openapi/mealme/main) |
 | [medcorder.com](../../../../apis/openapi/medcorder.com) | [main](../../../../apis/openapi/medcorder.com/main) |
 | [mediasilo.com](../../../../apis/openapi/mediasilo.com) | [main](../../../../apis/openapi/mediasilo.com/main) |
@@ -113,6 +115,7 @@ Browsing 316 APIs starting with **M**.
 | [megaventory.com](../../../../apis/openapi/megaventory.com) | [main](../../../../apis/openapi/megaventory.com/main) |
 | [meilisearch.com](../../../../apis/openapi/meilisearch.com) | [main](../../../../apis/openapi/meilisearch.com/main) · [meilisearch-v1.0](../../../../apis/openapi/meilisearch.com/meilisearch-v1.0) |
 | [meistertask.com](../../../../apis/openapi/meistertask.com) | [main](../../../../apis/openapi/meistertask.com/main) |
+| [mekler.ai](../../../../apis/openapi/mekler.ai) | [main](../../../../apis/openapi/mekler.ai/main) |
 | [melissa.com](../../../../apis/openapi/melissa.com) | [main](../../../../apis/openapi/melissa.com/main) |
 | [melod.ie](../../../../apis/openapi/melod.ie) | [main](../../../../apis/openapi/melod.ie/main) |
 | [memara.io](../../../../apis/openapi/memara.io) | [main](../../../../apis/openapi/memara.io/main) |
