@@ -9,5 +9,5 @@ Browsing 4 APIs starting with **2**.
 | [24pullrequests.com](../../../../apis/openapi/24pullrequests.com) | [main](../../../../apis/openapi/24pullrequests.com/main) |
 | [2captcha.com](../../../../apis/openapi/2captcha.com) | [main](../../../../apis/openapi/2captcha.com/main) |
 | [2chat.co](../../../../apis/openapi/2chat.co) | [main](../../../../apis/openapi/2chat.co/main) |
-| [2minutewarning.com](../../../../apis/openapi/2minutewarning.com) | [apis](../../../../apis/openapi/2minutewarning.com/apis) |
+| [2minutewarning.com](../../../../apis/openapi/2minutewarning.com) | [apis](../../../../apis/openapi/2minutewarning.com/apis) · [ppe](../../../../apis/openapi/2minutewarning.com/ppe) |
 
