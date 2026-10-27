@@ -1,6 +1,6 @@
 # APIs — S
 
-Browsing 750 APIs starting with **S**.
+Browsing 751 APIs starting with **S**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · **S** · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -256,6 +256,7 @@ Browsing 750 APIs starting with **S**.
 | [sirportly.com](../../../../apis/openapi/sirportly.com) | [main](../../../../apis/openapi/sirportly.com/main) |
 | [sirv.com](../../../../apis/openapi/sirv.com) | [main](../../../../apis/openapi/sirv.com/main) |
 | [site24x7.com](../../../../apis/openapi/site24x7.com) | [main](../../../../apis/openapi/site24x7.com/main) |
+| [sits.no](../../../../apis/openapi/sits.no) | [main](../../../../apis/openapi/sits.no/main) |
 | [sivo.com](../../../../apis/openapi/sivo.com) | [main](../../../../apis/openapi/sivo.com/main) |
 | [skaala.ai](../../../../apis/openapi/skaala.ai) | [main](../../../../apis/openapi/skaala.ai/main) |
 | [sketchfab.com](../../../../apis/openapi/sketchfab.com) | [main](../../../../apis/openapi/sketchfab.com/main) |
