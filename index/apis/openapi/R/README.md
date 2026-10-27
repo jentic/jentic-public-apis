@@ -1,6 +1,6 @@
 # APIs — R
 
-Browsing 275 APIs starting with **R**.
+Browsing 277 APIs starting with **R**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · **R** · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -160,6 +160,7 @@ Browsing 275 APIs starting with **R**.
 | [restful4up.local](../../../../apis/openapi/restful4up.local) | [main](../../../../apis/openapi/restful4up.local/main) |
 | [restpac.groov.com](../../../../apis/openapi/restpac.groov.com) | [main](../../../../apis/openapi/restpac.groov.com/main) |
 | [restpack.io](../../../../apis/openapi/restpack.io) | [main](../../../../apis/openapi/restpack.io/main) |
+| [restrata.net](../../../../apis/openapi/restrata.net) | [restrata-location-connector-location-ingestion](../../../../apis/openapi/restrata.net/restrata-location-connector-location-ingestion) · [restrata-people-connector-person-profile-ingestion](../../../../apis/openapi/restrata.net/restrata-people-connector-person-profile-ingestion) |
 | [result.dev](../../../../apis/openapi/result.dev) | [main](../../../../apis/openapi/result.dev/main) |
 | [resumatorapi.com](../../../../apis/openapi/resumatorapi.com) | [jazzhr-api](../../../../apis/openapi/resumatorapi.com/jazzhr-api) |
 | [resurs.com](../../../../apis/openapi/resurs.com) | [main](../../../../apis/openapi/resurs.com/main) |
@@ -244,6 +245,7 @@ Browsing 275 APIs starting with **R**.
 | [rootplatform.com](../../../../apis/openapi/rootplatform.com) | [main](../../../../apis/openapi/rootplatform.com/main) |
 | [roserocket.com](../../../../apis/openapi/roserocket.com) | [main](../../../../apis/openapi/roserocket.com/main) |
 | [rossum.ai](../../../../apis/openapi/rossum.ai) | [main](../../../../apis/openapi/rossum.ai/main) |
+| [rota.sp.gov.br](../../../../apis/openapi/rota.sp.gov.br) | [main](../../../../apis/openapi/rota.sp.gov.br/main) |
 | [rottentomatoes.com](../../../../apis/openapi/rottentomatoes.com) | [main](../../../../apis/openapi/rottentomatoes.com/main) |
 | [roundtrip.ai](../../../../apis/openapi/roundtrip.ai) | [easyroutes-api](../../../../apis/openapi/roundtrip.ai/easyroutes-api) |
 | [route4me.io](../../../../apis/openapi/route4me.io) | [main](../../../../apis/openapi/route4me.io/main) |
