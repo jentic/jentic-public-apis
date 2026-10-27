@@ -1,6 +1,6 @@
 # APIs — C
 
-Browsing 489 APIs starting with **C**.
+Browsing 490 APIs starting with **C**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · **C** · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -469,6 +469,7 @@ Browsing 489 APIs starting with **C**.
 | [cuentica.com](../../../../apis/openapi/cuentica.com) | [main](../../../../apis/openapi/cuentica.com/main) |
 | [cupixworks.com](../../../../apis/openapi/cupixworks.com) | [main](../../../../apis/openapi/cupixworks.com/main) |
 | [cuponerapp.com](../../../../apis/openapi/cuponerapp.com) | [main](../../../../apis/openapi/cuponerapp.com/main) |
+| [curlshot.com](../../../../apis/openapi/curlshot.com) | [main](../../../../apis/openapi/curlshot.com/main) |
 | [currencyalliance.com](../../../../apis/openapi/currencyalliance.com) | [main](../../../../apis/openapi/currencyalliance.com/main) |
 | [currencyapi.com](../../../../apis/openapi/currencyapi.com) | [main](../../../../apis/openapi/currencyapi.com/main) |
 | [currencybeacon.com](../../../../apis/openapi/currencybeacon.com) | [main](../../../../apis/openapi/currencybeacon.com/main) |
