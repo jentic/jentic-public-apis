@@ -142,7 +142,7 @@ Browsing 274 APIs starting with **R**.
 | [repsly.com](../../../../apis/openapi/repsly.com) | [main](../../../../apis/openapi/repsly.com/main) |
 | [repuso.com](../../../../apis/openapi/repuso.com) | [public-api](../../../../apis/openapi/repuso.com/public-api) |
 | [reqbeat.com](../../../../apis/openapi/reqbeat.com) | [main](../../../../apis/openapi/reqbeat.com/main) |
-| [reqres.in](../../../../apis/openapi/reqres.in) | [decom](../../../../apis/openapi/reqres.in/decom) |
+| [reqres.in](../../../../apis/openapi/reqres.in) | [decom](../../../../apis/openapi/reqres.in/decom) · [dems](../../../../apis/openapi/reqres.in/dems) · [wewewe](../../../../apis/openapi/reqres.in/wewewe) |
 | [rescuetime.com](../../../../apis/openapi/rescuetime.com) | [rescuetime](../../../../apis/openapi/rescuetime.com/rescuetime) · [rescuetime-api](../../../../apis/openapi/rescuetime.com/rescuetime-api) |
 | [resemble.ai](../../../../apis/openapi/resemble.ai) | [main](../../../../apis/openapi/resemble.ai/main) |
 | [resend.com](../../../../apis/openapi/resend.com) | [main](../../../../apis/openapi/resend.com/main) |

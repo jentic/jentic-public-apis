@@ -1,6 +1,6 @@
 # APIs — B
 
-Browsing 249 APIs starting with **B**.
+Browsing 250 APIs starting with **B**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · **B** · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -187,6 +187,7 @@ Browsing 249 APIs starting with **B**.
 | [braintrust.dev](../../../../apis/openapi/braintrust.dev) | [main](../../../../apis/openapi/braintrust.dev/main) |
 | [brandfolder.com](../../../../apis/openapi/brandfolder.com) | [main](../../../../apis/openapi/brandfolder.com/main) |
 | [brandlovers.com](../../../../apis/openapi/brandlovers.com) | [main](../../../../apis/openapi/brandlovers.com/main) |
+| [brasilseg.com.br](../../../../apis/openapi/brasilseg.com.br) | [main](../../../../apis/openapi/brasilseg.com.br/main) |
 | [brave.com](../../../../apis/openapi/brave.com) | [main](../../../../apis/openapi/brave.com/main) |
 | [bravenewcoin.com](../../../../apis/openapi/bravenewcoin.com) | [main](../../../../apis/openapi/bravenewcoin.com/main) |
 | [braze.com](../../../../apis/openapi/braze.com) | [main](../../../../apis/openapi/braze.com/main) |
