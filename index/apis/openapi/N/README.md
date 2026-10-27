@@ -1,6 +1,6 @@
 # APIs — N
 
-Browsing 178 APIs starting with **N**.
+Browsing 179 APIs starting with **N**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · **N** · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -89,6 +89,7 @@ Browsing 178 APIs starting with **N**.
 | [newt](../../../../apis/openapi/newt) | [main](../../../../apis/openapi/newt/main) |
 | [newt.so](../../../../apis/openapi/newt.so) | [main](../../../../apis/openapi/newt.so/main) |
 | [newton.vercel.app](../../../../apis/openapi/newton.vercel.app) | [main](../../../../apis/openapi/newton.vercel.app/main) |
+| [nexagrids.dev](../../../../apis/openapi/nexagrids.dev) | [main](../../../../apis/openapi/nexagrids.dev/main) |
 | [nexi.it](../../../../apis/openapi/nexi.it) | [main](../../../../apis/openapi/nexi.it/main) |
 | [nexigroup.com](../../../../apis/openapi/nexigroup.com) | [main](../../../../apis/openapi/nexigroup.com/main) |
 | [nexmo.com](../../../../apis/openapi/nexmo.com) | [39 APIs](../../../../apis/openapi/nexmo.com) |
