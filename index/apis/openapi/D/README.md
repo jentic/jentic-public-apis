@@ -1,6 +1,6 @@
 # APIs — D
 
-Browsing 214 APIs starting with **D**.
+Browsing 216 APIs starting with **D**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · **D** · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -143,6 +143,7 @@ Browsing 214 APIs starting with **D**.
 | [discourse.local](../../../../apis/openapi/discourse.local) | [main](../../../../apis/openapi/discourse.local/main) |
 | [discourse.org](../../../../apis/openapi/discourse.org) | [main](../../../../apis/openapi/discourse.org/main) |
 | [discovery.verifiable.com](../../../../apis/openapi/discovery.verifiable.com) | [verifiable](../../../../apis/openapi/discovery.verifiable.com/verifiable) |
+| [discvision.de](../../../../apis/openapi/discvision.de) | [main](../../../../apis/openapi/discvision.de/main) |
 | [disease.sh](../../../../apis/openapi/disease.sh) | [main](../../../../apis/openapi/disease.sh/main) |
 | [disify.com](../../../../apis/openapi/disify.com) | [main](../../../../apis/openapi/disify.com/main) |
 | [distancematrix-ai](../../../../apis/openapi/distancematrix-ai) | [main](../../../../apis/openapi/distancematrix-ai/main) |
@@ -216,6 +217,7 @@ Browsing 214 APIs starting with **D**.
 | [dweet.io](../../../../apis/openapi/dweet.io) | [dweet.io](../../../../apis/openapi/dweet.io/dweet.io) |
 | [dydx.exchange](../../../../apis/openapi/dydx.exchange) | [main](../../../../apis/openapi/dydx.exchange/main) |
 | [dynamicmockups.com](../../../../apis/openapi/dynamicmockups.com) | [main](../../../../apis/openapi/dynamicmockups.com/main) |
+| [dynamics.com](../../../../apis/openapi/dynamics.com) | [bcgw-export](../../../../apis/openapi/dynamics.com/bcgw-export) · [dynamics-365-business-central](../../../../apis/openapi/dynamics.com/dynamics-365-business-central) · [pac](../../../../apis/openapi/dynamics.com/pac) |
 | [dynapictures.com](../../../../apis/openapi/dynapictures.com) | [main](../../../../apis/openapi/dynapictures.com/main) |
 | [dynosend.com](../../../../apis/openapi/dynosend.com) | [dynosend-api](../../../../apis/openapi/dynosend.com/dynosend-api) |
 | [dyntube.com](../../../../apis/openapi/dyntube.com) | [main](../../../../apis/openapi/dyntube.com/main) |

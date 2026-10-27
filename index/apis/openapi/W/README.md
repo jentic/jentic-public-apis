@@ -1,6 +1,6 @@
 # APIs — W
 
-Browsing 99 APIs starting with **W**.
+Browsing 100 APIs starting with **W**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · **W** · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -55,6 +55,7 @@ Browsing 99 APIs starting with **W**.
 | [weirapp.io](../../../../apis/openapi/weirapp.io) | [main](../../../../apis/openapi/weirapp.io/main) |
 | [wger.de](../../../../apis/openapi/wger.de) | [main](../../../../apis/openapi/wger.de/main) |
 | [whapi.com](../../../../apis/openapi/whapi.com) | [11 APIs](../../../../apis/openapi/whapi.com) |
+| [what-if.sg](../../../../apis/openapi/what-if.sg) | [main](../../../../apis/openapi/what-if.sg/main) |
 | [whatconverts.com](../../../../apis/openapi/whatconverts.com) | [main](../../../../apis/openapi/whatconverts.com/main) |
 | [whatnot.com](../../../../apis/openapi/whatnot.com) | [main](../../../../apis/openapi/whatnot.com/main) |
 | [whatsapp.local](../../../../apis/openapi/whatsapp.local) | [main](../../../../apis/openapi/whatsapp.local/main) |
