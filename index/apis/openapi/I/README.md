@@ -1,6 +1,6 @@
 # APIs — I
 
-Browsing 124 APIs starting with **I**.
+Browsing 125 APIs starting with **I**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · **I** · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -23,6 +23,7 @@ Browsing 124 APIs starting with **I**.
 | [idwise.com](../../../../apis/openapi/idwise.com) | [main](../../../../apis/openapi/idwise.com/main) |
 | [iexcloud.io](../../../../apis/openapi/iexcloud.io) | [main](../../../../apis/openapi/iexcloud.io/main) |
 | [ifillpdf.com](../../../../apis/openapi/ifillpdf.com) | [main](../../../../apis/openapi/ifillpdf.com/main) |
+| [ifttt.com](../../../../apis/openapi/ifttt.com) | [main](../../../../apis/openapi/ifttt.com/main) |
 | [igdb.com](../../../../apis/openapi/igdb.com) | [igdb](../../../../apis/openapi/igdb.com/igdb) · [main](../../../../apis/openapi/igdb.com/main) |
 | [ignisign.io](../../../../apis/openapi/ignisign.io) | [main](../../../../apis/openapi/ignisign.io/main) |
 | [ijenko.net](../../../../apis/openapi/ijenko.net) | [main](../../../../apis/openapi/ijenko.net/main) |
