@@ -1,6 +1,6 @@
 # APIs — R
 
-Browsing 281 APIs starting with **R**.
+Browsing 282 APIs starting with **R**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · **R** · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -20,6 +20,7 @@ Browsing 281 APIs starting with **R**.
 | [raktadan.com](../../../../apis/openapi/raktadan.com) | [main](../../../../apis/openapi/raktadan.com/main) |
 | [ramp.com](../../../../apis/openapi/ramp.com) | [main](../../../../apis/openapi/ramp.com/main) |
 | [rampnetwork.com](../../../../apis/openapi/rampnetwork.com) | [ramp-network-rest-api](../../../../apis/openapi/rampnetwork.com/ramp-network-rest-api) |
+| [ranch.bot](../../../../apis/openapi/ranch.bot) | [main](../../../../apis/openapi/ranch.bot/main) |
 | [rancher.com](../../../../apis/openapi/rancher.com) | [main](../../../../apis/openapi/rancher.com/main) |
 | [random.dog](../../../../apis/openapi/random.dog) | [main](../../../../apis/openapi/random.dog/main) |
 | [random.org](../../../../apis/openapi/random.org) | [main](../../../../apis/openapi/random.org/main) |

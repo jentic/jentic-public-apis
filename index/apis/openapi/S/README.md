@@ -1,6 +1,6 @@
 # APIs — S
 
-Browsing 771 APIs starting with **S**.
+Browsing 774 APIs starting with **S**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · **S** · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -79,6 +79,7 @@ Browsing 771 APIs starting with **S**.
 | [scideas.net](../../../../apis/openapi/scideas.net) | [perfectpdf](../../../../apis/openapi/scideas.net/perfectpdf) · [regression](../../../../apis/openapi/scideas.net/regression) |
 | [sciencebase.gov](../../../../apis/openapi/sciencebase.gov) | [main](../../../../apis/openapi/sciencebase.gov/main) |
 | [scoop.it](../../../../apis/openapi/scoop.it) | [main](../../../../apis/openapi/scoop.it/main) |
+| [scope.bid](../../../../apis/openapi/scope.bid) | [main](../../../../apis/openapi/scope.bid/main) |
 | [scorly.io](../../../../apis/openapi/scorly.io) | [main](../../../../apis/openapi/scorly.io/main) |
 | [scoro.com](../../../../apis/openapi/scoro.com) | [main](../../../../apis/openapi/scoro.com/main) |
 | [scrapecreators.com](../../../../apis/openapi/scrapecreators.com) | [main](../../../../apis/openapi/scrapecreators.com/main) |
@@ -400,6 +401,7 @@ Browsing 771 APIs starting with **S**.
 | [spoki.it](../../../../apis/openapi/spoki.it) | [main](../../../../apis/openapi/spoki.it/main) |
 | [spoo.me](../../../../apis/openapi/spoo.me) | [main](../../../../apis/openapi/spoo.me/main) |
 | [spoonacular.com](../../../../apis/openapi/spoonacular.com) | [main](../../../../apis/openapi/spoonacular.com/main) |
+| [spoonjoy.app](../../../../apis/openapi/spoonjoy.app) | [main](../../../../apis/openapi/spoonjoy.app/main) |
 | [sportmonks.com](../../../../apis/openapi/sportmonks.com) | [main](../../../../apis/openapi/sportmonks.com/main) |
 | [sportsdata](../../../../apis/openapi/sportsdata) | [main](../../../../apis/openapi/sportsdata/main) |
 | [sportsdata.io](../../../../apis/openapi/sportsdata.io) | [main](../../../../apis/openapi/sportsdata.io/main) |
@@ -412,6 +414,7 @@ Browsing 771 APIs starting with **S**.
 | [spreedly.com](../../../../apis/openapi/spreedly.com) | [main](../../../../apis/openapi/spreedly.com/main) |
 | [sprig.com](../../../../apis/openapi/sprig.com) | [main](../../../../apis/openapi/sprig.com/main) |
 | [sprinklr.com](../../../../apis/openapi/sprinklr.com) | [main](../../../../apis/openapi/sprinklr.com/main) |
+| [sprkly.app](../../../../apis/openapi/sprkly.app) | [main](../../../../apis/openapi/sprkly.app/main) |
 | [sproutsocial.com](../../../../apis/openapi/sproutsocial.com) | [main](../../../../apis/openapi/sproutsocial.com/main) |
 | [spyse.com](../../../../apis/openapi/spyse.com) | [main](../../../../apis/openapi/spyse.com/main) |
 | [sqala.tech](../../../../apis/openapi/sqala.tech) | [sqala](../../../../apis/openapi/sqala.tech/sqala) |
