@@ -1,6 +1,6 @@
 # APIs — C
 
-Browsing 516 APIs starting with **C**.
+Browsing 517 APIs starting with **C**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · **C** · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -43,6 +43,7 @@ Browsing 516 APIs starting with **C**.
 | [cantrip.io](../../../../apis/openapi/cantrip.io) | [main](../../../../apis/openapi/cantrip.io/main) |
 | [canva.dev](../../../../apis/openapi/canva.dev) | [main](../../../../apis/openapi/canva.dev/main) |
 | [canvasflare.com](../../../../apis/openapi/canvasflare.com) | [main](../../../../apis/openapi/canvasflare.com/main) |
+| [capgo.app](../../../../apis/openapi/capgo.app) | [main](../../../../apis/openapi/capgo.app/main) |
 | [capital-flow.de](../../../../apis/openapi/capital-flow.de) | [main](../../../../apis/openapi/capital-flow.de/main) |
 | [capital.com](../../../../apis/openapi/capital.com) | [main](../../../../apis/openapi/capital.com/main) |
 | [capitalcom](../../../../apis/openapi/capitalcom) | [main](../../../../apis/openapi/capitalcom/main) |
