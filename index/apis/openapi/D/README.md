@@ -1,6 +1,6 @@
 # APIs — D
 
-Browsing 227 APIs starting with **D**.
+Browsing 229 APIs starting with **D**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · **D** · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -78,6 +78,7 @@ Browsing 227 APIs starting with **D**.
 | [defastra.com](../../../../apis/openapi/defastra.com) | [main](../../../../apis/openapi/defastra.com/main) |
 | [defguard.net](../../../../apis/openapi/defguard.net) | [main](../../../../apis/openapi/defguard.net/main) |
 | [defici.com](../../../../apis/openapi/defici.com) | [main](../../../../apis/openapi/defici.com/main) |
+| [defispace.com](../../../../apis/openapi/defispace.com) | [main](../../../../apis/openapi/defispace.com/main) |
 | [deformity.ai](../../../../apis/openapi/deformity.ai) | [main](../../../../apis/openapi/deformity.ai/main) |
 | [delijn.be](../../../../apis/openapi/delijn.be) | [main](../../../../apis/openapi/delijn.be/main) |
 | [deliveryhero.com](../../../../apis/openapi/deliveryhero.com) | [pos-plugin-api](../../../../apis/openapi/deliveryhero.com/pos-plugin-api) |
@@ -170,6 +171,7 @@ Browsing 227 APIs starting with **D**.
 | [docs.openedx.org](../../../../apis/openapi/docs.openedx.org) | [main](../../../../apis/openapi/docs.openedx.org/main) |
 | [docs.terrareach.com](../../../../apis/openapi/docs.terrareach.com) | [terrareach-api](../../../../apis/openapi/docs.terrareach.com/terrareach-api) |
 | [docs.valence.desire2learn.com](../../../../apis/openapi/docs.valence.desire2learn.com) | [main](../../../../apis/openapi/docs.valence.desire2learn.com/main) |
+| [docsautomator.co](../../../../apis/openapi/docsautomator.co) | [main](../../../../apis/openapi/docsautomator.co/main) |
 | [docswrite.com](../../../../apis/openapi/docswrite.com) | [main](../../../../apis/openapi/docswrite.com/main) |
 | [doctofam.com](../../../../apis/openapi/doctofam.com) | [main](../../../../apis/openapi/doctofam.com/main) |
 | [docufence.com](../../../../apis/openapi/docufence.com) | [main](../../../../apis/openapi/docufence.com/main) |
