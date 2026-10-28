@@ -1,0 +1,5668 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "AgentsPodium account API (agent-facing subset)",
+    "version": "1.0.0",
+    "description": "Create, configure, pay for and watch AI agent pods, meant to be driven directly by an agent. This document covers the subset an agent (rather than a human operator) needs: auth, agent lifecycle, tools/models/personas catalog, payment, A2A directory. See https://hosting.defispace.com/docs/quickstart.md for a narrative walkthrough."
+  },
+  "servers": [
+    {
+      "url": "https://agentspodium.com/api"
+    }
+  ],
+  "security": [
+    {
+      "bearerAuth": []
+    }
+  ],
+  "tags": [
+    {
+      "name": "Auth",
+      "description": "Sign in."
+    },
+    {
+      "name": "API keys",
+      "description": "Machine credentials for agents."
+    },
+    {
+      "name": "Catalog",
+      "description": "Read-only reference data: personas, tiers, engines, tools, models, providers."
+    },
+    {
+      "name": "Agents",
+      "description": "Create, configure, and operate a pod."
+    },
+    {
+      "name": "Payment",
+      "description": "Subscriptions and payment providers."
+    },
+    {
+      "name": "A2A",
+      "description": "The public agent-to-agent directory."
+    },
+    {
+      "name": "Status",
+      "description": "Platform health."
+    }
+  ],
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "An API key `ak_live_…` created on the account page, or a session token from /auth/verify."
+      }
+    },
+    "schemas": {
+      "ApiError": {
+        "type": "object",
+        "description": "Uniform error body sent by the global error handler for every 4xx/5xx response.",
+        "required": [
+          "error",
+          "message"
+        ],
+        "properties": {
+          "error": {
+            "type": "string",
+            "description": "Stable machine code, e.g. BAD_REQUEST, UNAUTHORIZED, FORBIDDEN, NOT_FOUND, CONFLICT, RATE_LIMITED, INVALID_CODE, INTERNAL."
+          },
+          "message": {
+            "type": "string",
+            "description": "Human-readable reason, safe to show to whoever is driving the agent."
+          }
+        }
+      },
+      "AgentQuota": {
+        "type": "object",
+        "description": "Latest RAM/disk snapshot for a pod, refreshed about once a minute from the cluster.",
+        "required": [
+          "memoryUsedBytes",
+          "memoryLimitBytes",
+          "memoryPct",
+          "diskUsedBytes",
+          "diskTotalBytes",
+          "diskPct",
+          "status",
+          "updatedAt"
+        ],
+        "properties": {
+          "memoryUsedBytes": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "memoryLimitBytes": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "memoryPct": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "description": "memoryUsedBytes / memoryLimitBytes, or null when either side is unknown."
+          },
+          "diskUsedBytes": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "diskTotalBytes": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "diskPct": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "ok",
+              "warn",
+              "grace",
+              "paused"
+            ],
+            "description": "paused means the pod was auto-stopped for exceeding its plan."
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "AgentTools": {
+        "type": "object",
+        "description": "Enabled Hermes toolsets and user-defined MCP servers.",
+        "required": [
+          "enabled",
+          "mcpServers"
+        ],
+        "properties": {
+          "enabled": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Toolset ids from GET /tools; empty means the safe minimal set."
+          },
+          "mcpServers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/McpServerConfig"
+            }
+          }
+        }
+      },
+      "McpServerConfig": {
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Unique server name; used as the server:tool prefix in Hermes."
+          },
+          "command": {
+            "type": "string",
+            "description": "Stdio transport: executable to spawn."
+          },
+          "args": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "env": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "url": {
+            "type": "string",
+            "format": "uri",
+            "description": "HTTP transport: MCP endpoint URL."
+          },
+          "headers": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "A2aPeerPublic": {
+        "type": "object",
+        "description": "Another A2A agent this one may call by name. The peer's bearer token is write-only and never serialized back.",
+        "required": [
+          "name",
+          "url"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string",
+            "format": "uri"
+          }
+        }
+      },
+      "Agent": {
+        "type": "object",
+        "description": "One pod. Serialized with the engine encryption key and the plaintext-adjacent LLM key ciphertext stripped; every other stored field is returned as is.",
+        "required": [
+          "id",
+          "userId",
+          "personaId",
+          "name",
+          "tier",
+          "channels",
+          "createdAt",
+          "status",
+          "dseq",
+          "endpointUrl",
+          "llmKeyHash",
+          "dashUsername",
+          "dashPassword",
+          "quotaStatus",
+          "quota",
+          "lang",
+          "domain",
+          "tools",
+          "llmProvider",
+          "lastBackupAt",
+          "model",
+          "engine",
+          "timezone",
+          "a2aToken",
+          "a2aUrl",
+          "extraSoul",
+          "a2aPeers",
+          "a2aSlug",
+          "trialNoticeDay",
+          "telegramTokenEnc",
+          "a2aListed"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "example": "agt_…"
+          },
+          "userId": {
+            "type": "string"
+          },
+          "personaId": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "tier": {
+            "type": "string",
+            "enum": [
+              "tiny",
+              "small",
+              "medium",
+              "large"
+            ]
+          },
+          "channels": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "web",
+                "telegram",
+                "discord",
+                "whatsapp",
+                "email"
+              ]
+            }
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "The free trial is counted from here."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "provisioning",
+              "running",
+              "stopped",
+              "failed",
+              "deleted"
+            ]
+          },
+          "dseq": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Akash deployment sequence (the pod's namespace), set after a successful deploy."
+          },
+          "endpointUrl": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uri",
+            "description": "The engine's own public URL/dashboard."
+          },
+          "llmKeyHash": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "sha256 of the configured LLM key; set once a key is installed."
+          },
+          "dashUsername": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Login for the engine's own dashboard, when the engine has one."
+          },
+          "dashPassword": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "quotaStatus": {
+            "type": "string",
+            "enum": [
+              "ok",
+              "warn",
+              "grace",
+              "paused"
+            ]
+          },
+          "quota": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AgentQuota"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "lang": {
+            "type": "string",
+            "enum": [
+              "en",
+              "ru"
+            ],
+            "description": "Propagated into the persona's SOUL."
+          },
+          "domain": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The customer's own hostname if set, otherwise null (the pod still answers at <a2aSlug>.agentspodium.com)."
+          },
+          "tools": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AgentTools"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "llmProvider": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "openai",
+              "anthropic",
+              "openrouter",
+              "google",
+              "gemini",
+              "groq",
+              "mistral",
+              "deepseek",
+              "xai",
+              "nous",
+              null
+            ]
+          },
+          "lastBackupAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "model": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Model catalog id, e.g. anthropic:claude-sonnet-4-5."
+          },
+          "engine": {
+            "type": "string",
+            "enum": [
+              "hermes",
+              "openclaw",
+              "n8n",
+              "claude-code",
+              "opencode",
+              "pi"
+            ]
+          },
+          "timezone": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "IANA zone, e.g. Europe/Berlin. Null means the pod's UTC default."
+          },
+          "a2aToken": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Bearer peers must send to this agent's A2A endpoint. Null when the a2a toolset is off."
+          },
+          "a2aUrl": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uri"
+          },
+          "extraSoul": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The owner's own additions appended to the persona's SOUL."
+          },
+          "a2aPeers": {
+            "anyOf": [
+              {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/A2aPeerPublic"
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "a2aSlug": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Stable label every one of this agent's hostnames is built from."
+          },
+          "trialNoticeDay": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "Which trial reminder has already gone out: 3, 2, 1, or 0 for paused."
+          },
+          "telegramTokenEnc": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "\"set\" when a Telegram bot token is stored for this agent, otherwise null. The token itself never leaves the server."
+          },
+          "a2aListed": {
+            "type": "boolean",
+            "description": "Whether the owner opted into the public A2A catalog (GET /a2a-catalog)."
+          },
+          "webhookUrl": {
+            "type": "string",
+            "nullable": true,
+            "description": "Receiver for pod events, or null. Set with PUT /agents/{id}/webhook or `webhookUrl` on create."
+          },
+          "webhookLastStatus": {
+            "type": "string",
+            "nullable": true,
+            "description": "Outcome of the latest delivery: the HTTP status (`200`) or `error: …`."
+          },
+          "webhookLastAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "webhookLastEvent": {
+            "type": "string",
+            "nullable": true,
+            "description": "Type of the latest delivered event."
+          },
+          "app": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/AppConfig"
+              }
+            ],
+            "nullable": true,
+            "description": "Set only when engine is \"app\"."
+          },
+          "appRepoTokenEnc": {
+            "type": "string",
+            "nullable": true,
+            "enum": [
+              "set",
+              null
+            ],
+            "description": "\"set\" when a private-repository token is stored; the token itself never leaves the server."
+          }
+        }
+      },
+      "EngineCapabilities": {
+        "type": "object",
+        "required": [
+          "skills",
+          "mcp",
+          "skillRegistry",
+          "skillUninstall",
+          "llmKey",
+          "model",
+          "sso",
+          "dashCredentials"
+        ],
+        "properties": {
+          "skills": {
+            "type": "boolean"
+          },
+          "mcp": {
+            "type": "boolean"
+          },
+          "skillRegistry": {
+            "type": "boolean",
+            "description": "Whether the engine can search a skill registry itself."
+          },
+          "skillUninstall": {
+            "type": "boolean"
+          },
+          "llmKey": {
+            "type": "boolean"
+          },
+          "model": {
+            "type": "boolean"
+          },
+          "llmProviders": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Providers this engine accepts; omitted means every provider AgentsPodium offers."
+          },
+          "sso": {
+            "type": "boolean"
+          },
+          "dashCredentials": {
+            "type": "boolean"
+          }
+        }
+      },
+      "Engine": {
+        "type": "object",
+        "required": [
+          "id",
+          "label",
+          "description",
+          "requiresDomain",
+          "minTier",
+          "status",
+          "capabilities"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "enum": [
+              "hermes",
+              "openclaw",
+              "n8n",
+              "claude-code",
+              "opencode",
+              "pi"
+            ]
+          },
+          "label": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "requiresDomain": {
+            "type": "boolean"
+          },
+          "minTier": {
+            "type": "string",
+            "enum": [
+              "tiny",
+              "small",
+              "medium",
+              "large"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "stable",
+              "beta"
+            ]
+          },
+          "capabilities": {
+            "$ref": "#/components/schemas/EngineCapabilities"
+          }
+        }
+      },
+      "Tier": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "spec",
+          "monthlyUsd",
+          "annualUsd"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "enum": [
+              "tiny",
+              "small",
+              "medium",
+              "large"
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "spec": {
+            "type": "string",
+            "example": "2 GB RAM · 2 vCPU · 6 GB disk"
+          },
+          "monthlyUsd": {
+            "type": "number"
+          },
+          "annualUsd": {
+            "type": "number",
+            "description": "Annual price; two months free versus paying monthly."
+          }
+        }
+      },
+      "PersonaL10n": {
+        "type": "object",
+        "required": [
+          "name",
+          "tagline",
+          "forWho",
+          "does"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "tagline": {
+            "type": "string"
+          },
+          "forWho": {
+            "type": "string"
+          },
+          "does": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "disclaimer": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "doesExamples": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "demo": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DemoLine"
+            }
+          }
+        }
+      },
+      "DemoLine": {
+        "type": "object",
+        "required": [
+          "role",
+          "text"
+        ],
+        "properties": {
+          "role": {
+            "type": "string",
+            "enum": [
+              "user",
+              "agent"
+            ]
+          },
+          "text": {
+            "type": "string"
+          }
+        }
+      },
+      "Persona": {
+        "type": "object",
+        "description": "Public catalog entry: a built-in persona, or a community persona once published.",
+        "required": [
+          "id",
+          "icon",
+          "name",
+          "tagline",
+          "forWho",
+          "does",
+          "skills",
+          "channels",
+          "category",
+          "tags",
+          "tier",
+          "spec",
+          "price",
+          "risk",
+          "disclaimer"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "example": "personal-assistant"
+          },
+          "icon": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "tagline": {
+            "type": "string"
+          },
+          "forWho": {
+            "type": "string"
+          },
+          "does": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "doesExamples": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "One example question per `does` label, keyed by that label."
+          },
+          "skills": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "channels": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "category": {
+            "type": "string",
+            "enum": [
+              "study",
+              "creative",
+              "gaming",
+              "career",
+              "life",
+              "social",
+              "tech",
+              "fun"
+            ]
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "tier": {
+            "type": "string",
+            "enum": [
+              "tiny",
+              "small",
+              "medium",
+              "large"
+            ],
+            "description": "Recommended minimum plan for this persona."
+          },
+          "spec": {
+            "type": "string"
+          },
+          "price": {
+            "type": "string",
+            "example": "$4.99/mo"
+          },
+          "risk": {
+            "type": "string",
+            "enum": [
+              "low",
+              "high"
+            ]
+          },
+          "disclaimer": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "demo": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DemoLine"
+            },
+            "description": "Scripted, illustrative conversation. Absent when none was written."
+          },
+          "ru": {
+            "$ref": "#/components/schemas/PersonaL10n"
+          },
+          "es": {
+            "$ref": "#/components/schemas/PersonaL10n"
+          },
+          "pt": {
+            "$ref": "#/components/schemas/PersonaL10n"
+          },
+          "tr": {
+            "$ref": "#/components/schemas/PersonaL10n"
+          },
+          "ind": {
+            "$ref": "#/components/schemas/PersonaL10n",
+            "description": "Indonesian localization (key is `ind`, not `id`)."
+          },
+          "authorId": {
+            "type": "string",
+            "description": "Present for user-created (community) personas."
+          },
+          "author": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "builtin",
+              "draft",
+              "published"
+            ]
+          },
+          "soul": {
+            "type": "string",
+            "description": "The persona's system prompt."
+          },
+          "deployedCount": {
+            "type": "integer"
+          },
+          "recommendedModels": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "Subscription": {
+        "type": "object",
+        "description": "A paid term for one agent. Returned verbatim by GET /subscriptions, including the raw license key used to activate it.",
+        "required": [
+          "id",
+          "userId",
+          "agentId",
+          "tier",
+          "period",
+          "status",
+          "createdAt",
+          "priceUsd",
+          "currentPeriodEnd",
+          "provider",
+          "licenseKey",
+          "canceledAt",
+          "tierSnapshot",
+          "expiredAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "example": "sub_…"
+          },
+          "userId": {
+            "type": "string"
+          },
+          "agentId": {
+            "type": "string"
+          },
+          "tier": {
+            "type": "string",
+            "enum": [
+              "tiny",
+              "small",
+              "medium",
+              "large"
+            ]
+          },
+          "period": {
+            "type": "string",
+            "enum": [
+              "monthly",
+              "annual"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "canceled",
+              "expired"
+            ]
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "priceUsd": {
+            "type": "number"
+          },
+          "currentPeriodEnd": {
+            "type": "string",
+            "format": "date-time",
+            "description": "\"Paid till\" — when this term ends absent a renewal."
+          },
+          "provider": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Payment provider id, e.g. gumroad, usdt, usdc, telegram-stars, internal."
+          },
+          "licenseKey": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Raw provider license key, kept so a re-verify can happen later."
+          },
+          "canceledAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "tierSnapshot": {
+            "anyOf": [
+              {
+                "type": "object",
+                "description": "The tier's definition frozen at order time, so a later price change never rewrites what this order meant.",
+                "required": [
+                  "id",
+                  "name",
+                  "spec",
+                  "monthlyUsd",
+                  "annualUsd"
+                ],
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "enum": [
+                      "tiny",
+                      "small",
+                      "medium",
+                      "large"
+                    ]
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "spec": {
+                    "type": "string"
+                  },
+                  "monthlyUsd": {
+                    "type": "number"
+                  },
+                  "annualUsd": {
+                    "type": "number"
+                  }
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "expiredAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When payment stopped verifying; the grace period is counted from here, not from signup."
+          }
+        }
+      },
+      "ApiKey": {
+        "type": "object",
+        "description": "A machine credential. The secret itself (ak_live_…) is shown once, at creation, and never again.",
+        "required": [
+          "id",
+          "name",
+          "prefix",
+          "createdAt",
+          "lastUsedAt",
+          "revokedAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "example": "key_…"
+          },
+          "name": {
+            "type": "string"
+          },
+          "prefix": {
+            "type": "string",
+            "example": "ak_live_a1b2",
+            "description": "First 12 characters of the secret, kept to recognize it in the list."
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "lastUsedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "revokedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        }
+      },
+      "AgentTerm": {
+        "type": "object",
+        "description": "The one answer to when this agent's current term ends.",
+        "required": [
+          "mode",
+          "stopsAt",
+          "deletesAt",
+          "paidTill",
+          "paidProvider",
+          "renewUrl"
+        ],
+        "properties": {
+          "mode": {
+            "type": "string",
+            "enum": [
+              "trial",
+              "grace",
+              "paid",
+              "internal"
+            ]
+          },
+          "stopsAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When a free agent's pod is paused (trial/grace only)."
+          },
+          "deletesAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When a free agent is deleted for good (trial/grace only)."
+          },
+          "paidTill": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "End of the current paid period (paid only)."
+          },
+          "paidProvider": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "renewUrl": {
+            "type": "string",
+            "format": "uri",
+            "description": "Where a human pays to renew this agent."
+          }
+        }
+      },
+      "DomainCheck": {
+        "type": "object",
+        "required": [
+          "domain",
+          "expectedIp",
+          "dns",
+          "https"
+        ],
+        "properties": {
+          "domain": {
+            "type": "string"
+          },
+          "expectedIp": {
+            "type": "string",
+            "description": "The address the customer's A record has to carry."
+          },
+          "dns": {
+            "type": "object",
+            "required": [
+              "status",
+              "addresses"
+            ],
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "ok",
+                  "unresolved",
+                  "elsewhere"
+                ]
+              },
+              "addresses": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "https": {
+            "type": "object",
+            "required": [
+              "status"
+            ],
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "ok",
+                  "error",
+                  "skipped"
+                ],
+                "description": "skipped when DNS does not point here yet, or when the caller did not ask for the HTTPS probe."
+              }
+            }
+          }
+        }
+      },
+      "Liveness": {
+        "type": "object",
+        "required": [
+          "reachable",
+          "serving"
+        ],
+        "properties": {
+          "reachable": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "The cluster says the pod exists and is ready. Null when there is no address yet."
+          },
+          "serving": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "An HTTP request to the pod's address returned something below 5xx. Null when the connection itself failed."
+          }
+        }
+      },
+      "BackupEntry": {
+        "type": "object",
+        "required": [
+          "name",
+          "size",
+          "createdAt"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "size": {
+            "type": "integer"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "AgentMemory": {
+        "type": "object",
+        "description": "Read-only view of a Hermes agent's persona data.",
+        "required": [
+          "soul",
+          "skills",
+          "memories",
+          "sessionsCount"
+        ],
+        "properties": {
+          "soul": {
+            "type": "string"
+          },
+          "skills": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "memories": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "name",
+                "content"
+              ],
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "content": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "sessionsCount": {
+            "type": "integer"
+          }
+        }
+      },
+      "PaymentProvider": {
+        "type": "object",
+        "required": [
+          "id",
+          "label"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "example": "gumroad"
+          },
+          "label": {
+            "type": "string"
+          },
+          "buyUrl": {
+            "type": "string",
+            "format": "uri"
+          },
+          "buyUrls": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string",
+              "format": "uri"
+            },
+            "description": "Per-tier purchase page, keyed by tier id."
+          },
+          "note": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "soon"
+            ]
+          }
+        }
+      },
+      "CryptoInfo": {
+        "type": "object",
+        "required": [
+          "enabled",
+          "chainId",
+          "assets"
+        ],
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "chainId": {
+            "type": "integer",
+            "example": 1
+          },
+          "assets": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "asset",
+                "symbol"
+              ],
+              "properties": {
+                "asset": {
+                  "type": "string",
+                  "enum": [
+                    "usdt",
+                    "usdc"
+                  ]
+                },
+                "symbol": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      "CryptoOrder": {
+        "type": "object",
+        "required": [
+          "id",
+          "userId",
+          "agentId",
+          "asset",
+          "amount",
+          "baseline",
+          "status",
+          "createdAt",
+          "txHash",
+          "paidAt",
+          "tier",
+          "priceUsd",
+          "tierSnapshot"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "example": "cry_…"
+          },
+          "userId": {
+            "type": "string"
+          },
+          "agentId": {
+            "type": "string"
+          },
+          "asset": {
+            "type": "string",
+            "enum": [
+              "usdt",
+              "usdc"
+            ]
+          },
+          "amount": {
+            "type": "string",
+            "description": "Amount owed, in the token's smallest unit (string to avoid float loss)."
+          },
+          "baseline": {
+            "type": "string",
+            "description": "The deposit address's balance at order creation; payment is (balance - baseline) >= amount."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "paid",
+              "expired"
+            ]
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "txHash": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "paidAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "tier": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "tiny",
+                  "small",
+                  "medium",
+                  "large"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "priceUsd": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "tierSnapshot": {
+            "anyOf": [
+              {
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "StarsInfo": {
+        "type": "object",
+        "required": [
+          "enabled",
+          "botUsername",
+          "starUsd"
+        ],
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "botUsername": {
+            "type": "string"
+          },
+          "starUsd": {
+            "type": "number",
+            "description": "USD value of one Telegram Star, used to price orders."
+          }
+        }
+      },
+      "StarsOrder": {
+        "type": "object",
+        "required": [
+          "id",
+          "userId",
+          "agentId",
+          "amountStars",
+          "status",
+          "createdAt",
+          "paidAt",
+          "tier",
+          "priceUsd",
+          "tierSnapshot"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "example": "stx_…"
+          },
+          "userId": {
+            "type": "string"
+          },
+          "agentId": {
+            "type": "string"
+          },
+          "amountStars": {
+            "type": "integer"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "paid",
+              "expired"
+            ]
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "paidAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "tier": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "tiny",
+                  "small",
+                  "medium",
+                  "large"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "priceUsd": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "tierSnapshot": {
+            "anyOf": [
+              {
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "ModelInfo": {
+        "type": "object",
+        "required": [
+          "id",
+          "provider",
+          "name",
+          "label",
+          "costTier"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "example": "anthropic:claude-sonnet-4-5",
+            "description": "Passed back as `model` on create / PATCH llm-key."
+          },
+          "provider": {
+            "type": "string",
+            "enum": [
+              "openai",
+              "anthropic",
+              "openrouter",
+              "google",
+              "gemini",
+              "groq",
+              "mistral",
+              "deepseek",
+              "xai",
+              "nous"
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "costTier": {
+            "type": "string",
+            "enum": [
+              "cheap",
+              "mid",
+              "premium"
+            ]
+          }
+        }
+      },
+      "LlmProviderInfo": {
+        "type": "object",
+        "required": [
+          "id",
+          "label",
+          "envVar"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "enum": [
+              "openai",
+              "anthropic",
+              "openrouter",
+              "google",
+              "gemini",
+              "groq",
+              "mistral",
+              "deepseek",
+              "xai",
+              "nous"
+            ]
+          },
+          "label": {
+            "type": "string"
+          },
+          "envVar": {
+            "type": "string"
+          }
+        }
+      },
+      "ToolsetInfo": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "description",
+          "defaultEnabled",
+          "group"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "defaultEnabled": {
+            "type": "boolean"
+          },
+          "group": {
+            "type": "string",
+            "enum": [
+              "web",
+              "files",
+              "media",
+              "voice",
+              "thinking",
+              "integrations",
+              "network"
+            ]
+          },
+          "plugin": {
+            "type": "string",
+            "description": "Set for entries that are Hermes plugins rather than built-in toolsets."
+          }
+        }
+      },
+      "WebhookEvent": {
+        "type": "object",
+        "description": "The JSON body POSTed to your webhook URL. Verify `X-AgentsPodium-Signature` (`sha256=` + hex HMAC-SHA256 of the raw body with your secret) before trusting it.",
+        "required": [
+          "id",
+          "type",
+          "createdAt",
+          "agent",
+          "data"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "example": "evt_9f3c2a1b7d4e6f80",
+            "description": "Delivery id; also sent as `X-AgentsPodium-Delivery`. Retries reuse it, so it is your idempotency key."
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "agent.running",
+              "agent.stopped",
+              "agent.failed",
+              "agent.deleted",
+              "payment.confirmed",
+              "deletion.warning",
+              "test"
+            ]
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "agent": {
+            "type": "object",
+            "required": [
+              "id",
+              "status"
+            ],
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "engine": {
+                "type": "string"
+              },
+              "tier": {
+                "type": "string"
+              },
+              "status": {
+                "type": "string"
+              },
+              "endpointUrl": {
+                "type": "string",
+                "nullable": true
+              }
+            }
+          },
+          "data": {
+            "type": "object",
+            "additionalProperties": true,
+            "description": "Per type: status changes carry `from`/`to`; `payment.confirmed` carries `provider`, `tier`, `period`, `paidTill`; `deletion.warning` carries `daysLeft` (null once paused) and `keptDays`."
+          }
+        }
+      },
+      "WebhookDelivery": {
+        "type": "object",
+        "required": [
+          "ok",
+          "status",
+          "attempts"
+        ],
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "status": {
+            "type": "integer",
+            "nullable": true,
+            "description": "HTTP status of the last attempt, or null when the receiver was unreachable."
+          },
+          "attempts": {
+            "type": "integer"
+          },
+          "error": {
+            "type": "string"
+          }
+        }
+      },
+      "AppConfig": {
+        "type": "object",
+        "description": "Build and run configuration for engine \"app\": a customer repository served as frontend plus backend on one pod.",
+        "required": [
+          "repo",
+          "branch",
+          "appPort",
+          "apiPrefix"
+        ],
+        "properties": {
+          "repo": {
+            "type": "string",
+            "example": "https://github.com/owner/project",
+            "description": "Public https git URL. Private repositories need repoToken on create."
+          },
+          "branch": {
+            "type": "string",
+            "default": "main"
+          },
+          "runtime": {
+            "type": "string",
+            "nullable": true,
+            "enum": [
+              "node",
+              "python",
+              "go",
+              "static",
+              "docker",
+              null
+            ],
+            "description": "Omit and the pod detects it from the repository."
+          },
+          "buildCommand": {
+            "type": "string",
+            "nullable": true,
+            "example": "npm ci && npm run build"
+          },
+          "outputDir": {
+            "type": "string",
+            "nullable": true,
+            "example": "dist",
+            "description": "Static output, relative to rootDir; null means no static half."
+          },
+          "startCommand": {
+            "type": "string",
+            "nullable": true,
+            "example": "node server.js",
+            "description": "Backend process; null means a static-only app."
+          },
+          "appPort": {
+            "type": "integer",
+            "default": 3000,
+            "description": "Port the backend listens on inside the pod."
+          },
+          "apiPrefix": {
+            "type": "string",
+            "default": "/api",
+            "description": "Paths routed to the backend; everything else is served from outputDir."
+          },
+          "env": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Environment variables for the app. Not for secrets."
+          },
+          "rootDir": {
+            "type": "string",
+            "nullable": true,
+            "example": "app",
+            "description": "Directory inside the repository where the build runs. For a monorepo whose app is not at the root. Netlify calls this \"base\"."
+          },
+          "repoUser": {
+            "type": "string",
+            "nullable": true,
+            "description": "Username paired with repoToken when the host wants one. Left out, we use what the host expects: x-access-token for GitHub, oauth2 for GitLab, the token alone for Gitea and Forgejo."
+          }
+        }
+      },
+      "BuildStatus": {
+        "type": "object",
+        "required": [
+          "state"
+        ],
+        "properties": {
+          "state": {
+            "type": "string",
+            "enum": [
+              "building",
+              "ok",
+              "failed",
+              "unknown"
+            ]
+          },
+          "commit": {
+            "type": "string",
+            "nullable": true
+          },
+          "startedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "finishedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "logTail": {
+            "type": "string",
+            "nullable": true,
+            "description": "Last lines of the build log."
+          }
+        }
+      }
+    }
+  },
+  "paths": {
+    "/auth/request": {
+      "post": {
+        "summary": "Request a six-digit sign-in code by e-mail.",
+        "tags": [
+          "Auth"
+        ],
+        "description": "Send this first when authenticating with an e-mail address instead of an API key. Always answers 202, whether or not the address has an account — never poll this for existence. The code is valid 10 minutes; feed it to POST /auth/verify.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "email"
+                ],
+                "properties": {
+                  "email": {
+                    "type": "string",
+                    "format": "email"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Accepted — a code was sent (or the address does not exist; the response looks the same either way).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "ok"
+                  ],
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "devCode": {
+                      "type": "string",
+                      "description": "Only present when the server runs with devShowCode (local/dev)."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request — the body failed validation.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "security": []
+      }
+    },
+    "/auth/verify": {
+      "post": {
+        "summary": "Exchange an e-mail code for a bearer token.",
+        "tags": [
+          "Auth"
+        ],
+        "description": "Call this right after POST /auth/request with the six-digit code the address received. The returned token works as `Authorization: Bearer <token>` on every authenticated call below; it lives 30 days. For an agent that cannot read the mailbox itself, mint an API key from the account page instead (see bearerAuth).",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "email",
+                  "code"
+                ],
+                "properties": {
+                  "email": {
+                    "type": "string",
+                    "format": "email"
+                  },
+                  "code": {
+                    "type": "string",
+                    "pattern": "^\\d{6}$"
+                  },
+                  "attribution": {
+                    "type": "object",
+                    "description": "Optional marketing attribution; safe to omit.",
+                    "nullable": true,
+                    "required": [
+                      "anonId"
+                    ],
+                    "properties": {
+                      "anonId": {
+                        "type": "string"
+                      },
+                      "utmSource": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "utmMedium": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "utmCampaign": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "referrer": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Signed in.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "token",
+                    "user"
+                  ],
+                  "properties": {
+                    "token": {
+                      "type": "string"
+                    },
+                    "user": {
+                      "type": "object",
+                      "required": [
+                        "id",
+                        "email"
+                      ],
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "email": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request — the body failed validation.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid, expired, or revoked credential.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "security": []
+      }
+    },
+    "/keys": {
+      "get": {
+        "summary": "List this account's API keys.",
+        "tags": [
+          "API keys"
+        ],
+        "description": "Use to check what keys already exist before minting another; secrets are never included, only id/name/prefix/timestamps. Requires a session token — a key cannot list keys on its own behalf is untrue, but it also cannot mint or revoke one (see POST/DELETE below).",
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "keys"
+                  ],
+                  "properties": {
+                    "keys": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/ApiKey"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid, expired, or revoked credential.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Mint a new API key for this account.",
+        "tags": [
+          "API keys"
+        ],
+        "description": "Call once from a signed-in session to create the credential an agent will use going forward (`Authorization: Bearer ak_live_…`). The secret is returned exactly once, in this response, under `secret` — store it immediately, it cannot be retrieved again. Refused (403) when called with an API key rather than a session token, so a leaked key cannot mint its own replacements.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "name"
+                ],
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 60
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Created.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "key",
+                    "secret"
+                  ],
+                  "properties": {
+                    "key": {
+                      "$ref": "#/components/schemas/ApiKey"
+                    },
+                    "secret": {
+                      "type": "string",
+                      "example": "ak_live_…",
+                      "description": "The only time the full secret is ever returned."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request — the body failed validation.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid, expired, or revoked credential.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The credential does not carry this right (e.g. an API key managing keys).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/keys/{id}": {
+      "delete": {
+        "summary": "Revoke an API key.",
+        "tags": [
+          "API keys"
+        ],
+        "description": "Call when a key has leaked or is no longer needed. The key stops working immediately (401 \"Invalid or revoked API key\" on next use); it is not deleted from history. Requires a session token, not the key being revoked or any other key.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Revoked."
+          },
+          "401": {
+            "description": "Missing, invalid, expired, or revoked credential.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The credential does not carry this right (e.g. an API key managing keys).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such agent, key, or persona for this account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/personas": {
+      "get": {
+        "summary": "List the public persona catalog.",
+        "tags": [
+          "Catalog"
+        ],
+        "description": "Call before creating an agent to choose a `personaId` — built-in personas plus any published community ones. No auth required; browse freely.",
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "personas"
+                  ],
+                  "properties": {
+                    "personas": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Persona"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": []
+      }
+    },
+    "/personas/{id}": {
+      "get": {
+        "summary": "Read one persona's full catalog entry.",
+        "tags": [
+          "Catalog"
+        ],
+        "description": "Call to inspect a persona's soul, localizations and example demo before deploying it, or to render its detail page. No auth required.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Persona id, e.g. personal-assistant."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "persona",
+                    "articles"
+                  ],
+                  "properties": {
+                    "persona": {
+                      "$ref": "#/components/schemas/Persona"
+                    },
+                    "articles": {
+                      "type": "array",
+                      "description": "Articles written about this persona (bodies omitted).",
+                      "items": {
+                        "type": "object"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such persona.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": []
+      }
+    },
+    "/tiers": {
+      "get": {
+        "summary": "List the pricing plans and the trial length.",
+        "tags": [
+          "Catalog"
+        ],
+        "description": "Call to show or validate plan choices before POST /agents — this is the one source of truth for prices and specs, do not hard-code them. No auth required.",
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "tiers",
+                    "trial"
+                  ],
+                  "properties": {
+                    "tiers": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Tier"
+                      }
+                    },
+                    "trial": {
+                      "type": "object",
+                      "required": [
+                        "days",
+                        "graceDays"
+                      ],
+                      "properties": {
+                        "days": {
+                          "type": "integer",
+                          "example": 7
+                        },
+                        "graceDays": {
+                          "type": "integer",
+                          "example": 3
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": []
+      }
+    },
+    "/engines": {
+      "get": {
+        "summary": "List the platforms (engines) that can be deployed.",
+        "tags": [
+          "Catalog"
+        ],
+        "description": "Call before POST /agents to pick a valid `engine` and confirm the tier you want meets its `minTier`. No auth required.",
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "engines",
+                    "podHostSuffix"
+                  ],
+                  "properties": {
+                    "engines": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Engine"
+                      }
+                    },
+                    "podHostSuffix": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Host suffix agent dashboards are proxied from; null when that proxy is off."
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": []
+      }
+    },
+    "/tools": {
+      "get": {
+        "summary": "List Hermes toolsets available to enable on an agent.",
+        "tags": [
+          "Catalog"
+        ],
+        "description": "Call to build the `tools.enabled` list for POST /agents or PATCH /agents/{id}/tools.",
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "platform",
+                    "toolsets",
+                    "groups",
+                    "minimalToolsets"
+                  ],
+                  "properties": {
+                    "platform": {
+                      "type": "string",
+                      "enum": [
+                        "hermes"
+                      ]
+                    },
+                    "toolsets": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/ToolsetInfo"
+                      }
+                    },
+                    "groups": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "id",
+                          "label"
+                        ],
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "label": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    },
+                    "minimalToolsets": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "description": "Ids enabled by default when a persona is deployed with nothing chosen."
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": []
+      }
+    },
+    "/models": {
+      "get": {
+        "summary": "List the curated LLM model catalog.",
+        "tags": [
+          "Catalog"
+        ],
+        "description": "Call to pick a valid `model` id for PATCH /agents/{id}/llm-key or POST /agents.",
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "models",
+                    "default"
+                  ],
+                  "properties": {
+                    "models": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/ModelInfo"
+                      }
+                    },
+                    "default": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": []
+      }
+    },
+    "/llm-providers": {
+      "get": {
+        "summary": "List LLM providers Hermes can take a key for.",
+        "tags": [
+          "Catalog"
+        ],
+        "description": "Call to validate the `provider` value before PATCH /agents/{id}/llm-key.",
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "providers"
+                  ],
+                  "properties": {
+                    "providers": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/LlmProviderInfo"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": []
+      }
+    },
+    "/status": {
+      "get": {
+        "summary": "Check whether the platform itself is healthy.",
+        "tags": [
+          "Status"
+        ],
+        "description": "Call when a request is behaving oddly, to tell \"the API is degraded\" apart from \"my agent/pod is broken\" — see also GET /healthz for just the API process.",
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "status"
+                  ],
+                  "properties": {
+                    "status": {
+                      "type": "object",
+                      "required": [
+                        "status",
+                        "services"
+                      ],
+                      "properties": {
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "operational",
+                            "degraded"
+                          ]
+                        },
+                        "services": {
+                          "type": "object",
+                          "required": [
+                            "account",
+                            "deployer"
+                          ],
+                          "properties": {
+                            "account": {
+                              "type": "string",
+                              "enum": [
+                                "ok",
+                                "down"
+                              ]
+                            },
+                            "deployer": {
+                              "type": "string",
+                              "enum": [
+                                "ok",
+                                "down",
+                                "unknown"
+                              ]
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": []
+      }
+    },
+    "/agents": {
+      "get": {
+        "summary": "List every agent (pod) owned by this account.",
+        "tags": [
+          "Agents"
+        ],
+        "description": "Call to enumerate your fleet, e.g. to find an id before acting on it.",
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "agents"
+                  ],
+                  "properties": {
+                    "agents": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Agent"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid, expired, or revoked credential.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Create a new agent (deploy a pod).",
+        "tags": [
+          "Agents"
+        ],
+        "description": "Call once to provision a pod. The call is synchronous and returns once the pod exists, typically within one to two minutes — the engine inside may need a few more seconds, which GET /agents/{id}/liveness tells you. Follow with PATCH /agents/{id}/llm-key: a fresh pod has no model key and answers nothing until one is set.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "personaId",
+                  "tier"
+                ],
+                "properties": {
+                  "personaId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "Any id from GET /personas."
+                  },
+                  "tier": {
+                    "type": "string",
+                    "enum": [
+                      "tiny",
+                      "small",
+                      "medium",
+                      "large"
+                    ],
+                    "description": "Must satisfy the chosen engine's minTier."
+                  },
+                  "name": {
+                    "type": "string",
+                    "maxLength": 60,
+                    "description": "Up to 60 chars; the pod's hostnames are derived from it."
+                  },
+                  "channels": {
+                    "type": "array",
+                    "minItems": 1,
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "web",
+                        "telegram",
+                        "discord",
+                        "whatsapp",
+                        "email"
+                      ]
+                    },
+                    "description": "Default [\"web\"]."
+                  },
+                  "lang": {
+                    "type": "string",
+                    "enum": [
+                      "en",
+                      "ru"
+                    ]
+                  },
+                  "skills": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "extraSoul": {
+                    "type": "string",
+                    "maxLength": 4000,
+                    "description": "Owner instructions appended to the persona's SOUL."
+                  },
+                  "soul": {
+                    "type": "string",
+                    "maxLength": 10000
+                  },
+                  "domain": {
+                    "type": "string",
+                    "maxLength": 253,
+                    "description": "Your own hostname, e.g. agent.example.com. Names under agentspodium.com are assigned automatically and refused here."
+                  },
+                  "tools": {
+                    "type": "object",
+                    "properties": {
+                      "enabled": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "mcpServers": {
+                        "type": "array",
+                        "items": {
+                          "$ref": "#/components/schemas/McpServerConfig"
+                        }
+                      }
+                    }
+                  },
+                  "engine": {
+                    "type": "string",
+                    "enum": [
+                      "hermes",
+                      "openclaw",
+                      "n8n",
+                      "claude-code",
+                      "opencode",
+                      "pi"
+                    ],
+                    "description": "Default hermes."
+                  },
+                  "model": {
+                    "type": "string",
+                    "maxLength": 200
+                  },
+                  "webhookUrl": {
+                    "type": "string",
+                    "maxLength": 500,
+                    "description": "Public http(s) URL to POST pod events to. The signing secret comes back once as `webhookSecret` beside `agent`."
+                  },
+                  "app": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/AppConfig"
+                      }
+                    ],
+                    "description": "Required when engine is \"app\". Add repoToken (string) for a private repository; it is stored encrypted and never returned."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Created — the pod exists and status is \"running\" (the engine inside may still be booting).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "agent"
+                  ],
+                  "properties": {
+                    "agent": {
+                      "$ref": "#/components/schemas/Agent"
+                    },
+                    "webhookSecret": {
+                      "type": "string",
+                      "description": "Only when `webhookUrl` was given: the HMAC secret for verifying deliveries. Shown once."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request — the body failed validation.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid, expired, or revoked credential.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/agents/{id}": {
+      "get": {
+        "summary": "Read one agent's full record.",
+        "tags": [
+          "Agents"
+        ],
+        "description": "Call to check current status, endpointUrl, a2a details, quota, and configuration.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Agent id (agt_…).",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "agent"
+                  ],
+                  "properties": {
+                    "agent": {
+                      "$ref": "#/components/schemas/Agent"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid, expired, or revoked credential.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such agent, key, or persona for this account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "Delete an agent for good.",
+        "tags": [
+          "Agents"
+        ],
+        "description": "Call only when you are certain: this destroys the pod after a final backup and wipes every secret and every line the owner wrote. Export first (GET /agents/{id}/export) if the data might still be needed.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Agent id (agt_…).",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted."
+          },
+          "401": {
+            "description": "Missing, invalid, expired, or revoked credential.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such agent, key, or persona for this account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/agents/{id}/upgrade": {
+      "post": {
+        "summary": "Change an agent's plan.",
+        "tags": [
+          "Agents"
+        ],
+        "description": "Call to move the pod to a different tier; it rebuilds with data migrated. Poll GET /agents/{id} until status is \"running\" afterward.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Agent id (agt_…).",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "tier"
+                ],
+                "properties": {
+                  "tier": {
+                    "type": "string",
+                    "enum": [
+                      "tiny",
+                      "small",
+                      "medium",
+                      "large"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Upgraded — status is \"provisioning\" while the pod rebuilds.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "agent"
+                  ],
+                  "properties": {
+                    "agent": {
+                      "$ref": "#/components/schemas/Agent"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request — the body failed validation.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid, expired, or revoked credential.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such agent, key, or persona for this account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/agents/{id}/llm-key": {
+      "patch": {
+        "summary": "Install, change, or clear the agent's model key.",
+        "tags": [
+          "Agents"
+        ],
+        "description": "Call right after creating an agent — without a key it accepts messages and answers nothing. Send `key: null` to clear it. This rebuilds the pod (about a minute); poll liveness again afterward.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Agent id (agt_…).",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "key"
+                ],
+                "properties": {
+                  "key": {
+                    "type": "string",
+                    "minLength": 8,
+                    "nullable": true,
+                    "description": "The provider's API key; null clears it."
+                  },
+                  "provider": {
+                    "type": "string",
+                    "enum": [
+                      "openai",
+                      "anthropic",
+                      "openrouter",
+                      "google",
+                      "gemini",
+                      "groq",
+                      "mistral",
+                      "deepseek",
+                      "xai",
+                      "nous"
+                    ],
+                    "description": "Required together with a non-null key; a key for one vendor and a model from another is a dead pod."
+                  },
+                  "model": {
+                    "type": "string",
+                    "maxLength": 200,
+                    "nullable": true
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Saved — status is \"provisioning\" while the pod rebuilds.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "agent"
+                  ],
+                  "properties": {
+                    "agent": {
+                      "$ref": "#/components/schemas/Agent"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request — the body failed validation.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid, expired, or revoked credential.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such agent, key, or persona for this account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/agents/{id}/tools": {
+      "patch": {
+        "summary": "Set the agent's enabled toolsets and MCP servers.",
+        "tags": [
+          "Agents"
+        ],
+        "description": "Call with the full desired set (this replaces, not merges) after checking valid ids via GET /tools. Rebuilds the pod.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Agent id (agt_…).",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "enabled": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "mcpServers": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/components/schemas/McpServerConfig"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "agent"
+                  ],
+                  "properties": {
+                    "agent": {
+                      "$ref": "#/components/schemas/Agent"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request — the body failed validation.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid, expired, or revoked credential.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such agent, key, or persona for this account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/agents/{id}/channels": {
+      "patch": {
+        "summary": "Set which messengers the agent listens on.",
+        "tags": [
+          "Agents"
+        ],
+        "description": "Call with the full desired channel list (at least one).",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Agent id (agt_…).",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "channels"
+                ],
+                "properties": {
+                  "channels": {
+                    "type": "array",
+                    "minItems": 1,
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "web",
+                        "telegram",
+                        "discord",
+                        "whatsapp",
+                        "email"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "agent"
+                  ],
+                  "properties": {
+                    "agent": {
+                      "$ref": "#/components/schemas/Agent"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request — the body failed validation.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid, expired, or revoked credential.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such agent, key, or persona for this account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/agents/{id}/telegram": {
+      "patch": {
+        "summary": "Install or clear the agent's Telegram bot token.",
+        "tags": [
+          "Agents"
+        ],
+        "description": "Call with a bot token from @BotFather to enable the Telegram channel; send `token: null` to clear it. The token is encrypted at rest and never returned by any endpoint.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Agent id (agt_…).",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "token": {
+                    "type": "string",
+                    "minLength": 20,
+                    "maxLength": 200,
+                    "nullable": true
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "agent"
+                  ],
+                  "properties": {
+                    "agent": {
+                      "$ref": "#/components/schemas/Agent"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request — the body failed validation.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid, expired, or revoked credential.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such agent, key, or persona for this account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/agents/{id}/instructions": {
+      "patch": {
+        "summary": "Set the owner's extra instructions appended to the persona.",
+        "tags": [
+          "Agents"
+        ],
+        "description": "Call to change extraSoul; send `extraSoul: null` to clear it back to the plain persona.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Agent id (agt_…).",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "extraSoul": {
+                    "type": "string",
+                    "maxLength": 4000,
+                    "nullable": true
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "agent"
+                  ],
+                  "properties": {
+                    "agent": {
+                      "$ref": "#/components/schemas/Agent"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request — the body failed validation.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid, expired, or revoked credential.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such agent, key, or persona for this account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/agents/{id}/timezone": {
+      "patch": {
+        "summary": "Set the IANA timezone the agent's schedules run on.",
+        "tags": [
+          "Agents"
+        ],
+        "description": "Call to fix wrong-hour cron jobs and reminders; send `timezone: null` to fall back to the pod's UTC default. Wrong or missing timezone fails silently — schedules simply fire at the wrong hour.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Agent id (agt_…).",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "timezone"
+                ],
+                "properties": {
+                  "timezone": {
+                    "type": "string",
+                    "maxLength": 64,
+                    "nullable": true,
+                    "example": "Europe/Berlin"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "agent"
+                  ],
+                  "properties": {
+                    "agent": {
+                      "$ref": "#/components/schemas/Agent"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request — the body failed validation.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid, expired, or revoked credential.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such agent, key, or persona for this account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/agents/{id}/peers": {
+      "put": {
+        "summary": "Replace the list of other agents this one may call over A2A.",
+        "tags": [
+          "Agents"
+        ],
+        "description": "Call with the full desired peer list (up to 20) — this replaces, not merges. Peer tokens are other people's secrets: accepted here, encrypted at rest, and never sent back out. Written into the pod on rebuild.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Agent id (agt_…).",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "peers"
+                ],
+                "properties": {
+                  "peers": {
+                    "type": "array",
+                    "maxItems": 20,
+                    "items": {
+                      "type": "object",
+                      "required": [
+                        "name",
+                        "url"
+                      ],
+                      "properties": {
+                        "name": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 64
+                        },
+                        "url": {
+                          "type": "string",
+                          "format": "uri",
+                          "maxLength": 500
+                        },
+                        "token": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 500,
+                          "description": "The peer's own bearer credential."
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "agent"
+                  ],
+                  "properties": {
+                    "agent": {
+                      "$ref": "#/components/schemas/Agent"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request — the body failed validation.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid, expired, or revoked credential.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such agent, key, or persona for this account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/agents/{id}/listing": {
+      "patch": {
+        "summary": "Opt an agent into (or out of) the public A2A catalog.",
+        "tags": [
+          "Agents"
+        ],
+        "description": "Call with `listed: true` to make this pod discoverable at GET /a2a-catalog (name, url, agent card — never the token); `false` to remove it. Off by default — enabling the a2a toolset is not consent to being listed.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Agent id (agt_…).",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "listed": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "agent"
+                  ],
+                  "properties": {
+                    "agent": {
+                      "$ref": "#/components/schemas/Agent"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid, expired, or revoked credential.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such agent, key, or persona for this account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/agents/{id}/pause": {
+      "post": {
+        "summary": "Pause an agent (stop billing its resources).",
+        "tags": [
+          "Agents"
+        ],
+        "description": "Call to stop a pod without losing its data; resume later with POST /agents/{id}/resume.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Agent id (agt_…).",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Paused — status is \"stopped\".",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "agent"
+                  ],
+                  "properties": {
+                    "agent": {
+                      "$ref": "#/components/schemas/Agent"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request — the body failed validation.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid, expired, or revoked credential.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such agent, key, or persona for this account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/agents/{id}/resume": {
+      "post": {
+        "summary": "Resume a paused agent.",
+        "tags": [
+          "Agents"
+        ],
+        "description": "Call to bring a stopped pod back; poll GET /agents/{id}/liveness afterward.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Agent id (agt_…).",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Resumed — status is \"running\".",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "agent"
+                  ],
+                  "properties": {
+                    "agent": {
+                      "$ref": "#/components/schemas/Agent"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request — the body failed validation.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid, expired, or revoked credential.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such agent, key, or persona for this account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/agents/{id}/rebuild": {
+      "post": {
+        "summary": "Rebuild the pod from its last backup.",
+        "tags": [
+          "Agents"
+        ],
+        "description": "Call when liveness shows reachable but not serving for more than a few minutes, or after status is \"failed\". Poll GET /agents/{id} until \"running\", then liveness.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Agent id (agt_…).",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Rebuild started — status is \"provisioning\".",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "agent"
+                  ],
+                  "properties": {
+                    "agent": {
+                      "$ref": "#/components/schemas/Agent"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request — the body failed validation.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid, expired, or revoked credential.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such agent, key, or persona for this account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/agents/{id}/liveness": {
+      "get": {
+        "summary": "Check whether the pod is up and the engine inside is answering.",
+        "tags": [
+          "Agents"
+        ],
+        "description": "Poll every 5 seconds after create, upgrade, an llm-key change, or a rebuild, until `serving` is true. `reachable && !serving` for more than a few minutes means broken — call POST /agents/{id}/rebuild.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Agent id (agt_…).",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Liveness"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid, expired, or revoked credential.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such agent, key, or persona for this account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/agents/{id}/usage": {
+      "get": {
+        "summary": "Read the agent's current RAM/disk usage against its plan.",
+        "tags": [
+          "Agents"
+        ],
+        "description": "Call to check whether an agent is close to being auto-paused for exceeding its tier (quotaStatus reaches \"paused\"). Numbers refresh about once a minute from the cluster.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Agent id (agt_…).",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "usage",
+                    "status"
+                  ],
+                  "properties": {
+                    "usage": {
+                      "anyOf": [
+                        {
+                          "$ref": "#/components/schemas/AgentQuota"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "ok",
+                        "warn",
+                        "grace",
+                        "paused"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid, expired, or revoked credential.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such agent, key, or persona for this account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/agents/{id}/term": {
+      "get": {
+        "summary": "Find out when this agent's current free or paid term ends.",
+        "tags": [
+          "Agents"
+        ],
+        "description": "Call to decide whether to renew soon — the same numbers the account page's countdown uses. `renewUrl` is where a human pays.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Agent id (agt_…).",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "term"
+                  ],
+                  "properties": {
+                    "term": {
+                      "$ref": "#/components/schemas/AgentTerm"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Term information is not available on this deployment.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid, expired, or revoked credential.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such agent, key, or persona for this account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/agents/{id}/export": {
+      "get": {
+        "summary": "Download a tarball of the agent's own data.",
+        "tags": [
+          "Agents"
+        ],
+        "description": "Call any time, free, to get a portable copy of the pod's persona, skills, and memory before deleting or migrating it. Streams `application/gzip`.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Agent id (agt_…).",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A gzip tar stream.",
+            "content": {
+              "application/gzip": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Agent is not deployed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid, expired, or revoked credential.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such agent, key, or persona for this account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/agents/{id}/backup": {
+      "post": {
+        "summary": "Take an off-pod snapshot right now.",
+        "tags": [
+          "Agents"
+        ],
+        "description": "Call before a risky change if you do not want to wait for the daily automatic backup.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Agent id (agt_…).",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Backed up.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "backup"
+                  ],
+                  "properties": {
+                    "backup": {
+                      "type": "object",
+                      "required": [
+                        "file",
+                        "size"
+                      ],
+                      "properties": {
+                        "file": {
+                          "type": "string"
+                        },
+                        "size": {
+                          "type": "integer"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Agent is not deployed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid, expired, or revoked credential.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such agent, key, or persona for this account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/agents/{id}/backups": {
+      "get": {
+        "summary": "List server-side snapshots for this agent.",
+        "tags": [
+          "Agents"
+        ],
+        "description": "Call to see what is available to restore from; snapshots are kept 7 days, one taken daily.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Agent id (agt_…).",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "backups"
+                  ],
+                  "properties": {
+                    "backups": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/BackupEntry"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Agent is not deployed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid, expired, or revoked credential.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such agent, key, or persona for this account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/agents/{id}/memory": {
+      "get": {
+        "summary": "Inspect what a Hermes agent currently remembers.",
+        "tags": [
+          "Agents"
+        ],
+        "description": "Call read-only to see the pod's soul, installed skills, saved memories, and session count.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Agent id (agt_…).",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "memory"
+                  ],
+                  "properties": {
+                    "memory": {
+                      "$ref": "#/components/schemas/AgentMemory"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Agent is not deployed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid, expired, or revoked credential.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such agent, key, or persona for this account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/subscriptions": {
+      "get": {
+        "summary": "List this account's subscriptions across all agents.",
+        "tags": [
+          "Payment"
+        ],
+        "description": "Call to check payment status and currentPeriodEnd (\"paid till\") for every agent at once.",
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "subscriptions"
+                  ],
+                  "properties": {
+                    "subscriptions": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Subscription"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid, expired, or revoked credential.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/subscriptions/providers": {
+      "get": {
+        "summary": "List available (and coming-soon) payment providers.",
+        "tags": [
+          "Payment"
+        ],
+        "description": "Call before POST /agents/{id}/activate to find `providers[].buyUrls[tier]` (where to buy a licence) and its `note`.",
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "providers",
+                    "soon"
+                  ],
+                  "properties": {
+                    "providers": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/PaymentProvider"
+                      }
+                    },
+                    "soon": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/PaymentProvider"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid, expired, or revoked credential.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/agents/{id}/activate": {
+      "post": {
+        "summary": "Activate a paid subscription for an agent with a license key.",
+        "tags": [
+          "Payment"
+        ],
+        "description": "Call after a human buys a plan on a provider (e.g. Gumroad) and receives a license key. Verifies the key and opens an active subscription, stopping the trial clock and resuming a paused pod.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Agent id (agt_…).",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "licenseKey"
+                ],
+                "properties": {
+                  "provider": {
+                    "type": "string",
+                    "description": "Defaults to the first configured provider."
+                  },
+                  "licenseKey": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Activated.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "subscription"
+                  ],
+                  "properties": {
+                    "subscription": {
+                      "$ref": "#/components/schemas/Subscription"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request — the body failed validation.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid, expired, or revoked credential.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such agent, key, or persona for this account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/crypto/info": {
+      "get": {
+        "summary": "Read crypto payment configuration and supported assets.",
+        "tags": [
+          "Payment"
+        ],
+        "description": "Call before POST /agents/{id}/crypto-order to confirm crypto payments are enabled and which assets are accepted. Status: beta testing — the order → confirmation → activation pattern is verified through card payments, the crypto path itself is still being tested.",
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CryptoInfo"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid, expired, or revoked credential.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/agents/{id}/crypto-order": {
+      "post": {
+        "summary": "Open a USDT/USDC deposit order for an agent's plan.",
+        "tags": [
+          "Payment"
+        ],
+        "description": "Call once to get a deposit address and the exact amount owed, then send the transfer. Create the order before sending anything: the address is shared per account and the order records the balance at that moment as its baseline — a transfer sent earlier pays for nothing. Status: beta testing — verified through card payments, the crypto path itself is still being tested.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Agent id (agt_…).",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "asset"
+                ],
+                "properties": {
+                  "asset": {
+                    "type": "string",
+                    "enum": [
+                      "usdt",
+                      "usdc"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Order opened.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "order",
+                    "address",
+                    "amountDisplay",
+                    "symbol"
+                  ],
+                  "properties": {
+                    "order": {
+                      "type": "object",
+                      "required": [
+                        "id",
+                        "asset",
+                        "amount",
+                        "status"
+                      ],
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "asset": {
+                          "type": "string",
+                          "enum": [
+                            "usdt",
+                            "usdc"
+                          ]
+                        },
+                        "amount": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "pending",
+                            "paid",
+                            "expired"
+                          ]
+                        }
+                      }
+                    },
+                    "address": {
+                      "type": "string",
+                      "description": "The account's deposit address on Ethereum mainnet."
+                    },
+                    "amountDisplay": {
+                      "type": "string",
+                      "example": "4.99"
+                    },
+                    "symbol": {
+                      "type": "string",
+                      "example": "USDT"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request — the body failed validation.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid, expired, or revoked credential.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such agent, key, or persona for this account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/agents/{id}/crypto-orders": {
+      "get": {
+        "summary": "List crypto orders opened for this agent.",
+        "tags": [
+          "Payment"
+        ],
+        "description": "Call to poll order status: `pending` → `paid`, usually within minutes of the on-chain transfer confirming. Status: beta testing — verified through card payments, the crypto path itself is still being tested.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Agent id (agt_…).",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "orders"
+                  ],
+                  "properties": {
+                    "orders": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/CryptoOrder"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid, expired, or revoked credential.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such agent, key, or persona for this account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/stars/info": {
+      "get": {
+        "summary": "Read Telegram Stars payment configuration.",
+        "tags": [
+          "Payment"
+        ],
+        "description": "Call before POST /agents/{id}/stars-order to confirm Stars payments are enabled and get the bot username and star-to-USD rate. Status: beta testing — the card is the proven way for now.",
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StarsInfo"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid, expired, or revoked credential.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/agents/{id}/stars-order": {
+      "post": {
+        "summary": "Open a Telegram Stars payment order for an agent's plan.",
+        "tags": [
+          "Payment"
+        ],
+        "description": "Call to get a t.me deep link; opening it in Telegram sends a Stars invoice for the order's amount. Status: beta testing — the card is the proven way for now.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Agent id (agt_…).",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Order opened.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "order",
+                    "botLink"
+                  ],
+                  "properties": {
+                    "order": {
+                      "type": "object",
+                      "required": [
+                        "id",
+                        "amountStars",
+                        "status"
+                      ],
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "amountStars": {
+                          "type": "integer"
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "pending",
+                            "paid",
+                            "expired"
+                          ]
+                        }
+                      }
+                    },
+                    "botLink": {
+                      "type": "string",
+                      "format": "uri",
+                      "example": "https://t.me/SomeBot?start=pay_stx_…"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request — the body failed validation.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid, expired, or revoked credential.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such agent, key, or persona for this account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/agents/{id}/stars-orders": {
+      "get": {
+        "summary": "List Telegram Stars orders opened for this agent.",
+        "tags": [
+          "Payment"
+        ],
+        "description": "Call to poll order status: `pending` → `paid`. Status: beta testing — the card is the proven way for now.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Agent id (agt_…).",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "orders"
+                  ],
+                  "properties": {
+                    "orders": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/StarsOrder"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid, expired, or revoked credential.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such agent, key, or persona for this account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/domains/check": {
+      "get": {
+        "summary": "Check what a customer's own domain currently answers.",
+        "tags": [
+          "Agents"
+        ],
+        "description": "Call as the owner types their domain to confirm DNS points at the platform (and, once it does, that HTTPS works) before setting it as an agent's `domain`.",
+        "parameters": [
+          {
+            "name": "domain",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 253
+            }
+          },
+          {
+            "name": "https",
+            "in": "query",
+            "required": false,
+            "description": "\"1\" or \"true\" to also probe HTTPS (only when DNS already resolves here).",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DomainCheck"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request — the body failed validation.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid, expired, or revoked credential.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/a2a-catalog": {
+      "get": {
+        "summary": "List agents whose owners opted into the public A2A directory.",
+        "tags": [
+          "A2A"
+        ],
+        "description": "Call to discover other AgentsPodium agents to add as a peer (PUT /agents/{id}/peers). No auth required; unlisted agents never appear here however reachable they are.",
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "agents"
+                  ],
+                  "properties": {
+                    "agents": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "slug",
+                          "name",
+                          "url",
+                          "cardUrl"
+                        ],
+                        "properties": {
+                          "slug": {
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "url": {
+                            "type": "string",
+                            "format": "uri"
+                          },
+                          "cardUrl": {
+                            "type": "string",
+                            "format": "uri",
+                            "description": "The agent's public A2A card: <url>.well-known/agent-card.json."
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": []
+      }
+    },
+    "/agents/{id}/webhook": {
+      "put": {
+        "summary": "Set the URL that receives signed events about this agent's pod.",
+        "tags": [
+          "Agents"
+        ],
+        "description": "Call once instead of polling: agent.running, agent.stopped, agent.failed, agent.deleted, payment.confirmed, deletion.warning are POSTed there with an HMAC signature. Replacing the URL issues a new secret; the secret is returned only by this call. Private and loopback hosts are refused.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Agent id (agt_…).",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "url"
+                ],
+                "properties": {
+                  "url": {
+                    "type": "string",
+                    "example": "https://ops.example.com/hooks/agentspodium"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "agent",
+                    "webhook"
+                  ],
+                  "properties": {
+                    "agent": {
+                      "$ref": "#/components/schemas/Agent"
+                    },
+                    "webhook": {
+                      "type": "object",
+                      "required": [
+                        "url",
+                        "secret",
+                        "events"
+                      ],
+                      "properties": {
+                        "url": {
+                          "type": "string"
+                        },
+                        "secret": {
+                          "type": "string",
+                          "description": "HMAC-SHA256 key for `X-AgentsPodium-Signature`. Shown once."
+                        },
+                        "events": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad URL: not absolute http(s), carries credentials, or points at a private host.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not your agent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "Stop sending events for this agent.",
+        "tags": [
+          "Agents"
+        ],
+        "description": "Removes the URL and the secret; nothing else changes.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Agent id (agt_…).",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "agent"
+                  ],
+                  "properties": {
+                    "agent": {
+                      "$ref": "#/components/schemas/Agent"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not your agent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/agents/{id}/webhook/test": {
+      "post": {
+        "summary": "Deliver a `test` event to the webhook right now and report how it went.",
+        "tags": [
+          "Agents"
+        ],
+        "description": "Call after setting the URL to prove the receiver answers 2xx and your signature check passes. Runs all retries before answering, so it can take up to a couple of minutes when the receiver is down.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Agent id (agt_…).",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Delivered or not; see `delivery.ok`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "delivery"
+                  ],
+                  "properties": {
+                    "delivery": {
+                      "$ref": "#/components/schemas/WebhookDelivery"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "No webhook set on this agent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not your agent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/agents/{id}/app": {
+      "patch": {
+        "summary": "Change what an app instance builds and how it starts.",
+        "tags": [
+          "Agents"
+        ],
+        "description": "Call to point the instance at another branch, fix a build command, or replace the private-repository token. The pod reads this at start, so the change takes effect on the next POST /agents/{id}/rebuild.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Agent id (agt_…).",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/AppConfig"
+                  }
+                ],
+                "description": "Any subset of the fields; repoToken may be sent to replace it or null to remove it."
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "agent",
+                    "applied"
+                  ],
+                  "properties": {
+                    "agent": {
+                      "$ref": "#/components/schemas/Agent"
+                    },
+                    "applied": {
+                      "type": "string",
+                      "example": "on the next rebuild"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad configuration, or the instance is not an app.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not your agent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/agents/{id}/build": {
+      "get": {
+        "summary": "Find out how the last build of an app instance went.",
+        "tags": [
+          "Agents"
+        ],
+        "description": "Call after creating or rebuilding an app: the pod can be alive and still serving the previous version while a new build fails. `logTail` carries the reason.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Agent id (agt_…).",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "build"
+                  ],
+                  "properties": {
+                    "build": {
+                      "$ref": "#/components/schemas/BuildStatus"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The instance is not an app.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not your agent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
