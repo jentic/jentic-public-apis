@@ -1,0 +1,3455 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "rpc.aex402.com",
+    "version": "0.3.0",
+    "description": "Multi-chain RPC proxy (Solana + EVM chains) + OpenAI-compatible AI proxy with x402 micropayments. Full docs: https://rpc.aex402.com/llms.txt",
+    "contact": {
+      "url": "https://aex402.com"
+    },
+    "x-guidance": "This API provides multi-chain JSON-RPC proxying (Solana + EVM chains) and OpenAI-compatible AI chat completions, both payable via x402 micropayments on Solana.\n\n**Getting started:**\n1. Free tier: 10 requests/minute per IP, no auth needed. Response header X-Rate-Remaining shows calls left this minute. Heavier use is pay-per-call via x402 ($0.01 buys 100 calls).\n2. When the free tier is exceeded, the server returns HTTP 402 with full payment instructions in the body (schema: PaymentRequired402).\n3. ZERO-QUOTA DISCOVERY (two ways): (a) GET /.well-known/x402 — paymentRequirements field carries payTo, token mints, and atomic amounts; (b) POST / with header \"Prefer: x402-probe\" (any body) returns the full 402 payment instructions. Neither consumes quota.\n4. Pay with USDC, USDT, SOL, or $ANSEM on Solana mainnet. Minimum payment: $0.01 = 100 credits. The 402 body's paidTier.accepts[] lists exact mint addresses and atomic amounts; paidTier.payTo is the recipient.\n5. Two ways to settle: (a) build+sign a Solana transfer TX, base64-encode it, and retry the request with the PAYMENT-SIGNATURE header (the worker co-signs as fee payer and submits — you pay no gas); or (b) send tokens to payTo yourself, then claim with GET /topup?sig=<tx_signature>.\n6. Success responses include headers: X-Session (HMAC session token, 24h sliding TTL), X-Credits-Remaining, PAYMENT-RESPONSE (settlement JSON). Use X-Session on subsequent requests.\n7. For long-lived programmatic access, create an API key via POST /v1/api-keys (requires Ed25519 wallet signature) and use Authorization: Bearer sk-aex-v1-*. Header-less tooling (forge/hardhat/MetaMask/web3.js, which speak raw JSON-RPC and can't set headers) can instead embed the credential in the URL query — ?key=sk-aex-v1-* or ?session=ses-* on any endpoint (e.g. https://rpc.aex402.com/rh?key=sk-aex-v1-...), identical to the header and drawing from prepaid credits rather than the free per-IP rate limit.\n\n**Key endpoints:**\n- POST / — Solana JSON-RPC proxy; eth_* methods auto-route to Robinhood Chain (1 credit per call)\n- POST /rh — Robinhood Chain mainnet (EVM, chain ID 4663); /rh/testnet for testnet (46630)\n- POST /hl — HyperEVM (EVM, chain ID 999)\n- POST /eth — Ethereum Mainnet (EVM, chain ID 1)\n- POST /base — Base Mainnet (EVM, chain ID 8453)\n- POST /stable — Stable Mainnet (EVM, chain ID 988, USDT0 gas)\n- POST /plasma — Plasma Mainnet (EVM, chain ID 9745)\n- POST /tempo — Tempo Mainnet Presto (EVM, chain ID 4217)\n- POST /codex — Codex Mainnet (EVM, chain ID 81224)\n- POST /v1/chat/completions — OpenAI-compatible AI chat (1-50 credits depending on model/tokens)\n- GET /credits?wallet=<pubkey> — Check credit balance (free)\n- GET /health — Backend status (free)\n- POST /mcp — MCP server: any Solana/EVM RPC method (solana_rpc/evm_rpc), all read endpoints (api_get), AMM tools, TX builders, and mcp_linq for one-call fan-out + fluent LINQ-style aggregation\n\n**Pricing:** 1 credit = $0.0001. RPC calls cost 1 credit. AI calls cost 1-50 credits based on token usage.",
+    "x-jentic-source-url": "https://rpc.aex402.com/openapi.json"
+  },
+  "servers": [
+    {
+      "url": "https://rpc.aex402.com"
+    }
+  ],
+  "paths": {
+    "/v1/chat/completions": {
+      "post": {
+        "operationId": "createChatCompletion",
+        "summary": "Create chat completion (OpenAI-compatible)",
+        "x-payment-info": {
+          "protocols": [
+            "x402"
+          ],
+          "pricingMode": "range",
+          "minPrice": "100",
+          "maxPrice": "5000",
+          "priceUnits": "atomic USDC (6 decimals) — 100 = $0.0001 = 1 credit"
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "messages"
+                ],
+                "properties": {
+                  "model": {
+                    "type": "string",
+                    "default": "auto",
+                    "description": "Model ID"
+                  },
+                  "messages": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "role": {
+                          "type": "string",
+                          "enum": [
+                            "system",
+                            "user",
+                            "assistant"
+                          ]
+                        },
+                        "content": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "role",
+                        "content"
+                      ]
+                    },
+                    "description": "Chat messages"
+                  },
+                  "max_tokens": {
+                    "type": "integer",
+                    "default": 1024
+                  },
+                  "temperature": {
+                    "type": "number",
+                    "default": 0.7
+                  },
+                  "stream": {
+                    "type": "boolean",
+                    "default": false
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Chat completion",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatResponse"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Payment required — see body for payTo, mints, amounts (elicit anytime: POST / with header Prefer: x402-probe)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaymentRequired402"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/": {
+      "post": {
+        "operationId": "solanaRpc",
+        "summary": "Multi-chain JSON-RPC proxy — Solana by default; eth_*/net_*/web3_* methods auto-route to Robinhood Chain mainnet",
+        "x-payment-info": {
+          "protocols": [
+            "x402"
+          ],
+          "pricingMode": "fixed",
+          "price": "100",
+          "priceUnits": "atomic USDC (6 decimals) — 100 = $0.0001 = 1 credit"
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "jsonrpc",
+                  "id",
+                  "method"
+                ],
+                "properties": {
+                  "jsonrpc": {
+                    "type": "string",
+                    "enum": [
+                      "2.0"
+                    ]
+                  },
+                  "id": {
+                    "type": [
+                      "integer",
+                      "string"
+                    ]
+                  },
+                  "method": {
+                    "type": "string"
+                  },
+                  "params": {
+                    "type": "array"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "JSON-RPC response"
+          },
+          "402": {
+            "description": "Payment required — see body for payTo, mints, amounts (elicit anytime: POST / with header Prefer: x402-probe)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaymentRequired402"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/rh": {
+      "post": {
+        "operationId": "robinhoodRpc",
+        "summary": "Robinhood Chain mainnet JSON-RPC (EVM, Arbitrum Orbit L2, chain ID 4663). Use as wallet RPC URL, currency ETH. Served by our own synced node that ingests the sequencer feed directly — it carries the chain tip ~0.8s (6-8 blocks) AHEAD of the public Robinhood RPC, so reads reflect the newest state sooner.",
+        "x-payment-info": {
+          "protocols": [
+            "x402"
+          ],
+          "pricingMode": "fixed",
+          "price": "100",
+          "priceUnits": "atomic USDC (6 decimals) — 100 = $0.0001 = 1 credit"
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "jsonrpc",
+                  "id",
+                  "method"
+                ],
+                "properties": {
+                  "jsonrpc": {
+                    "type": "string",
+                    "enum": [
+                      "2.0"
+                    ]
+                  },
+                  "id": {
+                    "type": [
+                      "integer",
+                      "string"
+                    ]
+                  },
+                  "method": {
+                    "type": "string",
+                    "description": "Any Ethereum JSON-RPC method (eth_*, net_*, web3_*)"
+                  },
+                  "params": {
+                    "type": "array"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "JSON-RPC response"
+          },
+          "402": {
+            "description": "Payment required — see body for payTo, mints, amounts (elicit anytime: POST / with header Prefer: x402-probe)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaymentRequired402"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/rh/testnet": {
+      "post": {
+        "operationId": "robinhoodTestnetRpc",
+        "summary": "Robinhood Chain testnet JSON-RPC (chain ID 46630)",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "jsonrpc",
+                  "id",
+                  "method"
+                ],
+                "properties": {
+                  "jsonrpc": {
+                    "type": "string",
+                    "enum": [
+                      "2.0"
+                    ]
+                  },
+                  "id": {
+                    "type": [
+                      "integer",
+                      "string"
+                    ]
+                  },
+                  "method": {
+                    "type": "string"
+                  },
+                  "params": {
+                    "type": "array"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "JSON-RPC response"
+          }
+        }
+      }
+    },
+    "/hl": {
+      "post": {
+        "operationId": "hyperevmRpc",
+        "summary": "HyperEVM JSON-RPC — Hyperliquid L1 EVM (chain ID 999). Use as wallet RPC URL.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "jsonrpc",
+                  "id",
+                  "method"
+                ],
+                "properties": {
+                  "jsonrpc": {
+                    "type": "string",
+                    "enum": [
+                      "2.0"
+                    ]
+                  },
+                  "id": {
+                    "type": [
+                      "integer",
+                      "string"
+                    ]
+                  },
+                  "method": {
+                    "type": "string",
+                    "description": "Any Ethereum JSON-RPC method"
+                  },
+                  "params": {
+                    "type": "array"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "JSON-RPC response"
+          }
+        }
+      }
+    },
+    "/eth": {
+      "post": {
+        "operationId": "ethereumRpc",
+        "summary": "Ethereum Mainnet JSON-RPC — EVM chain ID 1. Use as wallet RPC URL.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "jsonrpc",
+                  "id",
+                  "method"
+                ],
+                "properties": {
+                  "jsonrpc": {
+                    "type": "string",
+                    "enum": [
+                      "2.0"
+                    ]
+                  },
+                  "id": {
+                    "type": [
+                      "integer",
+                      "string"
+                    ]
+                  },
+                  "method": {
+                    "type": "string",
+                    "description": "Any Ethereum JSON-RPC method"
+                  },
+                  "params": {
+                    "type": "array"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "JSON-RPC response"
+          }
+        }
+      }
+    },
+    "/base": {
+      "post": {
+        "operationId": "baseRpc",
+        "summary": "Base Mainnet JSON-RPC — EVM chain ID 8453. Use as wallet RPC URL.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "jsonrpc",
+                  "id",
+                  "method"
+                ],
+                "properties": {
+                  "jsonrpc": {
+                    "type": "string",
+                    "enum": [
+                      "2.0"
+                    ]
+                  },
+                  "id": {
+                    "type": [
+                      "integer",
+                      "string"
+                    ]
+                  },
+                  "method": {
+                    "type": "string",
+                    "description": "Any Ethereum JSON-RPC method"
+                  },
+                  "params": {
+                    "type": "array"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "JSON-RPC response"
+          }
+        }
+      }
+    },
+    "/stable": {
+      "post": {
+        "operationId": "stableRpc",
+        "summary": "Stable Mainnet JSON-RPC — EVM chain ID 988, gas token USDT0. Use as wallet RPC URL.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "jsonrpc",
+                  "id",
+                  "method"
+                ],
+                "properties": {
+                  "jsonrpc": {
+                    "type": "string",
+                    "enum": [
+                      "2.0"
+                    ]
+                  },
+                  "id": {
+                    "type": [
+                      "integer",
+                      "string"
+                    ]
+                  },
+                  "method": {
+                    "type": "string",
+                    "description": "Any Ethereum JSON-RPC method"
+                  },
+                  "params": {
+                    "type": "array"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "JSON-RPC response"
+          }
+        }
+      }
+    },
+    "/plasma": {
+      "post": {
+        "operationId": "plasmaRpc",
+        "summary": "Plasma Mainnet JSON-RPC — EVM chain ID 9745. Use as wallet RPC URL.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "jsonrpc",
+                  "id",
+                  "method"
+                ],
+                "properties": {
+                  "jsonrpc": {
+                    "type": "string",
+                    "enum": [
+                      "2.0"
+                    ]
+                  },
+                  "id": {
+                    "type": [
+                      "integer",
+                      "string"
+                    ]
+                  },
+                  "method": {
+                    "type": "string",
+                    "description": "Any Ethereum JSON-RPC method"
+                  },
+                  "params": {
+                    "type": "array"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "JSON-RPC response"
+          }
+        }
+      }
+    },
+    "/tempo": {
+      "post": {
+        "operationId": "tempoRpc",
+        "summary": "Tempo Mainnet Presto JSON-RPC — EVM chain ID 4217. Use as wallet RPC URL.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "jsonrpc",
+                  "id",
+                  "method"
+                ],
+                "properties": {
+                  "jsonrpc": {
+                    "type": "string",
+                    "enum": [
+                      "2.0"
+                    ]
+                  },
+                  "id": {
+                    "type": [
+                      "integer",
+                      "string"
+                    ]
+                  },
+                  "method": {
+                    "type": "string",
+                    "description": "Any Ethereum JSON-RPC method"
+                  },
+                  "params": {
+                    "type": "array"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "JSON-RPC response"
+          }
+        }
+      }
+    },
+    "/codex": {
+      "post": {
+        "operationId": "codexRpc",
+        "summary": "Codex Mainnet JSON-RPC — EVM chain ID 81224. Use as wallet RPC URL.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "jsonrpc",
+                  "id",
+                  "method"
+                ],
+                "properties": {
+                  "jsonrpc": {
+                    "type": "string",
+                    "enum": [
+                      "2.0"
+                    ]
+                  },
+                  "id": {
+                    "type": [
+                      "integer",
+                      "string"
+                    ]
+                  },
+                  "method": {
+                    "type": "string",
+                    "description": "Any Ethereum JSON-RPC method"
+                  },
+                  "params": {
+                    "type": "array"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "JSON-RPC response"
+          }
+        }
+      }
+    },
+    "/slonana": {
+      "post": {
+        "operationId": "slonanaRpc",
+        "summary": "Slonana JSON-RPC — a separate Solana-compatible SVM network (slonana-core, its own ledger, NOT mainnet). Also selectable via a \"network\":\"slonana\" field on POST /.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "jsonrpc",
+                  "id",
+                  "method"
+                ],
+                "properties": {
+                  "jsonrpc": {
+                    "type": "string",
+                    "enum": [
+                      "2.0"
+                    ]
+                  },
+                  "id": {
+                    "type": [
+                      "integer",
+                      "string"
+                    ]
+                  },
+                  "method": {
+                    "type": "string"
+                  },
+                  "params": {
+                    "type": "array"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "JSON-RPC response"
+          }
+        }
+      }
+    },
+    "/hl/info": {
+      "post": {
+        "operationId": "hyperliquidInfo",
+        "summary": "Hyperliquid Info API — perps/spot order-book data layer (read-only, no auth, free). The 'type' field selects the query.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "type"
+                ],
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "description": "meta | l2Book | allMids | clearinghouseState | metaAndAssetCtxs | spotMeta | candleSnapshot | ..."
+                  },
+                  "coin": {
+                    "type": "string"
+                  },
+                  "user": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Hyperliquid Info response (schema varies by type)"
+          }
+        }
+      }
+    },
+    "/mcp": {
+      "post": {
+        "operationId": "mcpCall",
+        "summary": "MCP server (Streamable HTTP transport)",
+        "description": "32 primary tools. Generic: solana_rpc (any Solana/Slonana method), evm_rpc (any EVM method — Robinhood, HyperEVM, Ethereum, Base, Stable, Plasma, Tempo, Codex), hl_info (Hyperliquid perps/spot order-book data), api_get (any public GET endpoint), mcp_linq (one read-only call with cross-chain fan-out, reducers, JSON pipeline, or LINQ-like fluent method chains such as results.selectMany(...).where(...).groupBy(...).take(...)). Discovery: discover_programs (curated + auto-discovered programs/contracts across all chains + hourly token census where available), describe_program (introspect any address — Solana executable/owner, EVM contract/ERC-20 + Blockscout enrichment where available), search_tokens (query the Robinhood/HyperEVM token+NFT census by symbol/name — holders, market cap, live price), discovery_health (freshness/failures of the discovery cron), reconstruct_abi (rebuild a PARTIAL interface from resolved bytecode selectors + event topics — novel selectors stay unresolved). Typed Solana: solana_getBalance, solana_getAccountInfo, solana_getTokenAccountsByOwner, solana_getTransaction, solana_getLatestBlockhash, solana_getSignaturesForAddress, solana_sendTransaction, solana_getSlot, solana_buildTransfer. AMM: aex402_listPools, aex402_getPool, aex402_quote, aex402_buildSwap. Bridge: bridge_quote (cross-chain bridge/swap via LI.FI/Jumper — any chain incl. Robinhood 4663, returns an unsigned tx), bridge_status. AI: ai_chat, agent_delegate. Call tools/list for input schemas.",
+        "x-payment-info": {
+          "protocols": [
+            "x402"
+          ],
+          "pricingMode": "fixed",
+          "price": "100",
+          "priceUnits": "atomic USDC (6 decimals) — 100 = $0.0001 = 1 credit"
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "jsonrpc",
+                  "id",
+                  "method"
+                ],
+                "properties": {
+                  "jsonrpc": {
+                    "type": "string",
+                    "enum": [
+                      "2.0"
+                    ]
+                  },
+                  "id": {
+                    "type": [
+                      "integer",
+                      "string"
+                    ]
+                  },
+                  "method": {
+                    "type": "string"
+                  },
+                  "params": {
+                    "type": "object"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "MCP JSON-RPC response"
+          },
+          "402": {
+            "description": "Payment required — see body for payTo, mints, amounts (elicit anytime: POST / with header Prefer: x402-probe)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaymentRequired402"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/health": {
+      "get": {
+        "operationId": "getHealth",
+        "summary": "Backend status, pricing, rate limit config (free, no auth)",
+        "responses": {
+          "200": {
+            "description": "Status JSON: service, version, backends, pricing, topupReferrers"
+          }
+        }
+      }
+    },
+    "/credits": {
+      "get": {
+        "operationId": "getCredits",
+        "summary": "Check prepaid credit balance (free, no auth)",
+        "parameters": [
+          {
+            "name": "wallet",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Solana wallet pubkey (base58)"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "{ wallet, remaining, totalPurchased, asset, lastPayment }"
+          }
+        }
+      }
+    },
+    "/topup": {
+      "get": {
+        "operationId": "topupCredits",
+        "summary": "Claim credits from a confirmed Solana payment TX. Alternative to inline PAYMENT-SIGNATURE: send USDC/USDT/SOL to the payTo address from the 402 body, then submit the signature here. Idempotent. Returns X-Session token.",
+        "parameters": [
+          {
+            "name": "sig",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Base58 transaction signature of your payment"
+          },
+          {
+            "name": "ref",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Optional payment source tag (e.g. phantom, cli)"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "{ success, wallet, creditsAllocated, creditsRemaining, asset, session }"
+          },
+          "404": {
+            "description": "TX not confirmed yet — retry after a few seconds"
+          },
+          "409": {
+            "description": "Already credited (idempotent) — returns prior record"
+          }
+        }
+      }
+    },
+    "/v1/api-keys": {
+      "post": {
+        "operationId": "createApiKey",
+        "summary": "Generate API key (Ed25519 wallet-signed request, 5-min timestamp window). Max 5 keys per wallet. Key shown once.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApiKeyCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Created key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiKeyResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Bad signature or stale timestamp"
+          }
+        }
+      },
+      "get": {
+        "operationId": "listApiKeys",
+        "summary": "List key prefixes for a wallet (read-only)",
+        "parameters": [
+          {
+            "name": "wallet",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "{ wallet, count, max, keys: [{ prefix, label, created }] }"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "revokeApiKey",
+        "summary": "Revoke an API key",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "key"
+                ],
+                "properties": {
+                  "key": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Revoked"
+          }
+        }
+      }
+    },
+    "/v1/models": {
+      "get": {
+        "operationId": "listModels",
+        "summary": "Available AI models (OpenAI-compatible list)",
+        "responses": {
+          "200": {
+            "description": "Model list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Model"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/.well-known/x402": {
+      "get": {
+        "operationId": "x402Discovery",
+        "summary": "x402 discovery manifest — paymentRequirements field carries payTo, accepted mints, and atomic amounts (zero-quota payment discovery)",
+        "responses": {
+          "200": {
+            "description": "x402 resources + accepted assets"
+          }
+        }
+      }
+    },
+    "/agents": {
+      "post": {
+        "operationId": "spawnAgent",
+        "summary": "Spawn a new autonomous trading agent (backed by a Durable Object with its own burner wallet). Requires a verified session (X-Session) or API key — a raw X-Wallet is rejected. Max 20 agents per owner.",
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "SessionHeader": []
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "config": {
+                    "type": "object",
+                    "description": "Agent strategy/config (opaque; stored in the agent DO)"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Agent created — returns the agent record plus its agentId",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "agentId": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authenticated session required (X-Session token or Authorization: Bearer sk-aex-v1-*)"
+          },
+          "429": {
+            "description": "Agent limit reached (20 per owner)"
+          },
+          "503": {
+            "description": "Trading agents not available on this deployment"
+          }
+        }
+      },
+      "get": {
+        "operationId": "listAgents",
+        "summary": "List this owner's trading agents with live status. Owner resolved from the verified session/API key.",
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "SessionHeader": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "{ ok, agents: [...] }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "agents": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authenticated session required"
+          }
+        }
+      }
+    },
+    "/agents/{id}/execute": {
+      "post": {
+        "operationId": "executeAgentTrade",
+        "summary": "PAID: run a real pump.fun trade on the agent's burner wallet. Charges a flat 100 credits (~$0.01) ONLY on a fresh confirmed on-chain fill — idempotent replays and unconfirmed/failed trades are never charged. Per-trade capped at 0.02 SOL. Live-gated (deployment must have AGENTS_LIVE_ENABLED).",
+        "x-payment-info": {
+          "protocols": [
+            "prepaid-credits"
+          ],
+          "pricingMode": "fixed",
+          "price": "100",
+          "priceUnits": "credits (1 credit = $0.0001) — charged only on a confirmed fill"
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "SessionHeader": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Agent ID (from POST /agents / GET /agents)"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgentExecuteRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Trade result. On a fresh confirmed fill: { ok:true, side, mint, sig, replayed:false, feeCredits:100, remaining }. On idempotent replay: original result with feeCredits:0. On no-confirm: { ok:false, feeCredits:0, note }.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentExecuteResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authenticated session required (X-Session token or Authorization: Bearer sk-aex-v1-*)"
+          },
+          "402": {
+            "description": "Insufficient credits — { ok:false, error:\"insufficient credits\", required:100, remaining }"
+          },
+          "403": {
+            "description": "Live execution disabled on this deployment (AGENTS_LIVE_ENABLED not set)"
+          },
+          "404": {
+            "description": "Agent not found for this owner"
+          }
+        }
+      }
+    },
+    "/agents/{id}/testbuy": {
+      "post": {
+        "operationId": "agentTestBuy",
+        "summary": "Force ONE deterministic buy on the agent's burner wallet to verify pump execution end-to-end. Free — no credit charge. Still live-gated (AGENTS_LIVE_ENABLED).",
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "SessionHeader": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Agent ID"
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "mint": {
+                    "type": "string",
+                    "description": "Optional token mint to buy; omit for the agent default"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Trade result from the agent DO ({ ok, sig, ... })"
+          },
+          "401": {
+            "description": "Authenticated session required"
+          },
+          "404": {
+            "description": "Agent not found for this owner"
+          }
+        }
+      }
+    },
+    "/llms.txt": {
+      "get": {
+        "operationId": "llmsTxt",
+        "summary": "Full plain-text API reference for LLMs/agents — the most complete documentation surface",
+        "responses": {
+          "200": {
+            "description": "text/plain reference"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "BearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "API key (sk-aex-v1-...). Recommended for programmatic access. Create via POST /v1/api-keys."
+      },
+      "ApiKeyQuery": {
+        "type": "apiKey",
+        "in": "query",
+        "name": "key",
+        "description": "Same API key (sk-aex-v1-...) passed in the URL query (?key=...) instead of the Authorization header — for header-less tooling (forge, hardhat, MetaMask, web3.js). Identical effect to BearerAuth; draws from prepaid credits, not the free rate limit. A ?session=ses-... query is likewise accepted in place of X-Session."
+      },
+      "SessionHeader": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-Session",
+        "description": "HMAC session token (ses-...). Issued in the X-Session response header after x402 settlement (PAYMENT-SIGNATURE) or GET /topup?sig=. Proves wallet ownership. 24h sliding TTL — every credit-spending response returns a refreshed token."
+      },
+      "WalletHeader": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-Wallet",
+        "description": "Solana wallet pubkey. READ-ONLY without session/key (balance check only)."
+      },
+      "PaymentSignature": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "PAYMENT-SIGNATURE",
+        "description": "Inline x402 settlement: base64-encoded signed Solana transfer transaction paying >= the amount from the 402 body (paidTier.accepts[]) to paidTier.payTo. The worker verifies (3-6 instructions, CU limit <= 5000, recipient must match payTo), co-signs as fee payer, simulates, submits, and allocates credits — the payer never spends gas. Success returns PAYMENT-RESPONSE + X-Session + X-Credits-Remaining headers."
+      }
+    },
+    "schemas": {
+      "PaymentRequired402": {
+        "type": "object",
+        "description": "Body of every HTTP 402 response. Contains everything needed to construct payment. Elicit without burning quota: POST / with body {}.",
+        "properties": {
+          "jsonrpc": {
+            "type": "string"
+          },
+          "error": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "integer",
+                "description": "-32099 = rate limited / payment required"
+              },
+              "message": {
+                "type": "string"
+              }
+            }
+          },
+          "freeTier": {
+            "type": "object",
+            "properties": {
+              "limit": {
+                "type": "string",
+                "description": "e.g. \"10 req/min\""
+              },
+              "resetAt": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "retryAfterMs": {
+                "type": "integer"
+              }
+            }
+          },
+          "paidTier": {
+            "type": "object",
+            "properties": {
+              "pricePerCall": {
+                "type": "string",
+                "description": "\"$0.0001 USD\" — 1 credit per RPC/MCP call"
+              },
+              "minimumPayment": {
+                "type": "string",
+                "description": "\"$0.01 USD (buys 100 calls)\""
+              },
+              "accepts": {
+                "type": "array",
+                "description": "Accepted assets with exact atomic amounts",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "name": {
+                      "type": "string",
+                      "description": "USDC | USDT | SOL"
+                    },
+                    "mint": {
+                      "type": "string",
+                      "description": "SPL mint address (base58); SOL uses the wrapped SOL mint sentinel"
+                    },
+                    "amount": {
+                      "type": "string",
+                      "description": "Minimum payment in atomic units of this asset (USDC/USDT: 6 decimals, SOL: 9/lamports)"
+                    },
+                    "decimals": {
+                      "type": "integer"
+                    },
+                    "creditsPerPayment": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              },
+              "howToPay": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Step-by-step payment instructions"
+              },
+              "payTo": {
+                "type": "string",
+                "description": "Merchant recipient address — the transfer destination"
+              },
+              "feePayer": {
+                "type": "string",
+                "description": "Facilitator fee-payer address (must NOT appear in your instruction accounts)"
+              },
+              "facilitator": {
+                "type": "string",
+                "description": "External facilitator base URL (alternative to inline PAYMENT-SIGNATURE)"
+              }
+            }
+          },
+          "docs": {
+            "type": "string"
+          },
+          "quickstart": {
+            "type": "object",
+            "description": "Copy-paste onboarding steps incl. /topup and API key flow"
+          }
+        }
+      },
+      "ChatRequest": {
+        "type": "object",
+        "required": [
+          "messages"
+        ],
+        "properties": {
+          "model": {
+            "type": "string",
+            "default": "auto",
+            "description": "Model ID or alias"
+          },
+          "messages": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "role": {
+                  "type": "string",
+                  "enum": [
+                    "system",
+                    "user",
+                    "assistant"
+                  ]
+                },
+                "content": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "role",
+                "content"
+              ]
+            }
+          },
+          "max_tokens": {
+            "type": "integer",
+            "default": 1024
+          },
+          "temperature": {
+            "type": "number",
+            "default": 0.7
+          },
+          "stream": {
+            "type": "boolean",
+            "default": false
+          },
+          "tools": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            },
+            "description": "OpenAI function-calling tools"
+          }
+        }
+      },
+      "ChatResponse": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "object": {
+            "type": "string",
+            "enum": [
+              "chat.completion"
+            ]
+          },
+          "choices": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "index": {
+                  "type": "integer"
+                },
+                "message": {
+                  "type": "object",
+                  "properties": {
+                    "role": {
+                      "type": "string"
+                    },
+                    "content": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "finish_reason": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "usage": {
+            "type": "object",
+            "properties": {
+              "prompt_tokens": {
+                "type": "integer"
+              },
+              "completion_tokens": {
+                "type": "integer"
+              },
+              "total_tokens": {
+                "type": "integer"
+              }
+            }
+          }
+        }
+      },
+      "Model": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "object": {
+            "type": "string",
+            "enum": [
+              "model"
+            ]
+          },
+          "created": {
+            "type": "integer"
+          },
+          "owned_by": {
+            "type": "string"
+          }
+        }
+      },
+      "ApiKeyCreate": {
+        "type": "object",
+        "required": [
+          "wallet",
+          "signature",
+          "message"
+        ],
+        "properties": {
+          "wallet": {
+            "type": "string",
+            "description": "Solana wallet pubkey (base58)"
+          },
+          "signature": {
+            "type": "string",
+            "description": "Hex-encoded 64-byte Ed25519 signature"
+          },
+          "message": {
+            "type": "string",
+            "description": "Signed message: \"Sign to generate API key for rpc.aex402.com\\nTimestamp: <unix>\\nWallet: <pubkey>\""
+          },
+          "label": {
+            "type": "string",
+            "description": "Optional key label",
+            "default": "default"
+          }
+        }
+      },
+      "ApiKeyResponse": {
+        "type": "object",
+        "properties": {
+          "key": {
+            "type": "string",
+            "description": "Full API key (shown once)"
+          },
+          "prefix": {
+            "type": "string"
+          },
+          "wallet": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "created": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "AgentExecuteRequest": {
+        "type": "object",
+        "required": [
+          "side",
+          "mint"
+        ],
+        "properties": {
+          "side": {
+            "type": "string",
+            "enum": [
+              "buy",
+              "sell"
+            ],
+            "description": "Trade direction"
+          },
+          "mint": {
+            "type": "string",
+            "description": "pump.fun token mint (base58)"
+          },
+          "solAmount": {
+            "type": "number",
+            "description": "SOL to spend (buy) / notional (sell). Per-trade capped at 0.02 SOL; omit for the agent default."
+          },
+          "idempotencyKey": {
+            "type": "string",
+            "description": "Optional client-supplied key. A repeat call with the same key returns the original result WITHOUT re-executing or re-charging (replayed:true)."
+          }
+        }
+      },
+      "AgentExecuteResponse": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "description": "true when the trade confirmed on-chain"
+          },
+          "side": {
+            "type": "string",
+            "enum": [
+              "buy",
+              "sell"
+            ]
+          },
+          "mint": {
+            "type": "string"
+          },
+          "sig": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Confirmed transaction signature (base58), or null if it did not confirm"
+          },
+          "replayed": {
+            "type": "boolean",
+            "description": "true if this was an idempotent replay (original fee already charged)"
+          },
+          "feeCredits": {
+            "type": "integer",
+            "description": "100 on a fresh confirmed fill; 0 on replay or no-confirm"
+          },
+          "remaining": {
+            "type": "integer",
+            "description": "Owner credit balance after the debit (present only when a fee was charged)"
+          },
+          "note": {
+            "type": "string",
+            "description": "Explanation when feeCredits is 0 (replay vs. no-confirm)"
+          }
+        }
+      }
+    }
+  },
+  "security": [
+    {
+      "BearerAuth": []
+    },
+    {
+      "SessionHeader": []
+    },
+    {
+      "WalletHeader": []
+    }
+  ],
+  "x-mcp-endpoint": "https://rpc.aex402.com/mcp",
+  "x-mcp-tool-count": 33,
+  "x-mcp-tools": [
+    {
+      "name": "solana_getBalance",
+      "category": "solana",
+      "description": "Get SOL balance for a wallet address (in lamports). Divide by 1e9 for SOL.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "address": {
+            "type": "string",
+            "description": "Solana wallet address (base58)"
+          }
+        },
+        "required": [
+          "address"
+        ]
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "context": {
+            "type": "object",
+            "properties": {
+              "slot": {
+                "type": "integer",
+                "description": "slot the value was read at"
+              }
+            }
+          },
+          "value": {
+            "type": "integer",
+            "description": "balance in lamports (1e9 = 1 SOL)"
+          }
+        },
+        "required": [
+          "context",
+          "value"
+        ]
+      }
+    },
+    {
+      "name": "solana_getAccountInfo",
+      "category": "solana",
+      "description": "Get raw account info (owner, lamports, data) for any Solana address.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "address": {
+            "type": "string",
+            "description": "Account address (base58)"
+          },
+          "encoding": {
+            "type": "string",
+            "description": "Data encoding: base64 (default) or jsonParsed",
+            "default": "base64"
+          }
+        },
+        "required": [
+          "address"
+        ]
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "context": {
+            "type": "object",
+            "properties": {
+              "slot": {
+                "type": "integer",
+                "description": "slot the value was read at"
+              }
+            }
+          },
+          "value": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "account (lamports, owner, data, executable, rentEpoch) or null if it does not exist"
+          }
+        },
+        "required": [
+          "context"
+        ]
+      }
+    },
+    {
+      "name": "solana_getTokenAccountsByOwner",
+      "category": "solana",
+      "description": "Get all SPL token accounts owned by a wallet. Returns mint, balance, decimals for each token.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "owner": {
+            "type": "string",
+            "description": "Wallet address (base58)"
+          }
+        },
+        "required": [
+          "owner"
+        ]
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "context": {
+            "type": "object",
+            "properties": {
+              "slot": {
+                "type": "integer",
+                "description": "slot the value was read at"
+              }
+            }
+          },
+          "value": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "pubkey": {
+                  "type": "string",
+                  "description": "token account address"
+                },
+                "account": {
+                  "type": "object",
+                  "description": "parsed SPL account (mint, owner, tokenAmount)"
+                }
+              }
+            }
+          }
+        },
+        "required": [
+          "context",
+          "value"
+        ]
+      }
+    },
+    {
+      "name": "solana_getTransaction",
+      "category": "solana",
+      "description": "Get full transaction details by signature, including instructions, logs, and status.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "signature": {
+            "type": "string",
+            "description": "Transaction signature (base58)"
+          }
+        },
+        "required": [
+          "signature"
+        ]
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "slot": {
+            "type": "integer"
+          },
+          "blockTime": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "unix seconds"
+          },
+          "transaction": {
+            "type": "object",
+            "description": "message + signatures"
+          },
+          "meta": {
+            "type": "object",
+            "description": "fee, pre/post balances, logs, err"
+          }
+        }
+      }
+    },
+    {
+      "name": "solana_getLatestBlockhash",
+      "category": "solana",
+      "description": "Get latest blockhash for transaction building. Returns blockhash + lastValidBlockHeight.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "context": {
+            "type": "object",
+            "properties": {
+              "slot": {
+                "type": "integer",
+                "description": "slot the value was read at"
+              }
+            }
+          },
+          "value": {
+            "type": "object",
+            "properties": {
+              "blockhash": {
+                "type": "string",
+                "description": "base58"
+              },
+              "lastValidBlockHeight": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "blockhash",
+              "lastValidBlockHeight"
+            ]
+          }
+        },
+        "required": [
+          "context",
+          "value"
+        ]
+      }
+    },
+    {
+      "name": "solana_getSignaturesForAddress",
+      "category": "solana",
+      "description": "Get recent transaction signatures for an address. Returns up to 20 most recent.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "address": {
+            "type": "string",
+            "description": "Account address (base58)"
+          },
+          "limit": {
+            "type": "number",
+            "description": "Max signatures to return (default 20, max 1000)",
+            "default": 20
+          }
+        },
+        "required": [
+          "address"
+        ]
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "result": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "signature": {
+                  "type": "string",
+                  "description": "base58 tx signature"
+                },
+                "slot": {
+                  "type": "integer"
+                },
+                "err": {
+                  "type": [
+                    "object",
+                    "null"
+                  ]
+                },
+                "blockTime": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                },
+                "confirmationStatus": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "description": "array of recent signature records, newest first"
+      }
+    },
+    {
+      "name": "solana_sendTransaction",
+      "category": "solana",
+      "description": "Submit a signed transaction to the network. Returns transaction signature.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "transaction": {
+            "type": "string",
+            "description": "Base64-encoded signed transaction"
+          }
+        },
+        "required": [
+          "transaction"
+        ]
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "result": {
+            "type": "string",
+            "description": "base58 transaction signature"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "description": "signature of the submitted transaction"
+      }
+    },
+    {
+      "name": "solana_getSlot",
+      "category": "solana",
+      "description": "Get the current slot number.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "result": {
+            "type": "integer",
+            "description": "current slot"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "description": "current slot number"
+      }
+    },
+    {
+      "name": "aex402_listPools",
+      "category": "amm",
+      "description": "List all AeX402 AMM pools on Solana. Returns pool addresses with basic info (mints, balances, fee, amp). Pools are 1024-byte accounts owned by program 3AMM53MsJZy2Jvf7PeHHga3bsGjWV4TSaYz29WUtcdje.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "minTvl": {
+            "type": "number",
+            "description": "Minimum TVL in lamports to filter (default 0)",
+            "default": 0
+          }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "count": {
+            "type": "integer"
+          },
+          "pools": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "description": "pool summary: address, mints, balances, tvl, feeBps, amp"
+            }
+          }
+        },
+        "required": [
+          "count",
+          "pools"
+        ]
+      }
+    },
+    {
+      "name": "aex402_getPool",
+      "category": "amm",
+      "description": "Get detailed AeX402 pool info: token mints, balances, fee, amplification, LP supply, analytics (OHLCV candles), circuit breaker status.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "address": {
+            "type": "string",
+            "description": "Pool account address (base58)"
+          }
+        },
+        "required": [
+          "address"
+        ]
+      },
+      "outputSchema": {
+        "type": "object",
+        "description": "full pool state",
+        "properties": {
+          "address": {
+            "type": "string"
+          },
+          "authority": {
+            "type": "string"
+          },
+          "token0Mint": {
+            "type": "string"
+          },
+          "token1Mint": {
+            "type": "string"
+          },
+          "vault0": {
+            "type": "string"
+          },
+          "vault1": {
+            "type": "string"
+          },
+          "lpMint": {
+            "type": "string"
+          },
+          "amp": {
+            "type": "string",
+            "description": "u64 as string"
+          },
+          "feeBps": {
+            "type": "string",
+            "description": "basis points as string"
+          },
+          "balance0": {
+            "type": "string",
+            "description": "u64 as string"
+          },
+          "balance1": {
+            "type": "string",
+            "description": "u64 as string"
+          },
+          "lpSupply": {
+            "type": "string",
+            "description": "u64 as string"
+          },
+          "paused": {
+            "type": "boolean"
+          },
+          "analytics": {
+            "type": "object",
+            "description": "OHLCV candles + trade stats"
+          }
+        },
+        "required": [
+          "address"
+        ]
+      }
+    },
+    {
+      "name": "aex402_quote",
+      "category": "amm",
+      "description": "Get a swap quote from an AeX402 pool. Calculates expected output, price impact, and fees without executing.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "pool": {
+            "type": "string",
+            "description": "Pool account address (base58)"
+          },
+          "inputMint": {
+            "type": "string",
+            "description": "Input token mint address"
+          },
+          "amount": {
+            "type": "number",
+            "description": "Input amount in atomic units (lamports/smallest unit)"
+          }
+        },
+        "required": [
+          "pool",
+          "inputMint",
+          "amount"
+        ]
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "inputMint": {
+            "type": "string"
+          },
+          "inputAmount": {
+            "type": "string",
+            "description": "u64 as string"
+          },
+          "outputMint": {
+            "type": "string"
+          },
+          "estimatedOutput": {
+            "type": "string",
+            "description": "u64 as string"
+          },
+          "feeBps": {
+            "type": "integer"
+          },
+          "priceImpactPct": {
+            "type": "string",
+            "description": "percent, 4 decimals"
+          },
+          "note": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "inputMint",
+          "inputAmount",
+          "outputMint",
+          "estimatedOutput"
+        ]
+      }
+    },
+    {
+      "name": "aex402_rh_pool",
+      "category": "amm",
+      "description": "Get the live state of the aeX402 AMM on Robinhood Chain (EVM 4663) — the diamond-contract port of the Solana AMM. The AMM is the set of GRADUATED launchpad coins whose pools are seeded in-diamond on the canonical launchpad (0xED2F); this enumerates them live by scanning VPoolGraduated events + reading each pool's reserves, so it tracks reality as coins graduate. Returns graduatedPools[] (poolId, token, reserves, TVL), graduatedPoolCount, and status (\"live\" | \"no-graduated-pools\" | \"unknown\"), plus the legacy standalone 0xA1F6 USDG/WETH pool (legacy-drained). Distinct from the chain's Uniswap-fork DEX. No inputs.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      },
+      "outputSchema": null
+    },
+    {
+      "name": "launch_token",
+      "category": "data",
+      "description": "Launch a memecoin on the aeX402 launchpad on Robinhood Chain (EVM 4663) for a FIXED pump.fun-style bonding curve (1B supply, starts 0.0001 USDG, graduates at 10,000 USDG raised, quoted in USDG). You supply only identity — name + ticker (+ optional description/image/links). DEFAULT (custodial): the aeX402 backend SIGNS + SUBMITS the createVPool tx for you, so a claude.ai user with NO WALLET can launch in one call; returns {ok,status,txHash,vpId}. Optionally pass `creator` (a 0x address) to record as the coin owner. Pass build:true instead to get an UNSIGNED tx {to,value,data} to submit yourself (non-custodial — that requires `creator` and makes you the on-chain creator). A custodial call SIMULATES first, so a failure burns no gas: status \"gated\" means createVPool reverts in simulation (cause not determined — likeliest are the ticker still being claimed by a bonding coin or this vpId being taken; see `detail`/`revertData`), and status \"unreachable\" means the chain could not be reached, which is retryable. The launchpad is NOT chain-gated: createVPool simulates clean from an arbitrary sender (measured 2026-09-25).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Token name, 1..32 bytes (e.g. \"Fork Meme\")"
+          },
+          "ticker": {
+            "type": "string",
+            "description": "Ticker / symbol, 1..16 bytes (e.g. \"FMEME\")"
+          },
+          "creator": {
+            "type": "string",
+            "description": "OPTIONAL 0x EVM address recorded as the coin owner (and seeds the vpId). REQUIRED only when build:true (then it is the self-signing on-chain creator)."
+          },
+          "description": {
+            "type": "string",
+            "description": "Short description (<=256 chars) — off-chain metadata"
+          },
+          "image": {
+            "type": "string",
+            "description": "Image URL (https:// or ipfs:// only) — off-chain metadata"
+          },
+          "links": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Up to 3 links (https:// or ipfs:// only) — off-chain metadata"
+          },
+          "pad": {
+            "type": "string",
+            "description": "OPTIONAL aeX402 launchpad slug the coin is launched on. Its vpId then starts with that pad's tag, so the pad lists it. Applies on BOTH the custodial (default) and build:true paths"
+          },
+          "build": {
+            "type": "boolean",
+            "description": "If true, return an UNSIGNED tx to submit yourself (non-custodial) instead of the backend launching for you. Default false."
+          }
+        },
+        "required": [
+          "name",
+          "ticker"
+        ]
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "description": "Custodial mode: whether the launch was submitted"
+          },
+          "status": {
+            "type": "string",
+            "description": "submitted | gated | custodial-disabled | exists | rate-limited | insufficient-gas | submit-failed"
+          },
+          "txHash": {
+            "type": "string",
+            "description": "Custodial mode: the createVPool tx hash"
+          },
+          "vpId": {
+            "type": "string",
+            "description": "Deterministic keccak256(creator-or-launcher ++ name ++ ticker)"
+          },
+          "to": {
+            "type": "string",
+            "description": "build mode: aeX402 diamond address"
+          },
+          "data": {
+            "type": "string",
+            "description": "build mode: createVPool calldata to submit"
+          },
+          "metadata": {
+            "type": "object",
+            "description": "Off-chain metadata (stored server-side in custodial mode)"
+          },
+          "note": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "name": "solana_buildTransfer",
+      "category": "solana",
+      "description": "Build a SOL or SPL token transfer instruction. Returns instruction JSON (programId, keys, data) for client-side TX construction and signing.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "from": {
+            "type": "string",
+            "description": "Sender wallet address (base58)"
+          },
+          "to": {
+            "type": "string",
+            "description": "Recipient address (base58)"
+          },
+          "amount": {
+            "type": "number",
+            "description": "Amount in atomic units (lamports for SOL, smallest unit for SPL)"
+          },
+          "mint": {
+            "type": "string",
+            "description": "SPL token mint address. Omit for native SOL transfer."
+          }
+        },
+        "required": [
+          "from",
+          "to",
+          "amount"
+        ]
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "description": "'transfer_sol' or 'transfer_spl'"
+          },
+          "instruction": {
+            "type": "object",
+            "properties": {
+              "programId": {
+                "type": "string"
+              },
+              "keys": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "description": "pubkey/isSigner/isWritable"
+                }
+              },
+              "data": {
+                "type": "string",
+                "description": "base64 instruction data"
+              }
+            },
+            "required": [
+              "programId",
+              "keys",
+              "data"
+            ]
+          },
+          "summary": {
+            "type": "string",
+            "description": "human-readable description of the transfer being built"
+          }
+        },
+        "required": [
+          "action",
+          "instruction"
+        ]
+      }
+    },
+    {
+      "name": "aex402_buildSwap",
+      "category": "amm",
+      "description": "Build an AeX402 AMM swap action. Fetches live pool state, computes output with slippage protection, returns all instruction parameters and account addresses for client signing.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "pool": {
+            "type": "string",
+            "description": "Pool account address (base58)"
+          },
+          "inputMint": {
+            "type": "string",
+            "description": "Input token mint address"
+          },
+          "amount": {
+            "type": "number",
+            "description": "Input amount in atomic units"
+          },
+          "slippageBps": {
+            "type": "number",
+            "description": "Max slippage in basis points (default 50 = 0.5%)"
+          },
+          "userWallet": {
+            "type": "string",
+            "description": "User wallet address (for account derivation)"
+          }
+        },
+        "required": [
+          "pool",
+          "inputMint",
+          "amount",
+          "userWallet"
+        ]
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "description": "'aex402_swap'"
+          },
+          "quote": {
+            "type": "object",
+            "description": "estimatedOutput, minOutput, priceImpact"
+          },
+          "instruction": {
+            "type": "object",
+            "description": "programId, keys, data (base64) — sign & submit client-side"
+          }
+        },
+        "required": [
+          "action",
+          "instruction"
+        ]
+      }
+    },
+    {
+      "name": "agent_delegate",
+      "category": "ai",
+      "description": "Delegate a task to an independent specialist AI agent session. The delegate runs with full tool access and returns its response. Useful for breaking complex tasks into subtasks. Max depth: 3.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "session": {
+            "type": "string",
+            "description": "Existing session ID to resume, or omit to create new session"
+          },
+          "role": {
+            "type": "string",
+            "description": "Role for new agent (e.g. \"Solana pool analyst\", \"route optimizer\"). Ignored if resuming session."
+          },
+          "message": {
+            "type": "string",
+            "description": "Task or question for the delegate agent"
+          },
+          "model": {
+            "type": "string",
+            "description": "Model ID or alias (default: gpt-4o-mini)"
+          }
+        },
+        "required": [
+          "message"
+        ]
+      },
+      "outputSchema": {
+        "type": "object",
+        "description": "delegate agent response (session, reply text, usage)"
+      }
+    },
+    {
+      "name": "ai_chat",
+      "category": "ai",
+      "description": "Send a chat completion request to the aeX402 AI Router. Free tier: 3 calls/day. Paid: deducts credits based on token usage.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "model": {
+            "type": "string",
+            "description": "Model ID or alias: gpt-4o-mini (default), gpt-4o, claude-sonnet, claude-haiku, llama-70b, llama-8b, gemini-flash"
+          },
+          "messages": {
+            "type": "array",
+            "description": "Chat messages array [{role: \"user\"|\"system\"|\"assistant\", content: \"...\"}]",
+            "items": {
+              "type": "object",
+              "properties": {
+                "role": {
+                  "type": "string",
+                  "description": "Message role: system, user, or assistant"
+                },
+                "content": {
+                  "type": "string",
+                  "description": "Message content"
+                }
+              },
+              "required": [
+                "role",
+                "content"
+              ]
+            }
+          },
+          "max_tokens": {
+            "type": "number",
+            "description": "Maximum tokens to generate (model-dependent default)"
+          },
+          "temperature": {
+            "type": "number",
+            "description": "Sampling temperature (0-2)"
+          },
+          "reasoning_effort": {
+            "type": "string",
+            "description": "low | medium | high — ask a reasoning-capable model to think harder. The chain-of-thought comes back in the tool result _meta (\"com.aex402/reasoning\")."
+          }
+        },
+        "required": [
+          "messages"
+        ]
+      },
+      "outputSchema": {
+        "type": "object",
+        "description": "OpenAI-compatible chat completion",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "object": {
+            "type": "string",
+            "description": "always 'chat.completion'"
+          },
+          "created": {
+            "type": "integer",
+            "description": "unix seconds"
+          },
+          "model": {
+            "type": "string"
+          },
+          "choices": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "message": {
+                  "type": "object",
+                  "description": "role + content"
+                },
+                "finish_reason": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "usage": {
+            "type": "object",
+            "description": "prompt/completion/total tokens"
+          }
+        },
+        "required": [
+          "choices"
+        ]
+      }
+    },
+    {
+      "name": "solana_rpc",
+      "category": "solana",
+      "description": "Call ANY Solana-compatible JSON-RPC method by name — full RPC surface beyond the typed solana_* tools (getProgramAccounts, getBlock, getEpochInfo, simulateTransaction, ...). Defaults to Solana mainnet; pass network:slonana to query Slonana (rpc.slonana.com), which additionally exposes RPC methods no other network has: getAlpenglowHealth (consensus migration status), getBridgeStatus, getAexchanRelays, getValidatorStats, quote. (listSvmNetworks/enableSvmNetwork/disableSvmNetwork/setNetworkRpcUrl also exist but are inert API-compat stubs — listSvmNetworks always reports one hardcoded network and the enable/disable/set calls ignore their arguments and return true; verified in source, not live network-management controls.) For tools that exist ONLY on Slonana's MCP server with no RPC-method equivalent (the aea_* agent registry), use mcp_call instead.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "method": {
+            "type": "string",
+            "description": "Solana RPC method name, e.g. getEpochInfo"
+          },
+          "params": {
+            "type": "array",
+            "description": "Positional params array (method-specific). Omit for no params."
+          },
+          "network": {
+            "type": "string",
+            "description": "solana (default/mainnet-beta) or slonana",
+            "default": "solana"
+          }
+        },
+        "required": [
+          "method"
+        ]
+      },
+      "outputSchema": null
+    },
+    {
+      "name": "mcp_call",
+      "category": "workflow",
+      "description": "Call a tool on another MCP server this RPC federates with, for tools that have no equivalent in solana_rpc/evm_rpc (no underlying JSON-RPC method — e.g. Slonana's aea_list_services/aea_resolve agent registry). Known servers: slonana. Call that server's tools/list first if you don't know its tool names.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "server": {
+            "type": "string",
+            "description": "Federated server name. One of: slonana"
+          },
+          "tool": {
+            "type": "string",
+            "description": "Tool name on that server, e.g. aea_list_services. Omit both tool and arguments to list that server's tools instead."
+          },
+          "arguments": {
+            "type": "object",
+            "description": "Arguments for the tool call, per that server's own schema."
+          }
+        },
+        "required": [
+          "server"
+        ]
+      },
+      "outputSchema": null
+    },
+    {
+      "name": "evm_rpc",
+      "category": "evm",
+      "description": "Call ANY EVM JSON-RPC method on a supported chain — eth_getBalance, eth_call, eth_blockNumber, eth_sendRawTransaction, eth_getLogs, ... Chains: robinhood (4663) / robinhood-testnet (46630), hyperevm (999), ethereum (1), base (8453), stable (988), plasma (9745), tempo (4217), codex (81224), arc (5042, Circle mainnet).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "method": {
+            "type": "string",
+            "description": "EVM RPC method name, e.g. eth_getBalance"
+          },
+          "params": {
+            "type": "array",
+            "description": "Positional params array (method-specific). Omit for no params."
+          },
+          "network": {
+            "type": "string",
+            "description": "Chain slug: robinhood (default; legacy mainnet alias accepted), robinhood-testnet, hyperevm, ethereum/eth, base, stable/tether, plasma, tempo, codex, or arc (Circle mainnet)",
+            "default": "robinhood"
+          }
+        },
+        "required": [
+          "method"
+        ]
+      },
+      "outputSchema": null
+    },
+    {
+      "name": "mcp_linq",
+      "category": "workflow",
+      "description": "Primary LINQ-style MCP workflow tool. Run one bounded MCP call: fan out up to 32 READ-ONLY tool calls across chains, then compose the combined result with fluent chains like results.selectMany(...).where(...).groupBy(...).orderByDesc(...).take(...), JSON pipeline steps, or reducers. Use mcp_linq when you want one aggregate answer instead of N tool calls.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "calls": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 32,
+            "description": "Read-only MCP tool calls to run. Each call has {id?, tool, args?, pick?}. pick is a dot path into that call output; [] flattens arrays.",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "description": "Stable label for this subcall; defaults to tool:index."
+                },
+                "tool": {
+                  "type": "string",
+                  "description": "Read-only tool name, e.g. evm_rpc, solana_rpc, discover_programs, search_tokens, hl_info."
+                },
+                "args": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "description": "Arguments for the subcall."
+                },
+                "pick": {
+                  "type": "string",
+                  "description": "Optional dot path to return from this subcall, e.g. count or programs[].activity."
+                }
+              },
+              "required": [
+                "tool"
+              ]
+            }
+          },
+          "reduce": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "object",
+              "properties": {
+                "op": {
+                  "type": "string",
+                  "enum": [
+                    "count",
+                    "sum",
+                    "avg",
+                    "min",
+                    "max",
+                    "top",
+                    "groupCount",
+                    "groupSum",
+                    "groupAvg",
+                    "concat",
+                    "first"
+                  ]
+                },
+                "path": {
+                  "type": "string",
+                  "description": "Dot path into the batch result, e.g. results[].picked or results[].output.programs[].activity."
+                },
+                "by": {
+                  "type": "string",
+                  "description": "For group* reducers: dot path inside each selected item used as the group key."
+                },
+                "value": {
+                  "type": "string",
+                  "description": "For groupSum/groupAvg: numeric path inside each selected item. Defaults to the item itself."
+                },
+                "sortBy": {
+                  "type": "string",
+                  "description": "For top: numeric/string path inside each selected item used for ordering."
+                },
+                "limit": {
+                  "type": "number",
+                  "description": "Max rows returned by top/concat/group reducers (default 10, max 100)."
+                }
+              },
+              "required": [
+                "op"
+              ]
+            },
+            "description": "Named reductions to compute from subcall outputs. Example: {\"total\":{\"op\":\"sum\",\"path\":\"results[].picked\"},\"top\":{\"op\":\"top\",\"path\":\"results[]\",\"sortBy\":\"picked\",\"limit\":5}}."
+          },
+          "pipeline": {
+            "type": "array",
+            "maxItems": 64,
+            "description": "LINQ-style chained transforms over the raw batch result. Each step feeds the next. Ops: from, expand, where, select/project, groupBy, orderBy/sort, take/limit, skip, distinct, count, sum, avg, min, max, first, top. Example: [{\"op\":\"from\",\"path\":\"results[]\"},{\"op\":\"expand\",\"path\":\"output.programs[]\"},{\"op\":\"where\",\"path\":\"type\",\"in\":[\"token\",\"canonical-token\"]},{\"op\":\"groupBy\",\"by\":\"_chain\",\"as\":\"chain\",\"aggregates\":{\"tokens\":{\"op\":\"count\"},\"activity\":{\"op\":\"sum\",\"path\":\"activity\"}}},{\"op\":\"orderBy\",\"path\":\"tokens\",\"dir\":\"desc\"},{\"op\":\"take\",\"count\":5}].",
+            "items": {
+              "type": "object",
+              "additionalProperties": true,
+              "properties": {
+                "op": {
+                  "type": "string",
+                  "description": "from | expand | where | select | project | groupBy | orderBy | sort | take | limit | skip | distinct | count | sum | avg | min | max | first | top"
+                },
+                "path": {
+                  "type": "string",
+                  "description": "Dot path. [] flattens arrays. \"$\" or \".\" means the current item."
+                },
+                "by": {
+                  "type": "string",
+                  "description": "groupBy/distinct key path."
+                },
+                "fields": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "description": "Projection map: outputField -> input path. Use {\"literal\":value} for literal strings."
+                },
+                "aggregates": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "description": "groupBy aggregates: name -> {op,path?}; ops: count, sum, avg, min, max, first, top."
+                },
+                "dir": {
+                  "type": "string",
+                  "description": "asc or desc for orderBy/top."
+                },
+                "count": {
+                  "type": "number",
+                  "description": "take/limit/top count."
+                },
+                "limit": {
+                  "type": "number",
+                  "description": "Alias for count."
+                }
+              },
+              "required": [
+                "op"
+              ]
+            }
+          },
+          "linq": {
+            "type": "string",
+            "description": "LINQ-like query string compiled into pipeline steps. Supports fluent dot chaining and query clauses. .where()/.map()/.select() bodies AND .orderBy()/.orderByDesc()/.distinctBy()/.groupBy() keys are all real expressions — ternaries, &&/||, comparisons, arithmetic, member/index access, object/array literals, and a small method whitelist (.includes/.startsWith/.endsWith/.toLowerCase/.toUpperCase/.trim/.slice/.indexOf/.split/.join, Math.min/max/round/floor/ceil/abs, String()/Number()/Boolean()) all work, e.g. results.map(r => r.ok ? ({chain: r.id, height: r.output}) : ({chain: r.id, height: -1})), or ranking by a COMPUTED score: results.where(r => r.ok).orderByDesc(r => r.output.volume24h * r.output.priceChangePct).take(10) — the ranking key is not limited to a bare field. Fluent example: results.selectMany(r => r.output.programs[]).where(p => p.type in (\"token\",\"canonical-token\")).groupBy(p => p._chain, assets=count(), activity=sum(activity)).orderByDesc(assets).take(5). Clause example: from results[] | expand output.programs[] | where type in (\"token\",\"canonical-token\") | group by _chain as chain select assets=count(), activity=sum(activity) | order by assets desc | take 5."
+          },
+          "concurrency": {
+            "type": "number",
+            "description": "Parallelism for subcalls (default 8, max 12).",
+            "default": 8
+          },
+          "ignoreFailures": {
+            "type": "boolean",
+            "default": false,
+            "description": "When reduce/pipeline/linq is used, a failed subcall is normally still reported in `failures` alongside the aggregate result, since a `.where(ok)`-style query would otherwise make it invisible. Set true to suppress that and get back only {reductions?, result?} — use when you already expect some chains/calls to fail and only want whatever succeeded. Defaults to false (failures still shown) because silently dropping an error is a real information loss, not just an efficiency choice — this one is opt-in on purpose."
+          }
+        },
+        "required": [
+          "calls"
+        ]
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "description": "omitted when reduce/pipeline/linq was requested — the aggregation response is just the answer, not this batch-fanout shape"
+          },
+          "calls": {
+            "type": "integer",
+            "description": "number of subcalls attempted; omitted when reduce/pipeline/linq was requested"
+          },
+          "concurrency": {
+            "type": "integer",
+            "description": "omitted when reduce/pipeline/linq was requested"
+          },
+          "results": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "description": "per-call result: id, tool, ok, picked/output or error"
+            },
+            "description": "omitted when reduce/pipeline/linq was requested — see failures instead for what went wrong"
+          },
+          "reductions": {
+            "type": "object",
+            "description": "named reducer outputs; omitted when args.reduce was not passed"
+          },
+          "result": {
+            "description": "The pipeline/linq output value — the entire point of the call when args.pipeline or args.linq was passed, returned alone rather than wrapped; omitted when neither was passed"
+          },
+          "failures": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "description": "failed subcall: id, tool, error"
+            },
+            "description": "omitted when every subcall succeeded, when ignoreFailures:true was passed, or when no aggregation was requested (failures show inside results instead)"
+          },
+          "note": {
+            "type": "string",
+            "description": "omitted when reduce/pipeline/linq was requested"
+          }
+        },
+        "required": []
+      }
+    },
+    {
+      "name": "bridge_quote",
+      "category": "bridge",
+      "description": "Bridge/swap ANY asset across ANY chain via LI.FI (the engine behind Jumper) — e.g. Arbitrum USDC → Robinhood Chain (4663) USDG, or bridge into ETH for gas. Returns the best route (estimated output, fees, bridge used, duration) PLUS an unsigned transactionRequest (to/data/value/gasLimit) that the CALLER signs and submits on the fromChain — no keys are held here. Chains by id or key (1 Ethereum, 42161 Arbitrum, 8453 Base, 10 Optimism, 137 Polygon, 999 HyperEVM, 4663 Robinhood Chain). Tokens by symbol or 0x address.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "fromChain": {
+            "type": "string",
+            "description": "Source chain id or key, e.g. 42161 or ARB"
+          },
+          "toChain": {
+            "type": "string",
+            "description": "Destination chain id or key, e.g. 4663 (Robinhood Chain)"
+          },
+          "fromToken": {
+            "type": "string",
+            "description": "Source token symbol or 0x address, e.g. USDC"
+          },
+          "toToken": {
+            "type": "string",
+            "description": "Destination token symbol or 0x address, e.g. USDG or ETH"
+          },
+          "fromAmount": {
+            "type": "string",
+            "description": "Amount in the source token's smallest unit (e.g. 1000000 = 1 USDC at 6 decimals)"
+          },
+          "fromAddress": {
+            "type": "string",
+            "description": "Sender 0x address on the source chain"
+          },
+          "toAddress": {
+            "type": "string",
+            "description": "Recipient on the destination chain (defaults to fromAddress)"
+          }
+        },
+        "required": [
+          "fromChain",
+          "toChain",
+          "fromToken",
+          "toToken",
+          "fromAmount",
+          "fromAddress"
+        ]
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "bridge": {
+            "type": "string",
+            "description": "bridge tool used (e.g. across)"
+          },
+          "fromToken": {
+            "type": "string"
+          },
+          "toToken": {
+            "type": "string"
+          },
+          "fromChainId": {
+            "type": "integer"
+          },
+          "toChainId": {
+            "type": "integer"
+          },
+          "fromTokenAddress": {
+            "type": "string"
+          },
+          "toTokenAddress": {
+            "type": "string"
+          },
+          "fromAddress": {
+            "type": "string"
+          },
+          "toAddress": {
+            "type": "string"
+          },
+          "fromAmount": {
+            "type": "string"
+          },
+          "toAmount": {
+            "type": "string"
+          },
+          "toAmountMin": {
+            "type": "string"
+          },
+          "estimatedDurationSec": {
+            "type": "number"
+          },
+          "gasCostUsd": {
+            "type": "number"
+          },
+          "feeCostUsd": {
+            "type": "number"
+          },
+          "transactionRequest": {
+            "type": "object",
+            "description": "UNSIGNED tx (to, data, value, gasLimit) — caller signs & submits on the fromChain"
+          },
+          "note": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "bridge",
+          "toAmount",
+          "transactionRequest"
+        ]
+      }
+    },
+    {
+      "name": "bridge_status",
+      "category": "bridge",
+      "description": "Track a cross-chain bridge submitted via bridge_quote — returns DONE / PENDING / FAILED plus the receiving-chain tx once it completes. Pass the source-chain tx hash (and the bridge tool from the quote for a faster lookup).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "txHash": {
+            "type": "string",
+            "description": "Source-chain transaction hash from submitting the bridge tx"
+          },
+          "bridge": {
+            "type": "string",
+            "description": "The bridge tool from bridge_quote (e.g. across, stargate) — optional"
+          },
+          "fromChain": {
+            "type": "string",
+            "description": "Source chain id/key (optional)"
+          },
+          "toChain": {
+            "type": "string",
+            "description": "Destination chain id/key (optional)"
+          }
+        },
+        "required": [
+          "txHash"
+        ]
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "description": "DONE | PENDING | FAILED | NOT_FOUND"
+          },
+          "substatus": {
+            "type": "string"
+          },
+          "substatusMessage": {
+            "type": "string"
+          },
+          "sending": {
+            "type": "object",
+            "description": "source-chain leg"
+          },
+          "receiving": {
+            "type": "object",
+            "description": "destination-chain leg (tx hash once complete)"
+          }
+        },
+        "required": [
+          "status"
+        ]
+      }
+    },
+    {
+      "name": "hl_info",
+      "category": "data",
+      "description": "Query the Hyperliquid Info API — the perps/spot order-book data layer (read-only, no auth). The 'type' field selects the query: meta (perps universe + leverage), l2Book (order book for a coin), allMids (mid prices), clearinghouseState (a user's positions/margin), spotMeta, meta+assetCtxs (mark/funding/OI), candleSnapshot, and more. For type:metaAndAssetCtxs specifically: the raw response is TWO PARALLEL top-level arrays (universe names, asset contexts) correlated only by array position — do not try to read/scan it directly for '200+ coins' style questions (funding-rate outliers, biggest open interest, highest volume). Pass rankBy instead: it joins the two arrays server-side, sorts, and returns only the top N — the correct way to answer 'what has the highest/most extreme funding/OI/volume right now'.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "description": "Info request type, e.g. meta, l2Book, allMids, clearinghouseState, metaAndAssetCtxs"
+          },
+          "coin": {
+            "type": "string",
+            "description": "Coin symbol for l2Book/candleSnapshot (e.g. BTC, ETH)"
+          },
+          "user": {
+            "type": "string",
+            "description": "0x address for user-scoped queries (clearinghouseState, openOrders, userFills)"
+          },
+          "rankBy": {
+            "type": "string",
+            "description": "type:metaAndAssetCtxs ONLY. One of funding | fundingAbs | openInterest | volume. Joins each coin's name to its funding/OI/volume, drops delisted coins, sorts, and returns {ranked, rankBy, dir, totalCoins} instead of the raw two-array response. Use fundingAbs for \"biggest funding outlier either direction\" (ranks by |funding|); use funding for \"most positive/most negative\" specifically (with dir)."
+          },
+          "limit": {
+            "type": "number",
+            "description": "rankBy only: how many ranked rows to return (default 20, max 100)"
+          },
+          "dir": {
+            "type": "string",
+            "description": "rankBy only: asc | desc (default desc — highest rankBy value first)"
+          },
+          "interval": {
+            "type": "string",
+            "description": "candleSnapshot only: candle interval, e.g. 1m,5m,15m,1h,4h,1d"
+          },
+          "startTime": {
+            "type": "number",
+            "description": "candleSnapshot only: start time epoch ms (default: endTime minus 500 intervals)"
+          },
+          "endTime": {
+            "type": "number",
+            "description": "candleSnapshot only: end time epoch ms (default: now)"
+          }
+        },
+        "required": [
+          "type"
+        ]
+      },
+      "outputSchema": null
+    },
+    {
+      "name": "api_get",
+      "category": "data",
+      "description": "GET any public read endpoint of rpc.aex402.com: /health, /credits?wallet=, /pumpfun?limit=, /pumpfun/tuple?mint=, /security/<pool>, /market/list, /sniper/leaderboard, /sniper/bets?id=, /settlement/<sig>, /settlements/<wallet>, /ai/models, /ai/stats, /leaderboard, /openapi.json, /llms.txt, /rh/pools (Robinhood), /hl/pools (HyperEVM), /base/pools (Base Uniswap v3), /eth/pools (Ethereum Uniswap v3), /arb/pools (Arbitrum Uniswap v3)",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Endpoint path including query string, e.g. /security/9Wq.. or /pumpfun?limit=5"
+          }
+        },
+        "required": [
+          "path"
+        ]
+      },
+      "outputSchema": null
+    },
+    {
+      "name": "discover_programs",
+      "category": "discovery",
+      "description": "Discover on-chain programs/contracts across every chain this RPC supports (Solana, Slonana SVM, Robinhood, HyperEVM, Ethereum, Base, Stable, Plasma, Tempo, Codex). Returns a curated seed MERGED with programs/contracts AUTO-DISCOVERED from recent block activity (refreshed hourly) — each carries an `activity` count of recent invocations/calls; entries with type \"discovered\" were seen live on-chain but not yet named. Use this to learn what is actually active on-chain right now, then describe_program to introspect any specific address.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "chain": {
+            "type": "string",
+            "description": "Filter to one chain: solana | slonana | robinhood | hyperevm | ethereum | base | stable | plasma | tempo | codex. Omit or \"all\" for every chain.",
+            "default": "all"
+          }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "chain": {
+            "type": "string"
+          },
+          "count": {
+            "type": "integer"
+          },
+          "discovered": {
+            "type": "integer",
+            "description": "auto-discovered (not curated) entries"
+          },
+          "tokens": {
+            "type": "integer",
+            "description": "token contracts seen alongside programs"
+          },
+          "coverage": {
+            "type": [
+              "string",
+              "object"
+            ],
+            "description": "what this scan enumerated: a string on the single-chain response, the full per-chain map on the all-chains response"
+          },
+          "note": {
+            "type": "string",
+            "description": "caveats about what this scan did and did not see"
+          },
+          "programs": {
+            "type": [
+              "array",
+              "object"
+            ],
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "description": "program/contract address"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "type": {
+                  "type": "string",
+                  "description": "'core' | 'curated' | 'discovered'"
+                },
+                "note": {
+                  "type": "string"
+                },
+                "activity": {
+                  "type": "integer",
+                  "description": "recent invocations/calls"
+                }
+              },
+              "required": [
+                "id"
+              ]
+            },
+            "description": "array on the single-chain response; a per-chain {chain: program[]} map on the all-chains response"
+          }
+        }
+      }
+    },
+    {
+      "name": "describe_program",
+      "category": "discovery",
+      "description": "Introspect ANY specific program/contract address on a chain. Solana/Slonana: returns executable, owner, data size, and whether it is a known program. EVM: RPC-verified facts (is-contract, code size, ERC-20 name/symbol/decimals, EIP-1967 proxy → implementation) PLUS Blockscout explorer enrichment when available.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "chain": {
+            "type": "string",
+            "description": "solana | slonana | robinhood | hyperevm | ethereum | base | stable | plasma | tempo | codex"
+          },
+          "address": {
+            "type": "string",
+            "description": "Program id (base58, Solana/Slonana) or contract address (0x…, EVM)"
+          }
+        },
+        "required": [
+          "chain",
+          "address"
+        ]
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "chain": {
+            "type": "string"
+          },
+          "address": {
+            "type": "string"
+          },
+          "exists": {
+            "type": "boolean",
+            "description": "Solana/Slonana only — omitted when the chain is EVM (isContract is the EVM equivalent)"
+          },
+          "isProgram": {
+            "type": "boolean",
+            "description": "Solana/Slonana only — omitted when the chain is EVM"
+          },
+          "executable": {
+            "type": "boolean",
+            "description": "Solana/Slonana only — omitted when the chain is EVM"
+          },
+          "owner": {
+            "type": "string",
+            "description": "owning program. Solana/Slonana only — omitted when the chain is EVM"
+          },
+          "dataLen": {
+            "type": "integer",
+            "description": "account data length in bytes. Solana/Slonana only — omitted when the chain is EVM (codeSize is the EVM equivalent)"
+          },
+          "lamports": {
+            "type": "integer",
+            "description": "Solana/Slonana only — omitted when the chain is EVM"
+          },
+          "isContract": {
+            "type": "boolean",
+            "description": "EVM only — omitted when the chain is Solana/Slonana, where executable/isProgram carry this instead"
+          },
+          "codeSize": {
+            "type": "integer",
+            "description": "EVM bytecode length in bytes. EVM only — omitted when the chain is Solana/Slonana (dataLen is the Solana equivalent)"
+          },
+          "erc20": {
+            "type": "object",
+            "description": "ERC-20 name/symbol/decimals. EVM only — omitted when the address is not an ERC-20, or the chain is Solana/Slonana"
+          },
+          "proxy": {
+            "type": "object",
+            "description": "EIP-1967 proxy standard + implementation. EVM only — omitted when the address is not a proxy, or the chain is Solana/Slonana"
+          },
+          "known": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "curated registry entry {id,name,type,note} when the address is recognised"
+          }
+        },
+        "required": [
+          "chain",
+          "address"
+        ]
+      }
+    },
+    {
+      "name": "reconstruct_abi",
+      "category": "discovery",
+      "description": "Reconstruct a PARTIAL function/event interface for an EVM contract on a supported EVM chain from its BYTECODE — no source or verification needed. Extracts PUSH4 function selectors + recent event topic0 hashes and resolves the ones public signature DBs (openchain/4byte) know to human signatures. Works on UNVERIFIED contracts because bytecode is ground truth, but it is NOT a full ABI: novel/proprietary selectors DBs have never seen stay unresolved (decompile for those). Use it to understand what an unknown contract does before trusting behavior-based guesses.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "chain": {
+            "type": "string",
+            "description": "robinhood | hyperevm | ethereum | base | stable | plasma | tempo | codex"
+          },
+          "address": {
+            "type": "string",
+            "description": "EVM contract address (0x…). For a proxy, pass the implementation for the real logic."
+          }
+        },
+        "required": [
+          "chain",
+          "address"
+        ]
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "chain": {
+            "type": "string"
+          },
+          "address": {
+            "type": "string"
+          },
+          "isContract": {
+            "type": "boolean"
+          },
+          "codeSize": {
+            "type": "integer"
+          },
+          "functionCount": {
+            "type": "integer",
+            "description": "total PUSH4 selectors found"
+          },
+          "functions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "description": "{selector, sig}"
+            },
+            "description": "resolved function signatures"
+          },
+          "unresolvedSelectors": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "novel/proprietary selectors no DB knows"
+          },
+          "events": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "description": "{topic0, sig}"
+            },
+            "description": "resolved event signatures"
+          },
+          "note": {
+            "type": "string",
+            "description": "what the reconstruction could and could not resolve"
+          }
+        },
+        "required": [
+          "chain",
+          "address",
+          "isContract"
+        ]
+      }
+    },
+    {
+      "name": "search_tokens",
+      "category": "discovery",
+      "description": "Search the live token/NFT census for Robinhood Chain (4663) and HyperEVM (999) by symbol or name. Returns matching tokens with address, standard (erc20/erc721/erc1155), decimals, holders, market cap, and — for HyperEVM canonical tokens — live spot price + 24h volume. The census is refreshed hourly (canonical tokens from Hyperliquid spotMeta, top tokens from Blockscout, spam-filtered). Use this instead of discover_programs when you want a specific asset (e.g. \"USDC on hyperevm\", \"stablecoins on robinhood\") rather than the whole list.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "Symbol or name substring, case-insensitive (e.g. \"usdc\", \"hype\"). Omit to list the top of the census."
+          },
+          "chain": {
+            "type": "string",
+            "description": "robinhood | hyperevm. Omit to search both."
+          },
+          "limit": {
+            "type": "number",
+            "description": "Max results (default 20).",
+            "default": 20
+          }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string"
+          },
+          "chains": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "count": {
+            "type": "integer"
+          },
+          "censusAgeMin": {
+            "type": "number",
+            "description": "minutes since the census cron last ran"
+          },
+          "tokens": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "description": "address, symbol, name, standard, decimals, holders, marketCap, price"
+            }
+          },
+          "note": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "count",
+          "tokens"
+        ]
+      }
+    },
+    {
+      "name": "discovery_health",
+      "category": "discovery",
+      "description": "Report the freshness and health of the cross-chain program/token discovery pipeline: when the hourly cron last ran, how many programs/tokens each chain scan produced, and which scans failed. Use this to check whether discover_programs / search_tokens data is current before relying on it.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "description": "healthy | stale | degraded"
+          },
+          "lastRunAgeMin": {
+            "type": "number"
+          },
+          "lastRunUnix": {
+            "type": "integer"
+          },
+          "counts": {
+            "type": "object",
+            "description": "per-chain program counts from the last scan"
+          },
+          "history": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "ts": {
+                  "type": "integer",
+                  "description": "unix seconds"
+                },
+                "counts": {
+                  "type": "object",
+                  "description": "per-chain program count at that run"
+                }
+              }
+            },
+            "description": "per-chain counts over the last <=24 cron runs, oldest first"
+          },
+          "failedScans": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "chains whose last scan errored (omitted when none)"
+          },
+          "emptyScans": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "chains whose last scan returned zero (omitted when none)"
+          },
+          "sourceErrors": {
+            "type": "object",
+            "description": "per-chain list of what each live source ACTUALLY answered when it failed, e.g. \"robinhood/ERC-20: blockscout /api/v2/tokens → 403\". Says WHY a census is thin where seedsOnlyScans only says THAT it is. Capped at 4 entries per chain; when more were recorded the list carries a final \"… +N more (T total)\" string, so the count survives the truncation rather than the list silently reading as complete. Omitted when every source succeeded"
+          },
+          "seedsOnlyScans": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "chains whose last scan returned ONLY hardcoded canonical seeds — every live source returned nothing while the fallback held, so the count is non-zero and emptyScans does NOT list them. Sets status=degraded. Omitted when none"
+          },
+          "censusLiveRecords": {
+            "type": "object",
+            "description": "per-census count of records the LIVE source returned, before any merge, cap or spam filter — the evidence behind seedsOnlyScans. 0 means the live source supplied nothing (the census is its fallback); -1 means this census was last written by a build that did not record the field, which is NOT the same as zero. Published even when healthy, so a reader can distinguish \"source is fine\" from \"nothing was measured\" without inferring it from a verdict. Never omitted: built over the census keys in counts, so every census always carries a value and -1 covers the pre-field case — the earlier exemption for records predating the field was retired when the conditional spread was removed"
+          },
+          "censusRecordsBeforeCap": {
+            "type": "object",
+            "description": "per-census record count BEFORE the fungible (170) and NFT (50) caps. A count sitting exactly on its cap cannot say whether it is a finding or a ceiling — hyperevm_census reads 170 because 170 IS the cap. Compare against counts: a value here greater than the published count means that census was TRUNCATED, equal means it was not. -1 means the build that last wrote this census did not record the field. Never omitted, same construction as censusLiveRecords"
+          },
+          "note": {
+            "type": "string",
+            "description": "plain-language reading of status"
+          }
+        },
+        "required": [
+          "status"
+        ]
+      }
+    },
+    {
+      "name": "payment_help",
+      "category": "data",
+      "description": "How to pay for API access (x402 micropayments) — the complete self-serve guide for agents: current prices, every accepted asset/chain (USDC/USDT/SOL/ANSEM on Solana, ETH/USDG on Robinhood Chain, USDC/HYPE on HyperEVM), the merchant addresses, step-by-step topup → session-token → API-key flow, and how to attach credentials to MCP calls. This tool is FREE and NEVER rate-limited — call it when you hit a 402 / rate limit to convert into a paid session ($0.01 minimum buys 100 calls, no signup).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "freeTier": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "paidTier": {
+            "type": "object",
+            "additionalProperties": true,
+            "description": "Prices, accepted assets with mints/contracts + merchant addresses, howToPay steps"
+          },
+          "quickstart": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "mcp": {
+            "type": "object",
+            "additionalProperties": true,
+            "description": "MCP-specific: which methods stay free, how to attach X-Session / Bearer key to MCP requests"
+          },
+          "docs": {
+            "type": "string"
+          },
+          "note": {
+            "type": "string",
+            "description": "one-line summary of the cheapest path to a paid session"
+          }
+        },
+        "required": [
+          "paidTier",
+          "mcp",
+          "docs"
+        ]
+      }
+    },
+    {
+      "name": "search",
+      "category": "discovery",
+      "description": "Search the aeX402 universe by keyword: tokens (Robinhood Chain + HyperEVM census), known programs/contracts (Solana, Robinhood, HyperEVM, Slonana), and live AeX402 AMM pools. Returns a result list; pass a result id to the fetch tool for full detail. Use the specialist tools (search_tokens, discover_programs, aex402_listPools) when you already know the entity type.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "Keyword: token symbol/name (\"usdg\"), program name (\"pump.fun\"), contract address, or pool address."
+          }
+        },
+        "required": [
+          "query"
+        ]
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "results": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "description": "Opaque id for fetch: token:<chain>:<address> | program:<chain>:<address> | pool:<address>"
+                },
+                "title": {
+                  "type": "string"
+                },
+                "url": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "title",
+                "url"
+              ]
+            }
+          }
+        },
+        "required": [
+          "results"
+        ]
+      }
+    },
+    {
+      "name": "fetch",
+      "category": "discovery",
+      "description": "Fetch the full document for one search result id (from the search tool). Accepts token:<chain>:<address>, program:<chain>:<address>, or pool:<address>. Returns the entity detail (on-chain state for pools, census entry for tokens, registry/introspection for programs) as a document.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "A search result id, e.g. \"pool:G5d3qFZq...\" or \"token:robinhood:0x5fc5...\" or \"program:solana:3AMM53...\""
+          }
+        },
+        "required": [
+          "id"
+        ]
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string",
+            "description": "Entity detail as pretty-printed JSON/prose"
+          },
+          "url": {
+            "type": "string"
+          },
+          "metadata": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "text",
+          "url"
+        ]
+      }
+    }
+  ]
+}
