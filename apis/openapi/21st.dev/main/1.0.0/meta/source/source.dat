@@ -1,0 +1,991 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "21st API",
+    "version": "1.0.0",
+    "description": "REST API for the 21st.dev component marketplace: search and install components, publish components/templates/themes, and manage libraries and your account. This is the same surface the `21st` CLI and the 21st MCP server call — everything here is also reachable through those, but a direct HTTP client (or an agent building its own integration) can call it too.\n\nMost capability is also available with lower friction through the 21st MCP server (https://21st.dev/mcp.md) or the `21st` CLI (https://21st.dev/.well-known/skills/21st-cli-use/SKILL.md) — use this spec when you need direct HTTP access instead.",
+    "termsOfService": "https://21st.dev/terms",
+    "contact": { "url": "https://21st.dev" }
+  },
+  "servers": [{ "url": "https://21st.dev/api/v1" }],
+  "security": [{ "ApiKeyAuth": [] }],
+  "tags": [
+    { "name": "Account", "description": "Identity, plan, and quota for the calling API key." },
+    { "name": "Components", "description": "Search, install, publish, and manage components." },
+    { "name": "Libraries", "description": "Create and manage libraries (registries) that hold components." },
+    { "name": "Templates", "description": "Publish and manage template listings." },
+    { "name": "Themes", "description": "Publish and manage community themes (CSS design tokens)." },
+    { "name": "Team", "description": "Team invite links." },
+    { "name": "Profile", "description": "The caller's own bento profile board." },
+    {
+      "name": "CLI Studio Drafts",
+      "description": "Stateful, sandbox-backed draft workflow behind `21st publish`/`21st review`/`21st edit`. Heavier machinery than the rest of the API — most integrations want Components → Publish instead; use this family only if you need incremental edit-review-publish over a single draft."
+    }
+  ],
+  "components": {
+    "securitySchemes": {
+      "ApiKeyAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "21st_sk_...",
+        "description": "A 21st API key, generated at https://21st.dev/mcp. Send as `Authorization: Bearer 21st_sk_...`. Endpoints under Components/Libraries publish-and-manage additionally accept a `21st login`-minted CLI session token in the same header — obtained via the CLI, not something you construct by hand."
+      }
+    },
+    "schemas": {
+      "Error": {
+        "type": "object",
+        "properties": {
+          "error": { "type": "string", "description": "Stable machine-readable error code, e.g. `invalid_api_key`, `rate_limit_exceeded`." },
+          "message": { "type": "string", "description": "Human-readable explanation." },
+          "status": { "type": "integer" },
+          "retryable": { "type": "boolean" },
+          "request_id": { "type": "string" },
+          "details": { "type": "object", "additionalProperties": true }
+        },
+        "required": ["error", "message", "status"]
+      },
+      "Identity": {
+        "type": "object",
+        "properties": {
+          "user": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string" },
+              "email": { "type": "string" },
+              "displayName": { "type": "string" }
+            }
+          },
+          "team": {
+            "nullable": true,
+            "type": "object",
+            "properties": {
+              "id": { "type": "string" },
+              "name": { "type": "string" },
+              "slug": { "type": "string", "description": "Present on /registry/me, absent on /me (which has hasGithub instead)." },
+              "hasGithub": { "type": "boolean" }
+            }
+          },
+          "plan": { "type": "string" },
+          "requestsRemaining": { "type": "integer" }
+        }
+      },
+      "LibrarySummary": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "name": { "type": "string" },
+          "slug": { "type": "string" },
+          "description": { "type": "string", "nullable": true },
+          "displayName": { "type": "string", "nullable": true },
+          "logoUrl": { "type": "string", "nullable": true },
+          "websiteUrl": { "type": "string", "nullable": true },
+          "githubUrl": { "type": "string", "nullable": true },
+          "twitterUrl": { "type": "string", "nullable": true },
+          "isPublicPage": { "type": "boolean" },
+          "scope": {
+            "oneOf": [
+              { "type": "object", "properties": { "kind": { "const": "personal" } } },
+              { "type": "object", "properties": { "kind": { "const": "team" }, "teamId": { "type": "string" } } }
+            ]
+          },
+          "componentCount": { "type": "integer" }
+        }
+      },
+      "ComponentVisibility": {
+        "type": "string",
+        "enum": ["published", "private", "unlisted", "public"],
+        "description": "`unlisted` and `public` normalize server-side to `published` (`public` additionally submits for catalog featuring)."
+      },
+      "ComponentSearchResult": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string" },
+          "slug": { "type": "string" },
+          "description": { "type": "string", "nullable": true },
+          "registry": { "type": "string", "enum": ["ui", "hooks", "blocks", "icons"] },
+          "visibility": { "$ref": "#/components/schemas/ComponentVisibility" },
+          "install_ref": { "type": "string", "description": "Pass to /components/install/{username}/{slug} or the shadcn CLI." },
+          "url": { "type": "string" },
+          "preview_url": { "type": "string", "nullable": true },
+          "tags": { "type": "array", "items": { "type": "string" } },
+          "author": { "type": "string" },
+          "updated_at": { "type": "string", "format": "date-time" },
+          "score": { "type": "number" }
+        }
+      },
+      "ComponentInstall": {
+        "type": "object",
+        "description": "shadcn registry-item-shaped payload with everything needed to install the component.",
+        "properties": {
+          "install_ref": { "type": "string" },
+          "name": { "type": "string" },
+          "slug": { "type": "string" },
+          "description": { "type": "string", "nullable": true },
+          "registry": { "type": "string" },
+          "visibility": { "$ref": "#/components/schemas/ComponentVisibility" },
+          "author": { "type": "string" },
+          "runtime": { "type": "string", "enum": ["react", "expo"] },
+          "files": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "path": { "type": "string" },
+                "type": { "type": "string" },
+                "content": { "type": "string" }
+              }
+            }
+          },
+          "dependencies": { "type": "array", "items": { "type": "string" } },
+          "registry_dependencies": { "type": "array", "items": { "type": "string" } },
+          "index_css_url": { "type": "string", "nullable": true },
+          "preview": {
+            "nullable": true,
+            "type": "object",
+            "properties": {
+              "bundle_html_url": { "type": "string", "nullable": true },
+              "preview_image_url": { "type": "string", "nullable": true }
+            }
+          }
+        }
+      },
+      "PublishDemo": {
+        "type": "object",
+        "required": ["name", "slug", "file_index"],
+        "properties": {
+          "name": { "type": "string" },
+          "slug": { "type": "string" },
+          "file_index": { "type": "integer", "description": "Index into the uploaded files for this demo's code." },
+          "preview_index": { "type": "integer" },
+          "preview_dark_index": { "type": "integer" },
+          "video_index": { "type": "integer" },
+          "video_dark_index": { "type": "integer" },
+          "tags": { "type": "array", "items": { "type": "string" } },
+          "dependencies": { "type": "object", "additionalProperties": { "type": "string" } },
+          "registry_dependencies": { "type": "array", "items": { "type": "string" } }
+        }
+      },
+      "PublishMetadata": {
+        "type": "object",
+        "required": ["name", "description", "runtime", "registry", "demos"],
+        "properties": {
+          "name": { "type": "string" },
+          "slug": { "type": "string" },
+          "description": { "type": "string" },
+          "runtime": { "type": "string", "enum": ["react", "expo"] },
+          "dependencies": { "type": "object", "additionalProperties": { "type": "string" } },
+          "component_dependencies": { "type": "object", "additionalProperties": { "type": "string" } },
+          "registry_dependencies": { "type": "array", "items": { "type": "string" } },
+          "registry": { "type": "string", "enum": ["ui", "hooks", "blocks", "icons"] },
+          "license": { "type": "string" },
+          "visibility": { "$ref": "#/components/schemas/ComponentVisibility" },
+          "submit_for_featuring": { "type": "boolean" },
+          "registry_slug": { "type": "string", "description": "Target library slug. Omit to publish to the default personal library." },
+          "website_url": { "type": "string" },
+          "tags": { "type": "array", "items": { "type": "string" }, "maxItems": 5 },
+          "demos": { "type": "array", "items": { "$ref": "#/components/schemas/PublishDemo" } }
+        }
+      },
+      "PublishResult": {
+        "type": "object",
+        "properties": {
+          "success": { "type": "boolean" },
+          "component_id": { "type": "integer" },
+          "is_new": { "type": "boolean" },
+          "username": { "type": "string" },
+          "slug": { "type": "string" },
+          "url": { "type": "string" },
+          "visibility": { "$ref": "#/components/schemas/ComponentVisibility" },
+          "install_ref": { "type": "string" },
+          "demos": { "type": "array", "items": { "type": "object" } },
+          "duration_ms": { "type": "integer" }
+        }
+      },
+      "TemplateListItem": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "integer" },
+          "slug": { "type": "string" },
+          "name": { "type": "string" },
+          "description": { "type": "string", "nullable": true },
+          "status": { "type": "string", "enum": ["draft", "published"] },
+          "website_preview_url": { "type": "string" },
+          "preview_url": { "type": "string" },
+          "video_url": { "type": "string", "nullable": true },
+          "payment_url": { "type": "string", "nullable": true },
+          "price": { "type": "number" },
+          "url": { "type": "string" }
+        }
+      },
+      "BentoBlock": {
+        "type": "object",
+        "required": ["type"],
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": ["component", "social", "hire", "pro", "support", "note", "image", "divider", "ascii", "template", "theme", "gradient", "library"]
+          },
+          "demoId": { "type": "string" },
+          "refId": { "type": "string" },
+          "url": { "type": "string" },
+          "headline": { "type": "string" },
+          "body": { "type": "string" },
+          "email": { "type": "string" },
+          "cta": { "type": "string" },
+          "text": { "type": "string" },
+          "mediaUrl": { "type": "string" },
+          "w": { "type": "integer" },
+          "h": { "type": "integer" }
+        }
+      },
+      "ComponentWorkspaceComponent": {
+        "type": "object",
+        "properties": {
+          "ref": { "type": "string", "example": "component:1234" },
+          "kind": { "const": "component" },
+          "id": { "type": "integer" },
+          "name": { "type": "string" },
+          "slug": { "type": "string" },
+          "status": { "type": "string", "enum": ["published", "private"] },
+          "visibility": { "$ref": "#/components/schemas/ComponentVisibility" },
+          "reviewStatus": { "type": "string" },
+          "demoCount": { "type": "integer" },
+          "updatedAt": { "type": "string", "format": "date-time" },
+          "editorUrl": { "type": "string" },
+          "canEdit": { "type": "boolean" },
+          "canEditCode": { "type": "boolean" }
+        }
+      },
+      "ComponentWorkspaceDraft": {
+        "type": "object",
+        "properties": {
+          "ref": { "type": "string", "example": "draft:8f14e...uuid" },
+          "kind": { "const": "draft" },
+          "id": { "type": "string" },
+          "name": { "type": "string" },
+          "status": {
+            "type": "string",
+            "enum": ["active", "provisioning", "publishing", "failed", "deletion_pending", "unavailable"]
+          },
+          "editorUrl": { "type": "string" },
+          "updatedAt": { "type": "string", "format": "date-time" }
+        }
+      },
+      "CliDraftStatus": {
+        "type": "object",
+        "description": "Discriminated union on `state`.",
+        "properties": {
+          "state": { "type": "string", "enum": ["draft", "publishing", "published", "deleted", "failed"] },
+          "draft_id": { "type": "string" },
+          "sandbox_id": { "type": "string" },
+          "editor_url": { "type": "string" },
+          "status_url": { "type": "string" },
+          "review_url": { "type": "string" },
+          "component_id": { "type": "integer" },
+          "url": { "type": "string" },
+          "install_ref": { "type": "string" },
+          "message": { "type": "string" },
+          "retryable": { "type": "boolean" }
+        }
+      }
+    },
+    "responses": {
+      "Unauthorized": {
+        "description": "Missing, invalid, inactive, or expired API key.",
+        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+      },
+      "RateLimited": {
+        "description": "100 requests/min per key, 1000/hour per user (tighter on publish and profile-write endpoints, see each operation). `Retry-After` header set.",
+        "headers": {
+          "Retry-After": { "schema": { "type": "integer" }, "description": "Seconds until the limit resets." }
+        },
+        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+      },
+      "NotFound": {
+        "description": "No such resource, or it isn't visible to the caller.",
+        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+      },
+      "ValidationError": {
+        "description": "Request body failed validation.",
+        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+      }
+    }
+  },
+  "paths": {
+    "/me": {
+      "get": {
+        "tags": ["Account"],
+        "summary": "Get the caller's identity, plan, and quota",
+        "responses": {
+          "200": { "description": "OK", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Identity" } } } },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "429": { "$ref": "#/components/responses/RateLimited" }
+        }
+      }
+    },
+    "/registry/me": {
+      "get": {
+        "tags": ["Account"],
+        "summary": "Get the caller's identity for registry/CLI context (includes team slug)",
+        "responses": {
+          "200": { "description": "OK", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Identity" } } } },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "429": { "$ref": "#/components/responses/RateLimited" }
+        }
+      }
+    },
+    "/team/invite-link": {
+      "get": {
+        "tags": ["Team"],
+        "summary": "Get the team's invite link",
+        "description": "Requires a team-scoped API key. `?refresh=1` rotates the token (team owner only).",
+        "parameters": [
+          { "name": "refresh", "in": "query", "schema": { "type": "string", "enum": ["1"] } }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": { "application/json": { "schema": {
+              "type": "object",
+              "properties": {
+                "invite_url": { "type": "string" },
+                "token": { "type": "string" },
+                "team_id": { "type": "string" },
+                "team_name": { "type": "string" },
+                "rotated": { "type": "boolean" },
+                "onboarding": {
+                  "type": "object",
+                  "properties": { "cli_setup_url": { "type": "string" }, "install_command": { "type": "string" } }
+                }
+              }
+            } } }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "description": "Personal (non-team) API key.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "429": { "$ref": "#/components/responses/RateLimited" }
+        }
+      },
+      "post": {
+        "tags": ["Team"],
+        "summary": "Same as GET — create the invite link if it doesn't exist yet",
+        "responses": {
+          "200": { "description": "OK" },
+          "401": { "$ref": "#/components/responses/Unauthorized" }
+        }
+      }
+    },
+    "/libraries": {
+      "get": {
+        "tags": ["Libraries"],
+        "summary": "List every library (personal and team) the caller can manage",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": { "application/json": { "schema": {
+              "type": "object",
+              "properties": { "libraries": { "type": "array", "items": { "$ref": "#/components/schemas/LibrarySummary" } } }
+            } } }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" }
+        }
+      },
+      "post": {
+        "tags": ["Libraries"],
+        "summary": "Create a new library",
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": {
+            "type": "object",
+            "required": ["name", "slug"],
+            "properties": {
+              "name": { "type": "string" },
+              "slug": { "type": "string" },
+              "description": { "type": "string" }
+            }
+          } } }
+        },
+        "responses": {
+          "201": { "description": "Created", "content": { "application/json": { "schema": {
+            "type": "object", "properties": { "library": { "$ref": "#/components/schemas/LibrarySummary" } }
+          } } } },
+          "400": { "$ref": "#/components/responses/ValidationError" },
+          "401": { "$ref": "#/components/responses/Unauthorized" }
+        }
+      }
+    },
+    "/libraries/{slug}": {
+      "get": {
+        "tags": ["Libraries"],
+        "summary": "Get one manageable library",
+        "parameters": [{ "name": "slug", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": {
+          "200": { "description": "OK", "content": { "application/json": { "schema": {
+            "type": "object", "properties": { "library": { "$ref": "#/components/schemas/LibrarySummary" } }
+          } } } },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "$ref": "#/components/responses/NotFound" }
+        }
+      },
+      "patch": {
+        "tags": ["Libraries"],
+        "summary": "Edit a library's identity/branding",
+        "parameters": [{ "name": "slug", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": { "schema": {
+              "type": "object",
+              "properties": {
+                "name": { "type": "string" },
+                "description": { "type": "string" },
+                "display_name": { "type": "string" },
+                "website_url": { "type": "string" },
+                "github_url": { "type": "string" },
+                "twitter_url": { "type": "string" },
+                "logo_url": { "type": "string" },
+                "public_page": { "type": "boolean" }
+              }
+            } },
+            "multipart/form-data": { "schema": {
+              "type": "object",
+              "properties": {
+                "name": { "type": "string" },
+                "description": { "type": "string" },
+                "display_name": { "type": "string" },
+                "website_url": { "type": "string" },
+                "github_url": { "type": "string" },
+                "twitter_url": { "type": "string" },
+                "public_page": { "type": "boolean" },
+                "logo": { "type": "string", "format": "binary", "description": "Max 2MB." }
+              }
+            } }
+          }
+        },
+        "responses": {
+          "200": { "description": "OK", "content": { "application/json": { "schema": {
+            "type": "object", "properties": { "library": { "$ref": "#/components/schemas/LibrarySummary" } }
+          } } } },
+          "400": { "$ref": "#/components/responses/ValidationError" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "$ref": "#/components/responses/NotFound" }
+        }
+      }
+    },
+    "/components/search": {
+      "get": {
+        "tags": ["Components"],
+        "summary": "Search components",
+        "parameters": [
+          { "name": "q", "in": "query", "required": true, "schema": { "type": "string" } },
+          { "name": "scope", "in": "query", "schema": { "type": "string", "enum": ["team", "mine", "public"], "default": "team" } },
+          { "name": "limit", "in": "query", "schema": { "type": "integer", "minimum": 1, "maximum": 50, "default": 25 } }
+        ],
+        "responses": {
+          "200": { "description": "OK", "content": { "application/json": { "schema": {
+            "type": "object",
+            "properties": {
+              "query": { "type": "string" },
+              "scope": { "type": "string" },
+              "results": { "type": "array", "items": { "$ref": "#/components/schemas/ComponentSearchResult" } }
+            }
+          } } } },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "429": { "$ref": "#/components/responses/RateLimited" }
+        }
+      }
+    },
+    "/components/install/{username}/{slug}": {
+      "get": {
+        "tags": ["Components"],
+        "summary": "Get everything needed to install a component",
+        "description": "Files, dependencies, and registry deps for one component — the payload the `21st`/shadcn CLI installs from.",
+        "parameters": [
+          { "name": "username", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "slug", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": { "description": "OK", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ComponentInstall" } } } },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "429": { "$ref": "#/components/responses/RateLimited" }
+        }
+      }
+    },
+    "/components/publish": {
+      "post": {
+        "tags": ["Components"],
+        "summary": "Publish a new component, or update an existing one",
+        "description": "Multipart: JSON metadata (see PublishMetadata) alongside the component/demo code and preview media files referenced by index. Spawns a build sandbox; the request is synchronous and returns once the build completes. 30 requests/hour.",
+        "requestBody": {
+          "required": true,
+          "content": { "multipart/form-data": { "schema": {
+            "type": "object",
+            "required": ["metadata"],
+            "properties": {
+              "metadata": { "$ref": "#/components/schemas/PublishMetadata" },
+              "files": { "type": "array", "items": { "type": "string", "format": "binary" } }
+            }
+          } } }
+        },
+        "responses": {
+          "200": { "description": "Published", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/PublishResult" } } } },
+          "400": { "$ref": "#/components/responses/ValidationError" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "413": { "description": "Payload too large." },
+          "429": {
+            "description": "30 publishes/hour exceeded (`publish_rate_limit_exceeded`), or the general per-key/per-user limit.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+          }
+        }
+      }
+    },
+    "/components/{slug}": {
+      "patch": {
+        "tags": ["Components"],
+        "summary": "Update an owned component's visibility, description, or tags",
+        "parameters": [{ "name": "slug", "in": "path", "required": true, "schema": { "type": "string" }, "description": "Component slug or numeric id." }],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": {
+            "type": "object",
+            "description": "At least one field required.",
+            "properties": {
+              "visibility": { "$ref": "#/components/schemas/ComponentVisibility" },
+              "description": { "type": "string", "nullable": true },
+              "tags": { "type": "array", "items": { "type": "string" }, "description": "Full replace, not a merge." }
+            }
+          } } }
+        },
+        "responses": {
+          "200": { "description": "OK", "content": { "application/json": { "schema": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "integer" }, "slug": { "type": "string" },
+              "visibility": { "$ref": "#/components/schemas/ComponentVisibility" },
+              "reviewStatus": { "type": "string" }, "updated": { "type": "boolean" }
+            }
+          } } } },
+          "400": { "$ref": "#/components/responses/ValidationError" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "$ref": "#/components/responses/NotFound" }
+        }
+      },
+      "delete": {
+        "tags": ["Components"],
+        "summary": "Unpublish a component",
+        "description": "Soft-unpublish: sets visibility to private. Does not hard-delete.",
+        "parameters": [{ "name": "slug", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": {
+          "200": { "description": "OK", "content": { "application/json": { "schema": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "integer" }, "slug": { "type": "string" },
+              "visibility": { "const": "private" }, "unpublished": { "const": true }, "already": { "type": "boolean" }
+            }
+          } } } },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "$ref": "#/components/responses/NotFound" }
+        }
+      }
+    },
+    "/components/{slug}/review": {
+      "post": {
+        "tags": ["Components"],
+        "summary": "Move a component through catalog review",
+        "parameters": [{ "name": "slug", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": {
+            "type": "object",
+            "required": ["action"],
+            "properties": { "action": { "type": "string", "enum": ["submit", "withdraw", "resubmit", "remove_from_catalog"] } }
+          } } }
+        },
+        "responses": {
+          "200": { "description": "OK", "content": { "application/json": { "schema": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "integer" }, "slug": { "type": "string" },
+              "visibility": { "$ref": "#/components/schemas/ComponentVisibility" },
+              "reviewStatus": { "type": "string" }, "updated": { "type": "boolean" }
+            }
+          } } } },
+          "400": { "$ref": "#/components/responses/ValidationError" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "$ref": "#/components/responses/NotFound" }
+        }
+      }
+    },
+    "/templates/publish": {
+      "post": {
+        "tags": ["Templates"],
+        "summary": "Publish a new template listing",
+        "description": "Metadata-only, no build. Always starts in `draft` status pending moderation.",
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": {
+            "type": "object",
+            "required": ["name", "website_preview_url", "preview_url"],
+            "properties": {
+              "name": { "type": "string" },
+              "description": { "type": "string" },
+              "website_preview_url": { "type": "string", "format": "uri" },
+              "preview_url": { "type": "string", "format": "uri" },
+              "video_url": { "type": "string", "format": "uri" },
+              "payment_url": { "type": "string", "format": "uri" },
+              "price": { "type": "number", "minimum": 0, "default": 0 },
+              "tagIds": { "type": "array", "items": { "type": "integer" }, "maxItems": 10 }
+            }
+          } } }
+        },
+        "responses": {
+          "200": { "description": "Created", "content": { "application/json": { "schema": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "integer" }, "slug": { "type": "string" }, "url": { "type": "string" },
+              "status": { "const": "draft" }, "template": { "$ref": "#/components/schemas/TemplateListItem" }
+            }
+          } } } },
+          "400": { "$ref": "#/components/responses/ValidationError" },
+          "401": { "$ref": "#/components/responses/Unauthorized" }
+        }
+      }
+    },
+    "/templates/{id}": {
+      "patch": {
+        "tags": ["Templates"],
+        "summary": "Edit a template listing",
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": {
+            "type": "object",
+            "description": "At least one field required. Status/visibility is moderation-only and not settable here.",
+            "properties": {
+              "name": { "type": "string" }, "description": { "type": "string" },
+              "website_preview_url": { "type": "string" }, "payment_url": { "type": "string" },
+              "price": { "type": "number" }, "preview_url": { "type": "string" }, "video_url": { "type": "string" },
+              "tagIds": { "type": "array", "items": { "type": "integer" } }
+            }
+          } } }
+        },
+        "responses": {
+          "200": { "description": "OK", "content": { "application/json": { "schema": {
+            "type": "object",
+            "properties": { "id": { "type": "integer" }, "updated": { "type": "boolean" }, "template": { "$ref": "#/components/schemas/TemplateListItem" } }
+          } } } },
+          "400": { "$ref": "#/components/responses/ValidationError" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "$ref": "#/components/responses/NotFound" }
+        }
+      },
+      "delete": {
+        "tags": ["Templates"],
+        "summary": "Delete an owned template",
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }],
+        "responses": {
+          "200": { "description": "Deleted", "content": { "application/json": { "schema": {
+            "type": "object", "properties": { "id": { "type": "integer" }, "deleted": { "const": true } }
+          } } } },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "$ref": "#/components/responses/NotFound" }
+        }
+      }
+    },
+    "/themes/publish": {
+      "post": {
+        "tags": ["Themes"],
+        "summary": "Publish a community theme",
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": {
+            "type": "object",
+            "required": ["name", "css"],
+            "properties": {
+              "name": { "type": "string", "maxLength": 50 },
+              "css": { "type": "string", "description": "Must define both a `:root` and a `.dark` token block." },
+              "tags": { "type": "array", "items": { "type": "string" } }
+            }
+          } } }
+        },
+        "responses": {
+          "200": { "description": "Created", "content": { "application/json": { "schema": {
+            "type": "object",
+            "properties": { "id": { "type": "string" }, "slug": { "type": "string" }, "url": { "type": "string" } }
+          } } } },
+          "400": { "$ref": "#/components/responses/ValidationError" },
+          "401": { "$ref": "#/components/responses/Unauthorized" }
+        }
+      }
+    },
+    "/themes/{id}": {
+      "patch": {
+        "tags": ["Themes"],
+        "summary": "Rename, retag, or change visibility of an owned theme",
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } }],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": {
+            "type": "object",
+            "properties": {
+              "name": { "type": "string" },
+              "tags": { "type": "array", "items": { "type": "string" } },
+              "visibility": { "type": "string", "enum": ["public", "private"] }
+            }
+          } } }
+        },
+        "responses": {
+          "200": { "description": "OK", "content": { "application/json": { "schema": {
+            "type": "object", "properties": { "id": { "type": "string" }, "updated": { "type": "boolean" } }
+          } } } },
+          "400": { "$ref": "#/components/responses/ValidationError" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "$ref": "#/components/responses/NotFound" }
+        }
+      },
+      "delete": {
+        "tags": ["Themes"],
+        "summary": "Unpublish an owned theme",
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } }],
+        "responses": {
+          "200": { "description": "OK", "content": { "application/json": { "schema": {
+            "type": "object", "properties": { "id": { "type": "string" }, "unpublished": { "const": true }, "already": { "type": "boolean" } }
+          } } } },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "$ref": "#/components/responses/NotFound" }
+        }
+      }
+    },
+    "/profile": {
+      "get": {
+        "tags": ["Profile"],
+        "summary": "Get the caller's own bento profile board",
+        "responses": {
+          "200": { "description": "OK", "content": { "application/json": { "schema": {
+            "type": "object",
+            "properties": {
+              "enabled": { "type": "boolean" },
+              "blocks": { "type": "array", "items": { "$ref": "#/components/schemas/BentoBlock" } },
+              "warnings": { "type": "array", "items": { "type": "string" } }
+            }
+          } } } },
+          "401": { "$ref": "#/components/responses/Unauthorized" }
+        }
+      }
+    },
+    "/profile/bento": {
+      "put": {
+        "tags": ["Profile"],
+        "summary": "Replace the caller's bento board",
+        "description": "60 writes/hour.",
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": {
+            "oneOf": [
+              { "type": "object", "properties": { "blocks": { "type": "array", "items": { "$ref": "#/components/schemas/BentoBlock" } } } },
+              { "type": "object", "properties": { "clear": { "const": true } } },
+              { "type": "object", "properties": { "enabled": { "type": "boolean" } } }
+            ]
+          } } }
+        },
+        "responses": {
+          "200": { "description": "OK", "content": { "application/json": { "schema": {
+            "type": "object",
+            "properties": {
+              "enabled": { "type": "boolean" },
+              "blocks": { "type": "array", "items": { "$ref": "#/components/schemas/BentoBlock" } },
+              "warnings": { "type": "array", "items": { "type": "string" } }
+            }
+          } } } },
+          "400": { "$ref": "#/components/responses/ValidationError" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "429": { "description": "60 profile writes/hour exceeded.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      }
+    },
+    "/profile/media": {
+      "post": {
+        "tags": ["Profile"],
+        "summary": "Upload an image for use in an `image` bento block",
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": {
+            "type": "object",
+            "required": ["dataUrl"],
+            "properties": { "dataUrl": { "type": "string", "description": "data: URL, png/jpeg/gif/webp, up to 5MB decoded." } }
+          } } }
+        },
+        "responses": {
+          "200": { "description": "OK", "content": { "application/json": { "schema": {
+            "type": "object", "properties": { "url": { "type": "string" } }
+          } } } },
+          "400": { "description": "Bad image / too large (request body cap 8MB)." },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "429": { "description": "60 profile writes/hour exceeded." }
+        }
+      }
+    },
+    "/component-workspaces": {
+      "get": {
+        "tags": ["CLI Studio Drafts"],
+        "summary": "List the caller's published components and in-progress drafts together",
+        "parameters": [
+          { "name": "limit", "in": "query", "schema": { "type": "integer" } },
+          { "name": "status", "in": "query", "schema": { "type": "string", "enum": ["all", "draft", "published", "private"] } },
+          { "name": "scope", "in": "query", "schema": { "type": "string", "description": "\"all\", \"personal\", or \"team:<uuid>\"." } },
+          { "name": "component_cursor", "in": "query", "schema": { "type": "string" }, "description": "Opaque base64url cursor from a previous response." },
+          { "name": "draft_cursor", "in": "query", "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": { "description": "OK", "content": { "application/json": { "schema": {
+            "type": "object",
+            "properties": {
+              "components": { "type": "object", "properties": {
+                "items": { "type": "array", "items": { "$ref": "#/components/schemas/ComponentWorkspaceComponent" } },
+                "nextCursor": { "type": "string", "nullable": true }
+              } },
+              "drafts": { "type": "object", "properties": {
+                "items": { "type": "array", "items": { "$ref": "#/components/schemas/ComponentWorkspaceDraft" } },
+                "nextCursor": { "type": "string", "nullable": true }
+              } },
+              "draftAllowance": { "type": "object", "properties": { "remaining": { "type": "integer" }, "limit": { "type": "integer" } } }
+            }
+          } } } },
+          "401": { "$ref": "#/components/responses/Unauthorized" }
+        }
+      }
+    },
+    "/component-workspaces/{componentId}/revision": {
+      "post": {
+        "tags": ["CLI Studio Drafts"],
+        "summary": "Check out a published component into an editable draft",
+        "parameters": [{ "name": "componentId", "in": "path", "required": true, "schema": { "type": "integer" } }],
+        "responses": {
+          "202": { "description": "Draft created", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CliDraftStatus" } } } },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "$ref": "#/components/responses/NotFound" }
+        }
+      }
+    },
+    "/components/drafts": {
+      "post": {
+        "tags": ["CLI Studio Drafts"],
+        "summary": "Create a new draft (spawns a sandbox)",
+        "requestBody": {
+          "required": true,
+          "content": { "multipart/form-data": { "schema": {
+            "type": "object",
+            "required": ["metadata", "draftRequestId"],
+            "properties": {
+              "metadata": { "$ref": "#/components/schemas/PublishMetadata" },
+              "draftRequestId": { "type": "string", "format": "uuid" },
+              "files": { "type": "array", "items": { "type": "string", "format": "binary" } }
+            }
+          } } }
+        },
+        "responses": {
+          "202": { "description": "Draft created", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CliDraftStatus" } } } },
+          "400": { "$ref": "#/components/responses/ValidationError" },
+          "401": { "$ref": "#/components/responses/Unauthorized" }
+        }
+      }
+    },
+    "/components/drafts/{draftId}": {
+      "get": {
+        "tags": ["CLI Studio Drafts"],
+        "summary": "Poll a draft's status",
+        "parameters": [{ "name": "draftId", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": {
+          "200": { "description": "OK", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CliDraftStatus" } } } },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "$ref": "#/components/responses/NotFound" }
+        }
+      },
+      "delete": {
+        "tags": ["CLI Studio Drafts"],
+        "summary": "Delete a draft",
+        "parameters": [{ "name": "draftId", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": {
+          "200": { "description": "Deleted" },
+          "202": { "description": "Deletion queued" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "$ref": "#/components/responses/NotFound" }
+        }
+      }
+    },
+    "/components/drafts/{draftId}/publish": {
+      "post": {
+        "tags": ["CLI Studio Drafts"],
+        "summary": "Publish a draft as a real component",
+        "parameters": [{ "name": "draftId", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": {
+          "200": { "description": "Published", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/PublishResult" } } } },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "$ref": "#/components/responses/NotFound" }
+        }
+      }
+    },
+    "/components/drafts/{draftId}/review": {
+      "get": {
+        "tags": ["CLI Studio Drafts"],
+        "summary": "Get review context for a draft",
+        "parameters": [{ "name": "draftId", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": {
+          "200": { "description": "OK", "content": { "application/json": { "schema": {
+            "type": "object",
+            "properties": {
+              "state": { "const": "draft" }, "draftId": { "type": "string" },
+              "sourceHash": { "type": "string" }, "sourceDigest": { "type": "string" },
+              "component": { "type": "object" }, "demos": { "type": "array", "items": { "type": "object" } },
+              "media": { "type": "object" }
+            }
+          } } } },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "$ref": "#/components/responses/NotFound" }
+        }
+      },
+      "post": {
+        "tags": ["CLI Studio Drafts"],
+        "summary": "Trigger generated cover/video capture for a draft",
+        "parameters": [{ "name": "draftId", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": {
+            "type": "object", "required": ["action"], "properties": { "action": { "const": "ensure_media" } }
+          } } }
+        },
+        "responses": {
+          "202": { "description": "Media capture queued" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "$ref": "#/components/responses/NotFound" }
+        }
+      }
+    },
+    "/components/drafts/{draftId}/source": {
+      "post": {
+        "tags": ["CLI Studio Drafts"],
+        "summary": "Push updated source into an existing draft",
+        "parameters": [{ "name": "draftId", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "requestBody": {
+          "required": true,
+          "content": { "multipart/form-data": { "schema": {
+            "type": "object",
+            "properties": { "files": { "type": "array", "items": { "type": "string", "format": "binary" } } }
+          } } }
+        },
+        "responses": {
+          "200": { "description": "OK", "content": { "application/json": { "schema": {
+            "type": "object",
+            "properties": {
+              "state": { "const": "draft" }, "draftId": { "type": "string" },
+              "sourceHash": { "type": "string" }, "sourceDigest": { "type": "string" },
+              "changed": { "type": "boolean" }, "requiresRetry": { "type": "boolean" }, "mediaQueued": { "type": "boolean" }
+            }
+          } } } },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "$ref": "#/components/responses/NotFound" }
+        }
+      }
+    }
+  }
+}
