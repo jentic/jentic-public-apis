@@ -1,6 +1,6 @@
 # APIs — C
 
-Browsing 538 APIs starting with **C**.
+Browsing 537 APIs starting with **C**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · **C** · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -100,7 +100,6 @@ Browsing 538 APIs starting with **C**.
 | [certman.app](../../../../apis/openapi/certman.app) | [main](../../../../apis/openapi/certman.app/main) |
 | [cfengine.com](../../../../apis/openapi/cfengine.com) | [main](../../../../apis/openapi/cfengine.com/main) |
 | [cgtrader.com](../../../../apis/openapi/cgtrader.com) | [main](../../../../apis/openapi/cgtrader.com/main) |
-| [chain.so](../../../../apis/openapi/chain.so) | [main](../../../../apis/openapi/chain.so/main) |
 | [chain49.com](../../../../apis/openapi/chain49.com) | [main](../../../../apis/openapi/chain49.com/main) |
 | [chainaware.ai](../../../../apis/openapi/chainaware.ai) | [main](../../../../apis/openapi/chainaware.ai/main) |
 | [chaingateway.io](../../../../apis/openapi/chaingateway.io) | [main](../../../../apis/openapi/chaingateway.io/main) |
