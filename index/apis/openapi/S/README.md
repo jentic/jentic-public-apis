@@ -1,6 +1,6 @@
 # APIs — S
 
-Browsing 792 APIs starting with **S**.
+Browsing 796 APIs starting with **S**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · **S** · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -54,6 +54,7 @@ Browsing 792 APIs starting with **S**.
 | [sandboxreportingapi.connexpay.com](../../../../apis/openapi/sandboxreportingapi.connexpay.com) | [connexpay](../../../../apis/openapi/sandboxreportingapi.connexpay.com/connexpay) |
 | [sanity.io](../../../../apis/openapi/sanity.io) | [main](../../../../apis/openapi/sanity.io/main) |
 | [santanderconsumer.se](../../../../apis/openapi/santanderconsumer.se) | [main](../../../../apis/openapi/santanderconsumer.se/main) |
+| [saperly.com](../../../../apis/openapi/saperly.com) | [main](../../../../apis/openapi/saperly.com/main) |
 | [sarbacane-engage](../../../../apis/openapi/sarbacane-engage) | [main](../../../../apis/openapi/sarbacane-engage/main) |
 | [sarbacane.com](../../../../apis/openapi/sarbacane.com) | [main](../../../../apis/openapi/sarbacane.com/main) |
 | [satellogic.com](../../../../apis/openapi/satellogic.com) | [main](../../../../apis/openapi/satellogic.com/main) |
@@ -446,6 +447,7 @@ Browsing 792 APIs starting with **S**.
 | [ssllabs.com](../../../../apis/openapi/ssllabs.com) | [main](../../../../apis/openapi/ssllabs.com/main) |
 | [staatic.com](../../../../apis/openapi/staatic.com) | [main](../../../../apis/openapi/staatic.com/main) |
 | [stability.ai](../../../../apis/openapi/stability.ai) | [main](../../../../apis/openapi/stability.ai/main) |
+| [stack-auth.com](../../../../apis/openapi/stack-auth.com) | [main](../../../../apis/openapi/stack-auth.com/main) |
 | [stackexchange.com](../../../../apis/openapi/stackexchange.com) | [main](../../../../apis/openapi/stackexchange.com/main) |
 | [stadiamaps.com](../../../../apis/openapi/stadiamaps.com) | [stadiamaps-geospatial-api](../../../../apis/openapi/stadiamaps.com/stadiamaps-geospatial-api) |
 | [stadiq.app](../../../../apis/openapi/stadiq.app) | [main](../../../../apis/openapi/stadiq.app/main) |
@@ -534,6 +536,8 @@ Browsing 792 APIs starting with **S**.
 | [superfuds.pandoty.com](../../../../apis/openapi/superfuds.pandoty.com) | [main](../../../../apis/openapi/superfuds.pandoty.com/main) |
 | [supergood.ai](../../../../apis/openapi/supergood.ai) | [main](../../../../apis/openapi/supergood.ai/main) |
 | [superheroapi.com](../../../../apis/openapi/superheroapi.com) | [main](../../../../apis/openapi/superheroapi.com/main) · [superheroes](../../../../apis/openapi/superheroapi.com/superheroes) |
+| [supermemory.ai](../../../../apis/openapi/supermemory.ai) | [main](../../../../apis/openapi/supermemory.ai/main) |
+| [supersend.io](../../../../apis/openapi/supersend.io) | [main](../../../../apis/openapi/supersend.io/main) |
 | [superset.sh](../../../../apis/openapi/superset.sh) | [main](../../../../apis/openapi/superset.sh/main) |
 | [supp.co](../../../../apis/openapi/supp.co) | [main](../../../../apis/openapi/supp.co/main) |
 | [supportbox.cz](../../../../apis/openapi/supportbox.cz) | [supportbox](../../../../apis/openapi/supportbox.cz/supportbox) · [supportbox-2](../../../../apis/openapi/supportbox.cz/supportbox-2) |

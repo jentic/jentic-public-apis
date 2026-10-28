@@ -1,6 +1,6 @@
 # APIs — M
 
-Browsing 342 APIs starting with **M**.
+Browsing 347 APIs starting with **M**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · **M** · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -45,6 +45,7 @@ Browsing 342 APIs starting with **M**.
 | [mailu.io](../../../../apis/openapi/mailu.io) | [main](../../../../apis/openapi/mailu.io/main) |
 | [maintenanceconnection.com](../../../../apis/openapi/maintenanceconnection.com) | [main](../../../../apis/openapi/maintenanceconnection.com/main) |
 | [majestic.com](../../../../apis/openapi/majestic.com) | [main](../../../../apis/openapi/majestic.com/main) |
+| [makeaivideo.ai](../../../../apis/openapi/makeaivideo.ai) | [main](../../../../apis/openapi/makeaivideo.ai/main) |
 | [makeplans.net](../../../../apis/openapi/makeplans.net) | [main](../../../../apis/openapi/makeplans.net/main) |
 | [makeswift.com](../../../../apis/openapi/makeswift.com) | [main](../../../../apis/openapi/makeswift.com/main) |
 | [malga.io](../../../../apis/openapi/malga.io) | [main](../../../../apis/openapi/malga.io/main) |
@@ -147,6 +148,8 @@ Browsing 342 APIs starting with **M**.
 | [merchantwords.com](../../../../apis/openapi/merchantwords.com) | [main](../../../../apis/openapi/merchantwords.com/main) |
 | [mercure.local](../../../../apis/openapi/mercure.local) | [main](../../../../apis/openapi/mercure.local/main) |
 | [mercury.com](../../../../apis/openapi/mercury.com) | [main](../../../../apis/openapi/mercury.com/main) |
+| [merge.dev](../../../../apis/openapi/merge.dev) | [main](../../../../apis/openapi/merge.dev/main) |
+| [mergify.com](../../../../apis/openapi/mergify.com) | [main](../../../../apis/openapi/mergify.com/main) |
 | [merithub.com](../../../../apis/openapi/merithub.com) | [main](../../../../apis/openapi/merithub.com/main) |
 | [mermade.org.uk](../../../../apis/openapi/mermade.org.uk) | [openapi-converter](../../../../apis/openapi/mermade.org.uk/openapi-converter) |
 | [mermaidchart.com](../../../../apis/openapi/mermaidchart.com) | [main](../../../../apis/openapi/mermaidchart.com/main) |
@@ -299,6 +302,7 @@ Browsing 342 APIs starting with **M**.
 | [mta.info](../../../../apis/openapi/mta.info) | [main](../../../../apis/openapi/mta.info/main) |
 | [mtaa-api.herokuapp.com](../../../../apis/openapi/mtaa-api.herokuapp.com) | [main](../../../../apis/openapi/mtaa-api.herokuapp.com/main) |
 | [mtn.com](../../../../apis/openapi/mtn.com) | [main](../../../../apis/openapi/mtn.com/main) |
+| [muapi.ai](../../../../apis/openapi/muapi.ai) | [main](../../../../apis/openapi/muapi.ai/main) |
 | [multi-upload-tool.com](../../../../apis/openapi/multi-upload-tool.com) | [main](../../../../apis/openapi/multi-upload-tool.com/main) |
 | [multilocale.com](../../../../apis/openapi/multilocale.com) | [main](../../../../apis/openapi/multilocale.com/main) |
 | [multion.ai](../../../../apis/openapi/multion.ai) | [main](../../../../apis/openapi/multion.ai/main) |
@@ -337,6 +341,7 @@ Browsing 342 APIs starting with **M**.
 | [myhexfit.com](../../../../apis/openapi/myhexfit.com) | [main](../../../../apis/openapi/myhexfit.com/main) |
 | [myhours.com](../../../../apis/openapi/myhours.com) | [main](../../../../apis/openapi/myhours.com/main) |
 | [myhuiban.com](../../../../apis/openapi/myhuiban.com) | [main](../../../../apis/openapi/myhuiban.com/main) |
+| [myintervals.com](../../../../apis/openapi/myintervals.com) | [main](../../../../apis/openapi/myintervals.com/main) |
 | [myjgid.com](../../../../apis/openapi/myjgid.com) | [jgid-api](../../../../apis/openapi/myjgid.com/jgid-api) |
 | [myla.cx](../../../../apis/openapi/myla.cx) | [main](../../../../apis/openapi/myla.cx/main) |
 | [mylink.center](../../../../apis/openapi/mylink.center) | [main](../../../../apis/openapi/mylink.center/main) |
