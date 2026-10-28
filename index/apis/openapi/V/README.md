@@ -1,6 +1,6 @@
 # APIs — V
 
-Browsing 82 APIs starting with **V**.
+Browsing 84 APIs starting with **V**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · **V** · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -11,6 +11,7 @@ Browsing 82 APIs starting with **V**.
 | [valdit.com](../../../../apis/openapi/valdit.com) | [main](../../../../apis/openapi/valdit.com/main) |
 | [valence.desire2learn.com](../../../../apis/openapi/valence.desire2learn.com) | [main](../../../../apis/openapi/valence.desire2learn.com/main) |
 | [valida-cfdi.com.mx](../../../../apis/openapi/valida-cfdi.com.mx) | [main](../../../../apis/openapi/valida-cfdi.com.mx/main) |
+| [vaneform.com](../../../../apis/openapi/vaneform.com) | [main](../../../../apis/openapi/vaneform.com/main) |
 | [varg.ai](../../../../apis/openapi/varg.ai) | [main](../../../../apis/openapi/varg.ai/main) |
 | [varos.com](../../../../apis/openapi/varos.com) | [main](../../../../apis/openapi/varos.com/main) |
 | [vast.ai](../../../../apis/openapi/vast.ai) | [main](../../../../apis/openapi/vast.ai/main) |
@@ -29,6 +30,7 @@ Browsing 82 APIs starting with **V**.
 | [veridionmarkets.com](../../../../apis/openapi/veridionmarkets.com) | [main](../../../../apis/openapi/veridionmarkets.com/main) |
 | [veriff.com](../../../../apis/openapi/veriff.com) | [main](../../../../apis/openapi/veriff.com/main) |
 | [verifi.cloud](../../../../apis/openapi/verifi.cloud) | [main](../../../../apis/openapi/verifi.cloud/main) |
+| [verifiedhandles.org](../../../../apis/openapi/verifiedhandles.org) | [main](../../../../apis/openapi/verifiedhandles.org/main) |
 | [verifyd.online](../../../../apis/openapi/verifyd.online) | [main](../../../../apis/openapi/verifyd.online/main) |
 | [veripoint.ai](../../../../apis/openapi/veripoint.ai) | [main](../../../../apis/openapi/veripoint.ai/main) |
 | [verirouteintel.com](../../../../apis/openapi/verirouteintel.com) | [main](../../../../apis/openapi/verirouteintel.com/main) |
