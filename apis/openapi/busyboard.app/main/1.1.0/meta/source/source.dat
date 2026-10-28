@@ -1,0 +1,580 @@
+openapi: 3.1.0
+info:
+  title: BusyBoard API
+  version: 1.1.0
+  description: |
+    REST API for programmatic access to BusyBoard availability data.
+    The API exposes cross-person busy/free data while keeping event details private.
+
+    Keyless alternative: any BusyBoard share link (`/a/{slug}/{token}`) serves the
+    same structured availability JSON when requested with
+    `Accept: application/json` — or with `?format=json` appended for clients that
+    can't set headers. The token in the URL is the credential; see
+    `/.well-known/busyboard.json` for details.
+  contact:
+    url: https://busyboard.app
+  license:
+    name: MIT
+
+servers:
+  - url: https://busyboard.app/api/v1
+    description: Production
+
+security:
+  - apiKey: []
+
+components:
+  securitySchemes:
+    apiKey:
+      type: http
+      scheme: bearer
+      description: |
+        API key with `bb_live_` prefix. Create at Settings > API & Integrations.
+
+        **Scopes** (agent-readiness A2.1): every key carries a set of scopes.
+        `read:freebusy` and `read:people` are read scopes, available on the
+        **free plan**. `propose:booking` and `manage:preferences` (reserved,
+        not yet a live feature) are write scopes and require a **Pro plan**.
+        New keys default to read-only. OpenAPI's HTTP-bearer auth has no
+        formal scope field, so each path below states the scope it requires
+        in its description. `GET /me` needs no scope — any valid key can call
+        it. A request with a key missing the required scope receives `403`
+        with `code: "insufficient_scope"`.
+
+  schemas:
+    Person:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        firstName: { type: string, nullable: true }
+        lastName: { type: string, nullable: true }
+        email: { type: string, format: email }
+        imageUrl: { type: string, nullable: true }
+        timezone: { type: string, nullable: true, example: "Europe/Prague" }
+
+    Block:
+      type: object
+      properties:
+        id: { type: string }
+        userId: { type: string, format: uuid }
+        startTime: { type: string, format: date-time }
+        endTime: { type: string, format: date-time }
+        isAllDay: { type: boolean }
+        responseStatus: { type: string, enum: [accepted, tentative, needsAction], description: "Only included for own blocks (dual-detail model)" }
+        mergedCount: { type: integer }
+
+    Slot:
+      type: object
+      properties:
+        startTime: { type: string, format: date-time }
+        endTime: { type: string, format: date-time }
+
+    Group:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        description: { type: string, nullable: true }
+        color: { type: string, nullable: true }
+        emoji: { type: string, nullable: true }
+        organizationId: { type: string, format: uuid, nullable: true }
+        memberCount: { type: integer }
+        memberIds: { type: array, items: { type: string, format: uuid } }
+
+    Pagination:
+      type: object
+      properties:
+        total: { type: integer }
+        limit: { type: integer }
+        offset: { type: integer }
+        hasMore: { type: boolean }
+
+    Error:
+      type: object
+      properties:
+        error: { type: string }
+        code: { type: string, example: "validation_error" }
+        hint:
+          type: string
+          nullable: true
+          description: |
+            Machine-readable remediation guidance (agent-readiness §A2.2/§A4
+            structured-error convention). Present on newer endpoints
+            (`/booking-proposals`); older v1 routes may omit it.
+
+    BookingProposalRequest:
+      type: object
+      description: |
+        Exactly one of `shareToken` or `connectionId` must be provided.
+      required: [startTime, durationMinutes, idempotencyKey]
+      properties:
+        shareToken:
+          type: string
+          minLength: 1
+          maxLength: 64
+          description: The token segment from a share URL (`/a/{slug}/{token}`) — same trust as a human holding the link.
+        connectionId:
+          type: string
+          format: uuid
+          description: One of the caller's own external connections (see `/people` `connections[].connectionId`).
+        startTime:
+          type: string
+          format: date-time
+          description: ISO 8601 with offset. Must align to 15 minutes, be at least 1 hour out, and within 28 days.
+        durationMinutes:
+          type: integer
+          minimum: 15
+          maximum: 120
+        note:
+          type: string
+          maxLength: 500
+        idempotencyKey:
+          type: string
+          minLength: 8
+          maxLength: 128
+          description: |
+            Required. Caller-generated key scoping a retry-safe request. A
+            replayed call with the same key returns the original outcome
+            with the `X-Idempotency-Replayed: true` response header instead
+            of creating a duplicate proposal.
+
+    BookingProposalResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [confirmed, pending]
+          description: "`confirmed` when the sharer's share has auto-accept on; `pending` when it lands in the sharer's notification bell awaiting approval."
+        startTime: { type: string, format: date-time }
+        endTime: { type: string, format: date-time }
+        durationMinutes: { type: integer }
+        with: { type: string, description: The sharer's display name }
+        hint:
+          type: string
+          nullable: true
+          description: Present when `status` is `pending` — explains the approval step.
+
+  parameters:
+    limit:
+      name: limit
+      in: query
+      schema: { type: integer, minimum: 1 }
+      description: Number of items to return
+    offset:
+      name: offset
+      in: query
+      schema: { type: integer, minimum: 0, default: 0 }
+      description: Number of items to skip
+
+  headers:
+    X-RateLimit-Limit:
+      schema: { type: integer, example: 100 }
+      description: Requests allowed per minute
+    X-RateLimit-Remaining:
+      schema: { type: integer }
+      description: Requests remaining in current window
+    X-RateLimit-Reset:
+      schema: { type: integer }
+      description: Unix timestamp (seconds) when the rate limit resets
+    X-Request-Id:
+      schema: { type: string, format: uuid }
+      description: Unique request ID for tracing. Echoed if provided by client.
+    X-Idempotency-Replayed:
+      schema: { type: string, enum: ["true"] }
+      description: |
+        Present (value `"true"`) when a response was served from a prior
+        idempotent call with the same `idempotencyKey`, rather than newly
+        executed. Absent on a fresh execution.
+
+paths:
+  /me:
+    get:
+      summary: Get current user profile
+      operationId: getMe
+      description: "**Required scope:** none — any valid API key can call this."
+      responses:
+        "200":
+          description: User profile with plan, limits, and usage
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id: { type: string, format: uuid }
+                  email: { type: string }
+                  firstName: { type: string, nullable: true }
+                  lastName: { type: string, nullable: true }
+                  imageUrl: { type: string, nullable: true }
+                  timezone: { type: string, nullable: true }
+                  showWeekends: { type: boolean }
+                  workingHours: { type: object, nullable: true }
+                  plan: { type: string, enum: [free, pro] }
+                  limits: { type: object }
+                  usage:
+                    type: object
+                    properties:
+                      activeCalendars: { type: integer }
+                      groups: { type: integer }
+
+  /people:
+    get:
+      summary: List accessible people
+      operationId: getPeople
+      description: |
+        Returns org members grouped by org, external connections, and a flat deduplicated list for name matching.
+
+        **Required scope:** `read:people` (free plan).
+      parameters:
+        - $ref: "#/components/parameters/limit"
+        - $ref: "#/components/parameters/offset"
+      responses:
+        "200":
+          description: People list with pagination on the flat `data` array
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  orgs:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        orgId: { type: string }
+                        orgName: { type: string }
+                        members: { type: array, items: { $ref: "#/components/schemas/Person" } }
+                  connections:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        connectionId: { type: string }
+                        user: { $ref: "#/components/schemas/Person" }
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/Person" }
+                    description: Flat deduplicated list of all people (paginated)
+                  pagination: { $ref: "#/components/schemas/Pagination" }
+
+  /groups:
+    get:
+      summary: List user's groups
+      operationId: getGroups
+      description: "**Required scope:** `read:people` (free plan)."
+      parameters:
+        - $ref: "#/components/parameters/limit"
+        - $ref: "#/components/parameters/offset"
+      responses:
+        "200":
+          description: Groups with member counts
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/Group" }
+                  pagination: { $ref: "#/components/schemas/Pagination" }
+
+  /availability:
+    get:
+      summary: Get busy blocks for users
+      operationId: getAvailability
+      description: |
+        Returns busy blocks for specified users. Own blocks include full detail (responseStatus);
+        other users' blocks show busy/free only (dual-detail privacy model).
+
+        **Date interpretation:** `startDate` and `endDate` are interpreted as full calendar
+        days in the API key owner's timezone (NOT UTC). For example, a Bratislava user
+        passing `startDate=2026-04-08&endDate=2026-04-08` queries the entire day of
+        April 8 in CET/CEST.
+
+        **Required scope:** `read:freebusy` (free plan).
+      parameters:
+        - name: userIds
+          in: query
+          schema: { type: string }
+          description: Comma-separated user IDs (defaults to self)
+        - name: startDate
+          in: query
+          required: true
+          schema: { type: string, format: date }
+          description: YYYY-MM-DD; interpreted in the API key owner's timezone.
+        - name: endDate
+          in: query
+          required: true
+          schema: { type: string, format: date }
+          description: YYYY-MM-DD; interpreted in the API key owner's timezone (inclusive end-of-day).
+        - $ref: "#/components/parameters/limit"
+        - $ref: "#/components/parameters/offset"
+      responses:
+        "200":
+          description: Busy blocks with pagination
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/Block" }
+                  pagination: { $ref: "#/components/schemas/Pagination" }
+
+  /availability/summary:
+    get:
+      summary: Get availability summary
+      operationId: getAvailabilitySummary
+      description: |
+        Natural language summary with busyness score for the authenticated user.
+
+        **Date interpretation:** `date` is interpreted in the API key owner's timezone
+        (NOT UTC). When `range=week`, the Sunday-anchored week containing `date` is used.
+
+        **Required scope:** `read:freebusy` (free plan).
+      parameters:
+        - name: date
+          in: query
+          schema: { type: string, format: date }
+          description: Target date YYYY-MM-DD, interpreted in the API key owner's timezone (defaults to today).
+        - name: range
+          in: query
+          schema: { type: string, enum: [day, week], default: day }
+      responses:
+        "200":
+          description: Summary with busyness score
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  range: { type: string }
+                  startDate: { type: string, format: date-time }
+                  endDate: { type: string, format: date-time }
+                  meetingCount: { type: integer }
+                  totalBusyHours: { type: number }
+                  totalWorkingHours: { type: number }
+                  busynessScore: { type: integer, minimum: 0, maximum: 100 }
+                  nextFreeAt: { type: string, nullable: true }
+                  summary: { type: string, description: Natural language summary }
+
+  /find-time:
+    get:
+      summary: Find mutual free time
+      operationId: findTime
+      description: |
+        Find available time slots when multiple people are all free.
+
+        **Date interpretation:** `startDate` and `endDate` are interpreted as full calendar
+        days in the API key owner's timezone (NOT UTC).
+
+        At least one of `userIds` or `externalConnectionIds` is required.
+
+        **Required scope:** `read:freebusy` (free plan).
+      parameters:
+        - name: userIds
+          in: query
+          schema: { type: string }
+          description: Comma-separated user IDs (org members). At least one of userIds or externalConnectionIds is required.
+        - name: externalConnectionIds
+          in: query
+          schema: { type: string }
+          description: Comma-separated external connection IDs (from `/people` `connections[].connectionId`). Their connected users' busy blocks and working hours are included.
+        - name: durationMinutes
+          in: query
+          schema: { type: integer, minimum: 5, maximum: 480, default: 30 }
+        - name: startDate
+          in: query
+          required: true
+          schema: { type: string, format: date }
+          description: YYYY-MM-DD; interpreted in the API key owner's timezone.
+        - name: endDate
+          in: query
+          required: true
+          schema: { type: string, format: date }
+          description: YYYY-MM-DD; interpreted in the API key owner's timezone (inclusive end-of-day).
+        - name: withinWorkingHours
+          in: query
+          schema: { type: boolean, default: true }
+      responses:
+        "200":
+          description: Available time slots
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  slots:
+                    type: array
+                    items: { $ref: "#/components/schemas/Slot" }
+                  durationMinutes: { type: integer }
+                  userIds: { type: array, items: { type: string } }
+                  externalConnectionIds: { type: array, items: { type: string } }
+                  withinWorkingHours: { type: boolean }
+
+  /calendars:
+    get:
+      summary: List connected calendar accounts
+      operationId: getCalendars
+      description: |
+        Returns calendar accounts with nested calendars. Never exposes OAuth tokens.
+
+        **Required scope:** `read:freebusy` (free plan).
+      responses:
+        "200":
+          description: Calendar accounts
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  accounts:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: string }
+                        provider: { type: string, enum: [google, outlook, apple] }
+                        email: { type: string }
+                        syncStatus: { type: string, enum: [active, syncing, paused, error, disconnected] }
+                        lastSyncAt: { type: string, format: date-time, nullable: true }
+                        createdAt: { type: string, format: date-time }
+                        calendars:
+                          type: array
+                          items:
+                            type: object
+                            properties:
+                              id: { type: string }
+                              name: { type: string }
+                              color: { type: string, nullable: true }
+                              isPrimary: { type: boolean }
+                              isEnabled: { type: boolean }
+
+  /working-hours:
+    get:
+      summary: Get working hours configuration
+      operationId: getWorkingHours
+      description: |
+        Returns working hours for self or specified users (gated by shared org membership).
+
+        **Required scope:** `read:freebusy` (free plan).
+      parameters:
+        - name: userIds
+          in: query
+          schema: { type: string }
+          description: Comma-separated user IDs (defaults to self)
+      responses:
+        "200":
+          description: Working hours configurations
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  workingHours:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        userId: { type: string }
+                        workingHours: { type: object, nullable: true }
+                        timezone: { type: string, nullable: true }
+
+  /booking-proposals:
+    post:
+      summary: Propose a meeting time
+      operationId: createBookingProposal
+      description: |
+        Proposes a booking on someone's availability. Rides the same approval
+        infrastructure as public booking: this creates a `booking_requests`
+        row that lands in the sharer's notification bell exactly like a
+        request from a human visiting their share page. The sharer approves
+        or declines (or the booking confirms instantly if they've enabled
+        auto-accept on that share). There is no confirm/write-through scope
+        in v1 — confirmation always stays with a human.
+
+        Authorize the target with exactly one of `shareToken` (the token
+        segment from a share URL — the same trust as a human holding the
+        link) or `connectionId` (one of the caller's own external
+        connections, from `/people` `connections[].connectionId`).
+
+        Slots are re-verified server-side inside a per-user advisory lock at
+        write time; a slot taken between your availability read and this
+        call returns `409 slot_unavailable` — re-fetch and retry with a new
+        `idempotencyKey`.
+
+        **Idempotency:** `idempotencyKey` is required. Retrying the same
+        request with the same key returns the original outcome (status code
+        included) with the `X-Idempotency-Replayed: true` header instead of
+        creating a second proposal — safe for agents that retry on timeout.
+
+        **Required scope:** `propose:booking` (Pro plan — this is a write
+        scope, gated per the scope model above).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/BookingProposalRequest" }
+      responses:
+        "201":
+          description: |
+            Proposal created. `status` is `confirmed` when the share has
+            auto-accept enabled (the booking is already on the sharer's
+            calendar), or `pending` when it's awaiting the sharer's approval
+            from their notification bell.
+          headers:
+            X-Idempotency-Replayed:
+              $ref: "#/components/headers/X-Idempotency-Replayed"
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BookingProposalResponse" }
+        "400":
+          description: |
+            Invalid request body, or the requested slot fails validation
+            (not aligned to 15 minutes, inside the 1-hour minimum notice, or
+            past the 28-day horizon) — `code` is `invalid_body` or
+            `invalid_slot`. Also returned for `self_booking` (proposing
+            against your own share/connection).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "403":
+          description: |
+            The API key is missing the `propose:booking` scope
+            (`code: "insufficient_scope"`), or the caller's plan doesn't
+            include API write access (`code: "plan_required"` — propose is
+            Pro-only per the scope model).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "404":
+          description: |
+            The share token or connection doesn't resolve, or booking isn't
+            enabled on that share — always `code: "not_found"` (deliberately
+            not distinguished, no oracle for probing share state).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "409":
+          description: |
+            `code: "slot_unavailable"` — the slot was taken between your
+            read and this call; re-fetch availability and retry with a new
+            `idempotencyKey`. `code: "duplicate_pending"` — a pending
+            request for this exact time already exists in the sharer's
+            queue. `code: "unavailable"` — booking is temporarily
+            unavailable (e.g. no destination calendar resolved).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "429":
+          description: |
+            `code: "rate_limited"` — proposals are limited to 10/minute per
+            user (see `Retry-After`). `code: "daily_cap"` — the sharer's
+            rolling 24h booking capacity is exhausted; try again tomorrow.
+          headers:
+            Retry-After:
+              schema: { type: integer }
+              description: Seconds until the rate limit resets (present on `rate_limited` only).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
