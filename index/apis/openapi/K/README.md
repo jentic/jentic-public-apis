@@ -1,6 +1,6 @@
 # APIs — K
 
-Browsing 78 APIs starting with **K**.
+Browsing 79 APIs starting with **K**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · **K** · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -71,6 +71,7 @@ Browsing 78 APIs starting with **K**.
 | [kpn.com](../../../../apis/openapi/kpn.com) | [main](../../../../apis/openapi/kpn.com/main) |
 | [kraken.com](../../../../apis/openapi/kraken.com) | [main](../../../../apis/openapi/kraken.com/main) |
 | [kroger.com](../../../../apis/openapi/kroger.com) | [main](../../../../apis/openapi/kroger.com/main) |
+| [krova.cloud](../../../../apis/openapi/krova.cloud) | [main](../../../../apis/openapi/krova.cloud/main) |
 | [krozu.com](../../../../apis/openapi/krozu.com) | [main](../../../../apis/openapi/krozu.com/main) |
 | [krungsri.com](../../../../apis/openapi/krungsri.com) | [main](../../../../apis/openapi/krungsri.com/main) |
 | [ksaar.co](../../../../apis/openapi/ksaar.co) | [main](../../../../apis/openapi/ksaar.co/main) |
