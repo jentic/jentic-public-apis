@@ -1,6 +1,6 @@
 # APIs — I
 
-Browsing 136 APIs starting with **I**.
+Browsing 137 APIs starting with **I**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · **I** · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -110,6 +110,7 @@ Browsing 136 APIs starting with **I**.
 | [ip2whois.com](../../../../apis/openapi/ip2whois.com) | [main](../../../../apis/openapi/ip2whois.com/main) |
 | [ip99.com](../../../../apis/openapi/ip99.com) | [main](../../../../apis/openapi/ip99.com/main) |
 | [ipapi.com](../../../../apis/openapi/ipapi.com) | [ipapi](../../../../apis/openapi/ipapi.com/ipapi) · [main](../../../../apis/openapi/ipapi.com/main) |
+| [ipasis.com](../../../../apis/openapi/ipasis.com) | [main](../../../../apis/openapi/ipasis.com/main) |
 | [ipdata.co](../../../../apis/openapi/ipdata.co) | [main](../../../../apis/openapi/ipdata.co/main) |
 | [ipgeolocation.io](../../../../apis/openapi/ipgeolocation.io) |  |
 | [ipgeolocationapi.io](../../../../apis/openapi/ipgeolocationapi.io) | [main](../../../../apis/openapi/ipgeolocationapi.io/main) |
