@@ -1,0 +1,757 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Trawlia",
+    "version": "1.0.0",
+    "summary": "Web search and extraction for AI agents.",
+    "description": "Two endpoints. One call searches the live web and returns a short ranked list with the source URL on every result, and at advanced depth the readable page text or the reason it could not be fetched.\n\nParameters this API does not support are REJECTED with a 400 naming them, never accepted and ignored, so a request never appears to succeed while leaving out what it asked for.\n\nCosts are charged before the work and refunded on hard failure. A basic search is 1 credit, an advanced search 2, and extraction 1 credit per 5 URLs.",
+    "contact": {
+      "name": "Trawlia support",
+      "url": "https://trawlia.co/contact"
+    }
+  },
+  "servers": [
+    {
+      "url": "https://api.trawlia.co",
+      "description": "Production"
+    }
+  ],
+  "security": [
+    {
+      "bearerAuth": []
+    },
+    {
+      "apiKeyHeader": []
+    }
+  ],
+  "tags": [
+    {
+      "name": "search",
+      "description": "Retrieval."
+    },
+    {
+      "name": "extract",
+      "description": "Extraction of URLs you already have."
+    }
+  ],
+  "paths": {
+    "/v1/search": {
+      "post": {
+        "tags": [
+          "search"
+        ],
+        "operationId": "search",
+        "summary": "Search the live web",
+        "description": "Searches the live web, deduplicates by canonical URL, ranks what is left against the query, and at advanced depth fetches and extracts every result.\n\nAn empty `results` array only ever means the web had nothing to say. It is never how a failure is reported: a search that could not be served is a 502, and one held back by pacing is a 429 with Retry-After. You never have to guess which of the three happened.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "query"
+                ],
+                "properties": {
+                  "query": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 1000,
+                    "description": "The question to answer. Natural language, not a keyword expression.",
+                    "example": "what changed in the EU AI act"
+                  },
+                  "search_depth": {
+                    "type": "string",
+                    "enum": [
+                      "basic",
+                      "advanced",
+                      "fast",
+                      "ultra-fast"
+                    ],
+                    "default": "basic",
+                    "description": "The cost dial. `basic` returns a snippet per result and fetches no pages: roughly ten times cheaper and faster, and enough for most agent queries. `advanced` fetches every result, extracts the readable content and ranks passages against the query. `fast` is basic with browser escalation forbidden, so no blocked page can spend seconds being recovered. `ultra-fast` narrows the search further still, trading breadth for the quickest possible result."
+                  },
+                  "topic": {
+                    "type": "string",
+                    "enum": [
+                      "general",
+                      "news",
+                      "finance"
+                    ],
+                    "default": "general",
+                    "description": "Changes what is searched. `news` is tuned for recent events and returns a published_date that general results usually lack. `finance` validates but answers 503: this deployment has no finance index, and serving general results instead would answer a different question silently."
+                  },
+                  "max_results": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "description": "How many results to return, from the top of the ranked list. Omit it and every result the sources produced is returned, typically 20 to 60 after deduplication. There is no fixed ceiling; an organisation may carry one, and a request above it is a 400 naming it."
+                  },
+                  "include_answer": {
+                    "oneOf": [
+                      {
+                        "type": "boolean"
+                      },
+                      {
+                        "type": "string",
+                        "enum": [
+                          "basic",
+                          "advanced"
+                        ]
+                      }
+                    ],
+                    "default": false,
+                    "description": "Validates but answers 503. This API returns ranked results and extracted page content; it does not synthesise prose about them. Answer from the `content` of each result with the model you are already running."
+                  },
+                  "include_raw_content": {
+                    "oneOf": [
+                      {
+                        "type": "boolean"
+                      },
+                      {
+                        "type": "string",
+                        "enum": [
+                          "markdown",
+                          "text"
+                        ]
+                      }
+                    ],
+                    "default": false,
+                    "description": "Also return the full extracted page content as `raw_content`. `true` and `markdown` are the same thing; `text` is the same extraction with the markup taken back off. Implies advanced depth, because the field is only populated on the fetched path."
+                  },
+                  "include_images": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "Return absolute URLs of images inside each article, and their union at the top level. Taken from the extracted article rather than the whole page, so logos, avatars and tracking pixels are excluded. Implies advanced depth, because images come from the fetched page."
+                  },
+                  "include_image_descriptions": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "Describe each image with a vision model. Validates but answers 503: this API does not run one. include_images works without it and returns URLs."
+                  },
+                  "include_favicon": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "Return the icon each page declares, or null when it declares none. Never the conventional /favicon.ico guess, which is frequently a 404 and would hand you a URL nobody checked. Implies advanced depth."
+                  },
+                  "include_domains": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "maxItems": 300,
+                    "description": "Restrict results to these hosts. Suffix match, so subdomains are included."
+                  },
+                  "exclude_domains": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "maxItems": 150,
+                    "description": "Drop results from these hosts."
+                  },
+                  "time_range": {
+                    "type": "string",
+                    "enum": [
+                      "day",
+                      "week",
+                      "month",
+                      "year",
+                      "d",
+                      "w",
+                      "m",
+                      "y"
+                    ],
+                    "description": "Window back from now, in either spelling. Results with no publication date are dropped rather than assumed recent, so this filters harder on `general` than on `news`."
+                  },
+                  "start_date": {
+                    "type": "string",
+                    "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+                    "description": "Earliest publication date, as YYYY-MM-DD. Intersects with time_range rather than replacing it. Undated results are dropped, on the same reasoning as time_range."
+                  },
+                  "end_date": {
+                    "type": "string",
+                    "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+                    "description": "Latest publication date, as YYYY-MM-DD, inclusive of the whole day named. Must not be earlier than start_date."
+                  },
+                  "country": {
+                    "type": "string",
+                    "description": "Region preference, as an ISO 3166-1 alpha-2 code or a country name. A value we cannot resolve is a 400 rather than a silent default, because answering a request for French results with American ones is worse than refusing. A hint the engines weight by, not a filter."
+                  },
+                  "language": {
+                    "type": "string",
+                    "description": "Language preference, as an ISO 639-1 code or a language name. Unresolvable values are a 400, for the same reason as country. A hint rather than a filter; see filter_by_language."
+                  },
+                  "filter_by_language": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "Drop results not in the requested language. Validates but answers 503 on this deployment, because detecting the language of every result needs a detector we do not ship. `language` is still honoured as a preference."
+                  },
+                  "auto_parameters": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "Infer topic and depth from the query with a model. Validates but answers 503: this API does not run one. Set the parameters explicitly instead."
+                  },
+                  "exact_match": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "Treat the query as a phrase that must appear rather than as terms, so the words must occur together and in order rather than merely all being present."
+                  },
+                  "include_usage": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "Return a `usage` object carrying the credits this request actually spent, including any browser renders it needed. Accumulated as it is spent rather than estimated afterwards, so it agrees with the ledger you are billed from."
+                  },
+                  "safe_search": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "Filter adult content out of the results."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Ranked results.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "query": {
+                      "type": "string"
+                    },
+                    "results": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "title": {
+                            "type": "string"
+                          },
+                          "url": {
+                            "type": "string",
+                            "format": "uri"
+                          },
+                          "content": {
+                            "type": "string",
+                            "description": "The readable content of the page at advanced depth; a short snippet at basic depth."
+                          },
+                          "score": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1,
+                            "description": "Relevance score from 0 to 1, where 1 is the strongest match for your query. Safe to threshold on directly."
+                          },
+                          "published_date": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "fetched": {
+                            "type": "boolean",
+                            "description": "Whether the page was actually retrieved. Advanced depth only. A result we could not read is marked rather than dropped."
+                          },
+                          "fetch_error": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "redirected_from": {
+                            "type": "string",
+                            "description": "Present only when a render resolved an opaque redirector to the publisher."
+                          },
+                          "raw_content": {
+                            "type": "string",
+                            "description": "Only when include_raw_content is set."
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "title",
+                          "url",
+                          "content",
+                          "score"
+                        ]
+                      }
+                    },
+                    "images": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "format": "uri"
+                      },
+                      "description": "Absolute image URLs from inside the result articles, deduplicated and in rank order, so the first belong to the best-ranked page. Empty unless include_images is set. Taken from the extracted article rather than the whole page, so logos, avatars and tracking pixels are excluded."
+                    },
+                    "usage": {
+                      "type": "object",
+                      "properties": {
+                        "credits": {
+                          "type": "integer",
+                          "description": "Credits this request actually spent, browser renders included. Accumulated as it is spent rather than estimated afterwards, so it agrees with the ledger you are billed from."
+                        }
+                      },
+                      "required": [
+                        "credits"
+                      ],
+                      "description": "Present only when include_usage is set."
+                    },
+                    "response_time": {
+                      "type": "number"
+                    },
+                    "request_id": {
+                      "type": "string",
+                      "description": "Also the x-request-id response header. Quote it when reporting a problem."
+                    }
+                  },
+                  "required": [
+                    "query",
+                    "results",
+                    "response_time"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Malformed request, or a parameter this API does not support. `unsupported_parameters` lists the offending names; they are rejected rather than ignored so a request never appears to succeed while leaving out what it asked for.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "description": "Stable machine-readable code."
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, unknown, or revoked key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "description": "Stable machine-readable code."
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Valid key, insufficient scope, or an unverified email address.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "description": "Stable machine-readable code."
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Your rate limit, your exhausted credits, or search pacing itself. All carry retry-after; the `error` code says which.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "description": "Stable machine-readable code."
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "The search could not be run. Deliberately not a 200 with an empty array.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "description": "Stable machine-readable code."
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "A required capability is not configured, named in the response rather than quietly omitted.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "description": "Stable machine-readable code."
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/extract": {
+      "post": {
+        "tags": [
+          "extract"
+        ],
+        "operationId": "extract",
+        "summary": "Extract the readable content of URLs",
+        "description": "The search pipeline without the retrieval stage. Billed per batch of five URLs rather than per URL, so passing the whole list you have costs the same as passing one.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "urls"
+                ],
+                "properties": {
+                  "urls": {
+                    "oneOf": [
+                      {
+                        "type": "string",
+                        "format": "uri"
+                      },
+                      {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "format": "uri"
+                        },
+                        "minItems": 1,
+                        "maxItems": 20
+                      }
+                    ],
+                    "description": "URLs to fetch and extract the readable content from, as one string or a list. Canonicalised and deduplicated before anything is charged, so the same page with different tracking parameters costs one extraction."
+                  },
+                  "query": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 1000,
+                    "description": "Return only the passages of each page that answer this, rather than the whole document. Without it there is nothing to rank against, so the whole extraction is returned."
+                  },
+                  "chunks_per_source": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 5,
+                    "default": 3,
+                    "description": "How many ranked passages of each page to return. Only meaningful with `query`."
+                  },
+                  "extract_depth": {
+                    "type": "string",
+                    "enum": [
+                      "basic",
+                      "advanced"
+                    ],
+                    "default": "basic",
+                    "description": "`advanced` runs every page through a real browser, which is what recovers content assembled by JavaScript, and is charged the render meter per page. Answers 503 when the render tier is switched off, rather than charging for a depth it cannot deliver."
+                  },
+                  "include_images": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "Return absolute URLs of images inside each extracted article."
+                  },
+                  "include_favicon": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "Return the icon each page declares, or null when it declares none."
+                  },
+                  "format": {
+                    "type": "string",
+                    "enum": [
+                      "markdown",
+                      "text"
+                    ],
+                    "default": "markdown",
+                    "description": "`text` is the same extraction with the markup taken back off: link text is kept and targets dropped. Never a second extraction pass, so both formats describe the same body."
+                  },
+                  "timeout": {
+                    "type": "number",
+                    "minimum": 1,
+                    "maximum": 60,
+                    "description": "Per-page fetch timeout in seconds. Defaults to the organisation's setting."
+                  },
+                  "include_usage": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "Return a `usage` object carrying the credits this request actually spent, renders included."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Extracted pages, plus the ones that could not be.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "results": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "url": {
+                            "type": "string",
+                            "format": "uri"
+                          },
+                          "title": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "content": {
+                            "type": "string"
+                          },
+                          "source": {
+                            "type": "string",
+                            "enum": [
+                              "cache",
+                              "fetch",
+                              "render"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "url",
+                          "content",
+                          "source"
+                        ]
+                      }
+                    },
+                    "failed": {
+                      "type": "array",
+                      "description": "Named with the reason. Batches producing nothing are refunded.",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "url": {
+                            "type": "string"
+                          },
+                          "error": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "url",
+                          "error"
+                        ]
+                      }
+                    },
+                    "response_time": {
+                      "type": "number"
+                    },
+                    "request_id": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "results",
+                    "failed",
+                    "response_time"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Malformed request, unsupported parameter, or no usable URLs.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "description": "Stable machine-readable code."
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, unknown, or revoked key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "description": "Stable machine-readable code."
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit or exhausted credits.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "description": "Stable machine-readable code."
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Nothing could be extracted from any URL.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "description": "Stable machine-readable code."
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/health": {
+      "get": {
+        "summary": "Liveness, and which optional capabilities are configured",
+        "description": "Unauthenticated. `render` reports whether the browser tier is actually switched on for this deployment, so a caller can tell a missing capability from a broken one.",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Up.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "render": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "`authorization: Bearer twl_...`"
+      },
+      "apiKeyHeader": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "x-api-key",
+        "description": "`x-api-key: twl_...`. Accepted on every endpoint, same key."
+      }
+    }
+  }
+}
