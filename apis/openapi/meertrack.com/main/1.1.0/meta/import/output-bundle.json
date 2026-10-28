@@ -1,0 +1,3247 @@
+{
+  "openapi": "3.2.0",
+  "info": {
+    "title": "meertrack API",
+    "version": "1.1.0",
+    "summary": "Read-only HTTP API for programmatic access to meertrack competitor data.",
+    "description": "Machine-readable contract for the meertrack v1 API. Use it to\ngenerate clients, import into Postman/Stoplight, or validate requests\nand responses.\n\nAuth: every request must include `Authorization: Bearer mt_live_…`.\nKeys are minted in the app at Settings → API Keys (admin only).\n\nRate limit: 60 requests per minute, per workspace, **per serverless\ninstance**. The limiter is in-process - there is no shared Redis. In\npractice this means:\n- The `X-RateLimit-Remaining` header reflects the counter on the\n  instance that served the current request only. Successive requests\n  may be routed to different instances, so the value is not monotonic.\n- A burst across multiple cold instances can briefly exceed 60 rpm in\n  aggregate. Don't design clients that rely on exactly-60 enforcement.\n- Treat 429 + `X-RateLimit-Reset` as the authoritative backoff signal\n  and apply jitter; do not extrapolate from `X-RateLimit-Remaining`.\n\nEvery successful response and every rate-limited response carries the\n`X-RateLimit-Limit`, `X-RateLimit-Remaining`, and `X-RateLimit-Reset`\nheaders. 401 responses carry `WWW-Authenticate` instead.\n\nParameter validation is strict. On the filtering endpoints\n(`/competitors`, `/activity`, `/activity/items`, `/digests`) an\nunrecognized query parameter returns `400 unknown_parameter` naming\nthe offending parameter, and an out-of-range value returns\n`400 invalid_parameter` - neither is ignored. Comma-separated\nparameters may also be repeated (`?id=A&id=B` is equivalent to\n`?id=A,B`); repeating a non-list parameter is an error.\n\nVersioning & deprecation: this is `v1`. Backwards-incompatible\nchanges ship as `v2` at a new path prefix; `v1` will continue to be\nserved. One exception, effective 1.1.0: the strict parameter\nvalidation described above was introduced on `v1` rather than held\nfor `v2`, because the previous behavior returned `200` with\nunfiltered data for a request the server had not understood - a\nsilently wrong answer we judged worse than a breaking change.\nField-level deprecations are announced on a deprecated field via an\n`x-deprecated` extension and a `Deprecation: true` header on\naffected responses, with at least 90 days' notice before removal;\ndeprecated *parameters* are marked `deprecated: true` in this\ndocument and echoed in an `X-Meertrack-Deprecated-Parameter`\nresponse header. Subscribe to changes by watching the `info.version`\nfield in this document - the patch version bumps for additive\nchanges, the minor version for backwards-compatible behavior\nchanges.\n\nQuestions or access requests: [contact us](https://meertrack.com/contact).\n",
+    "license": {
+      "name": "Proprietary"
+    },
+    "x-jentic-source-url": "https://meertrack.com/v1/openapi.json"
+  },
+  "jsonSchemaDialect": "https://spec.openapis.org/oas/3.2/dialect/base",
+  "servers": [
+    {
+      "url": "https://api.meertrack.com/v1",
+      "description": "Production"
+    }
+  ],
+  "paths": {
+    "/me": {
+      "get": {
+        "tags": [
+          "Introspection"
+        ],
+        "operationId": "getMe",
+        "summary": "Caller context",
+        "description": "Returns the caller's auth context (`auth_type`, `subject`), the API key in use (`null` for OAuth callers, which have no API-key record), and the workspace it belongs to.",
+        "responses": {
+          "200": {
+            "description": "Key and workspace details.",
+            "headers": {
+              "X-RateLimit-Limit": {
+                "$ref": "#/components/headers/XRateLimitLimit"
+              },
+              "X-RateLimit-Remaining": {
+                "$ref": "#/components/headers/XRateLimitRemaining"
+              },
+              "X-RateLimit-Reset": {
+                "$ref": "#/components/headers/XRateLimitReset"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeResponse"
+                },
+                "example": {
+                  "data": {
+                    "auth_type": "api_key",
+                    "subject": "0c4f1d44-2811-4a32-b3ee-5b21f9c7e0ad",
+                    "key": {
+                      "id": "8c0f2b16-6f29-4b3c-8e2a-1d5b7e1c9a44",
+                      "name": "Production reporting key",
+                      "key_prefix": "mt_live_a1b2",
+                      "scopes": [
+                        "read:all"
+                      ],
+                      "created_at": "2026-01-15T09:30:00Z",
+                      "last_used_at": "2026-04-22T11:14:53Z"
+                    },
+                    "workspace": {
+                      "id": "0c4f1d44-2811-4a32-b3ee-5b21f9c7e0ad",
+                      "name": "Acme Inc",
+                      "created_at": "2025-08-12T14:00:00Z",
+                      "subscription": {
+                        "tier": "paid",
+                        "status": "active",
+                        "competitor_limit": 25,
+                        "competitors_used": 11,
+                        "current_period_end": "2026-05-01T00:00:00Z",
+                        "trial_ends_at": null
+                      },
+                      "rate_limit": {
+                        "window_seconds": 60,
+                        "requests_per_window": 60,
+                        "remaining_this_instance": 57,
+                        "reset_at": "2026-04-22T11:15:30Z"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      }
+    },
+    "/competitors": {
+      "get": {
+        "tags": [
+          "Competitors"
+        ],
+        "operationId": "listCompetitors",
+        "summary": "List competitors",
+        "description": "Returns every competitor tracked by the authenticated workspace. Use\n`active` to filter by status, `id` (comma-separated) to restrict to\nspecific competitors, and `expand=full` to get the full per-competitor\nprofile (social links, page URLs) instead of the summary shape.\n",
+        "parameters": [
+          {
+            "name": "active",
+            "in": "query",
+            "description": "`true` returns active competitors only. `false` returns deactivated\ncompetitors only. Omit to return both.\n",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "true",
+                "false"
+              ]
+            }
+          },
+          {
+            "name": "id",
+            "in": "query",
+            "required": false,
+            "description": "Restrict the response to the listed competitor UUIDs. Comma-separated,\ne.g. `?id=A,B,C`; repeating the key (`?id=A&id=B`) is also accepted and\nmerges into the same list. Any `id` value that doesn't belong to your\nworkspace yields `403 forbidden_competitor`. Unlike `/activity`,\ninactive competitors are allowed here - `/competitors` is the one\nendpoint where deactivated competitors are expected to be visible.\n",
+            "style": "form",
+            "explode": false,
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "format": "uuid"
+              }
+            }
+          },
+          {
+            "name": "ids",
+            "in": "query",
+            "required": false,
+            "deprecated": true,
+            "description": "Deprecated alias for `id`. Supply one spelling or the other, not both.",
+            "style": "form",
+            "explode": false,
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "format": "uuid"
+              }
+            }
+          },
+          {
+            "name": "expand",
+            "in": "query",
+            "required": false,
+            "description": "Omit for the default `CompetitorSummary` shape - `compact` is an\nexplicit spelling of that same default. Pass `full` to return the\ncompetitor profile for every row (social links, page URLs) - the\nsame fields returned alongside `items` by\n`GET /competitors/{id}` - plus an `active` boolean so inactive\ncompetitors can be distinguished in the list.\n\nInactive rows (`active: false`) return the `CompetitorDetail`\nshape with the expand-only fields emptied out: `image_icon` is\n`null`, and every value inside `social` and `pages` is `null`.\n`id`, `name`, `website`, `category`, `created_at`, and `active`\nare still populated.\n",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "full",
+                "compact"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Competitor list. Shape depends on `expand`.",
+            "headers": {
+              "X-RateLimit-Limit": {
+                "$ref": "#/components/headers/XRateLimitLimit"
+              },
+              "X-RateLimit-Remaining": {
+                "$ref": "#/components/headers/XRateLimitRemaining"
+              },
+              "X-RateLimit-Reset": {
+                "$ref": "#/components/headers/XRateLimitReset"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/CompetitorListResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/CompetitorDetailListResponse"
+                    }
+                  ]
+                },
+                "examples": {
+                  "summary": {
+                    "summary": "Default (no expand)",
+                    "value": {
+                      "data": [
+                        {
+                          "id": "5b2e21a4-9d4a-4f1b-8e75-2f5a1c11de01",
+                          "name": "Acme Inc",
+                          "website": "https://acme.example",
+                          "category": "SaaS",
+                          "active": true
+                        },
+                        {
+                          "id": "a13f0e22-c55a-44d8-8b39-f64c1a7d33b6",
+                          "name": "Globex",
+                          "website": "https://globex.example",
+                          "category": null,
+                          "active": true
+                        },
+                        {
+                          "id": "7c8b1eea-8c94-4d99-a6ad-9c97cf41e5a1",
+                          "name": "Initech",
+                          "website": "https://initech.example",
+                          "category": "Hardware",
+                          "active": false
+                        }
+                      ]
+                    }
+                  },
+                  "full": {
+                    "summary": "expand=full",
+                    "value": {
+                      "data": [
+                        {
+                          "id": "5b2e21a4-9d4a-4f1b-8e75-2f5a1c11de01",
+                          "name": "Acme Inc",
+                          "website": "https://acme.example",
+                          "category": "SaaS",
+                          "image_icon": "https://cdn.meertrack.com/icons/acme.png",
+                          "created_at": "2025-08-12T14:00:00Z",
+                          "active": true,
+                          "social": {
+                            "linkedin": "https://www.linkedin.com/company/acme",
+                            "twitter": "https://twitter.com/acme",
+                            "facebook": null,
+                            "instagram": null,
+                            "youtube": "https://www.youtube.com/@acme",
+                            "tiktok": null
+                          },
+                          "pages": {
+                            "pricing": "https://acme.example/pricing",
+                            "case_studies": "https://acme.example/customers",
+                            "blog": "https://acme.example/blog",
+                            "press": "https://acme.example/press",
+                            "release_notes": null,
+                            "job_listings": "https://acme.example/careers",
+                            "events": null,
+                            "shopify": null
+                          }
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Unrecognized query parameter (`unknown_parameter`), or an invalid\nvalue for `active`, `expand`, or `id` (`invalid_parameter`).\n",
+            "headers": {
+              "X-RateLimit-Limit": {
+                "$ref": "#/components/headers/XRateLimitLimit"
+              },
+              "X-RateLimit-Remaining": {
+                "$ref": "#/components/headers/XRateLimitRemaining"
+              },
+              "X-RateLimit-Reset": {
+                "$ref": "#/components/headers/XRateLimitReset"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ForbiddenCompetitor"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      }
+    },
+    "/competitors/{id}": {
+      "get": {
+        "tags": [
+          "Competitors"
+        ],
+        "operationId": "getCompetitorOverview",
+        "summary": "Get competitor overview",
+        "description": "Full profile for a competitor - metadata, social links, tracked page\nURLs - plus per-section item lists for the 12 sections shown on the\nin-app Competitor Overview page.\n\nThe same lenient \"overview\" filter the page uses is applied, and rows\nrecorded while the competitor was inactive are excluded. Items are\nnot paginated - each section is capped to match what the in-app\noverview page renders:\n\n| Section            | Max items |\n|--------------------|-----------|\n| `blog-posts`       | 3         |\n| `press-posts`      | 3         |\n| `case-studies`     | 3         |\n| `linkedin-posts`   | 3         |\n| `x-posts`          | 3         |\n| `youtube-videos`   | 3         |\n| `events`           | 3         |\n| `reviews`          | 3         |\n| `job-listings`     | 5         |\n| `ads`              | 5         |\n| `messaging`        | 5         |\n| `metrics-claimed`  | 5         |\n| `logos`            | 5         |\n| `pricing`          | 1         |\n\nRows within each section are ordered by `discovered_at` DESC (newest\nfirst).\n\nSections included: `blog-posts`, `press-posts`, `case-studies`,\n`job-listings`, `ads`, `pricing`, `messaging`, `metrics-claimed`, `logos`,\n`linkedin-posts`, `x-posts`, `reviews`, `youtube-videos`, `events`.\n\n403 if deactivated, 404 if cross-tenant or unknown.\n",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CompetitorIdPath"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Competitor profile plus per-section items.",
+            "headers": {
+              "X-RateLimit-Limit": {
+                "$ref": "#/components/headers/XRateLimitLimit"
+              },
+              "X-RateLimit-Remaining": {
+                "$ref": "#/components/headers/XRateLimitRemaining"
+              },
+              "X-RateLimit-Reset": {
+                "$ref": "#/components/headers/XRateLimitReset"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CompetitorOverviewResponse"
+                },
+                "example": {
+                  "data": {
+                    "id": "5b2e21a4-9d4a-4f1b-8e75-2f5a1c11de01",
+                    "name": "Acme Inc",
+                    "website": "https://acme.example",
+                    "category": "SaaS",
+                    "image_icon": "https://cdn.meertrack.com/icons/acme.png",
+                    "created_at": "2025-08-12T14:00:00Z",
+                    "social": {
+                      "linkedin": "https://www.linkedin.com/company/acme",
+                      "twitter": "https://twitter.com/acme",
+                      "facebook": null,
+                      "instagram": null,
+                      "youtube": "https://www.youtube.com/@acme",
+                      "tiktok": null
+                    },
+                    "pages": {
+                      "pricing": "https://acme.example/pricing",
+                      "case_studies": "https://acme.example/customers",
+                      "blog": "https://acme.example/blog",
+                      "press": "https://acme.example/press",
+                      "release_notes": null,
+                      "job_listings": "https://acme.example/careers",
+                      "events": null,
+                      "shopify": null
+                    },
+                    "items": {
+                      "blog-posts": [
+                        {
+                          "competitor": "Acme Inc",
+                          "tags": [
+                            "product",
+                            "launch"
+                          ],
+                          "discovered_at": "2026-04-19T08:12:11Z",
+                          "initial_run": false,
+                          "title": "Introducing Acme Pulse",
+                          "url": "https://acme.example/blog/introducing-pulse",
+                          "description": "A new real-time analytics surface for Acme customers.",
+                          "key_points": null,
+                          "image_url": null,
+                          "posted_date": "2026-04-18T15:00:00Z"
+                        }
+                      ],
+                      "press-posts": [],
+                      "case-studies": [],
+                      "job-listings": [
+                        {
+                          "competitor": "Acme Inc",
+                          "tags": [],
+                          "discovered_at": "2026-03-02T08:00:00Z",
+                          "initial_run": false,
+                          "title": "Senior Backend Engineer",
+                          "url": "https://jobs.acme.example/senior-backend",
+                          "category": "Engineering",
+                          "location": "Remote (US)",
+                          "posted_date": "2026-03-02T00:00:00Z",
+                          "is_live": true,
+                          "added_at": "2026-03-02T08:00:00Z",
+                          "removed_at": null
+                        }
+                      ],
+                      "pricing": [
+                        {
+                          "competitor": "Acme Inc",
+                          "tags": [],
+                          "discovered_at": "2026-04-22T03:00:00Z",
+                          "initial_run": false,
+                          "pricing_data": {
+                            "tiers": [
+                              {
+                                "name": "Starter",
+                                "price_monthly": 49
+                              }
+                            ]
+                          },
+                          "changes": null,
+                          "is_live": true,
+                          "last_updated_at": "2026-04-21T22:34:00Z"
+                        }
+                      ],
+                      "messaging": [],
+                      "metrics-claimed": [],
+                      "logos": [],
+                      "linkedin-posts": [],
+                      "x-posts": [],
+                      "reviews": [],
+                      "youtube-videos": [],
+                      "events": []
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/CompetitorInactive"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/activity": {
+      "get": {
+        "tags": [
+          "Activity"
+        ],
+        "operationId": "listActivity",
+        "summary": "Cross-competitor delta feed / full roster",
+        "description": "Returns activity across the workspace's active competitors.\n\nWindow behaviour depends on `from` / `to`:\n  * Omit BOTH `from` and `to` → the complete all-time roster, including items\n    that already existed when tracking began (the initial backfill). For\n    versioned sections (job-listings, ads, logos, messaging, pricing) this is\n    the current live snapshot, not removed history; on this path\n    `change_type=added` therefore covers essentially the whole roster and\n    `total` is the all-time count.\n  * Supply `from` (and/or `to`) → adds / updates / removals in that window only\n    (defaults: `from` = 30d ago, `to` = now), excluding backfill.\n\n`sitemap-urls` is the one exception to the backfill rule above: it excludes\n`initial_run` items on BOTH paths, so the all-time count for that section\nmatches what the window path reports rather than including the URLs that were\nalready present when tracking began.\n\n`sitemap-urls` is also the highest-volume section by a wide margin - a single\ncrawl can append several hundred URLs for one competitor, and because they are\nthe most recent rows they land at the front of an unfiltered feed. If you are\nafter other kinds of change, narrow with `?section=` rather than paging past\nthem.\n\nTo keep list rows lean, the bulky fields `description`, `key_points`,\n`pricing_data`, and `excerpt` are OMITTED from each item's `data` here. Fetch\nthe full payload for a row via `GET /activity/{row_uuid}` or, in batch, via\n`GET /activity/items`.\n\nAny `competitor_id` referencing a deactivated competitor yields a 403.\n",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CompetitorIdQuery"
+          },
+          {
+            "$ref": "#/components/parameters/SectionQuery"
+          },
+          {
+            "$ref": "#/components/parameters/ChangeTypeQuery"
+          },
+          {
+            "$ref": "#/components/parameters/FromQuery"
+          },
+          {
+            "$ref": "#/components/parameters/ToQuery"
+          },
+          {
+            "$ref": "#/components/parameters/LimitQuery"
+          },
+          {
+            "$ref": "#/components/parameters/CursorQuery"
+          },
+          {
+            "$ref": "#/components/parameters/CompetitorIdsQueryDeprecated"
+          },
+          {
+            "$ref": "#/components/parameters/SectionsQueryDeprecated"
+          },
+          {
+            "$ref": "#/components/parameters/ChangeTypesQueryDeprecated"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Paginated activity feed.",
+            "headers": {
+              "X-RateLimit-Limit": {
+                "$ref": "#/components/headers/XRateLimitLimit"
+              },
+              "X-RateLimit-Remaining": {
+                "$ref": "#/components/headers/XRateLimitRemaining"
+              },
+              "X-RateLimit-Reset": {
+                "$ref": "#/components/headers/XRateLimitReset"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActivityListResponse"
+                },
+                "example": {
+                  "data": [
+                    {
+                      "id": "9f6d22aa-3c72-4a31-b81a-0e72a3c44b11",
+                      "section": "blog-posts",
+                      "change_type": "added",
+                      "change_date": "2026-04-19T08:12:11Z",
+                      "competitor": {
+                        "id": "5b2e21a4-9d4a-4f1b-8e75-2f5a1c11de01",
+                        "name": "Acme Inc"
+                      },
+                      "data": {
+                        "competitor": "Acme Inc",
+                        "tags": [
+                          "product",
+                          "launch"
+                        ],
+                        "discovered_at": "2026-04-19T08:12:11Z",
+                        "initial_run": false,
+                        "title": "Introducing Acme Pulse",
+                        "url": "https://acme.example/blog/introducing-pulse",
+                        "image_url": null,
+                        "posted_date": "2026-04-18T15:00:00Z"
+                      }
+                    },
+                    {
+                      "id": "4d11ac88-6f0e-4ed7-9b21-77bdb9c41122",
+                      "section": "job-listings",
+                      "change_type": "removed",
+                      "change_date": "2026-04-18T22:00:00Z",
+                      "competitor": {
+                        "id": "a13f0e22-c55a-44d8-8b39-f64c1a7d33b6",
+                        "name": "Globex"
+                      },
+                      "data": {
+                        "competitor": "Globex",
+                        "tags": [],
+                        "discovered_at": "2026-03-02T08:00:00Z",
+                        "initial_run": false,
+                        "title": "Senior Backend Engineer",
+                        "url": "https://jobs.globex.example/senior-backend",
+                        "category": "Engineering",
+                        "location": "Remote (US)",
+                        "posted_date": "2026-03-02T00:00:00Z",
+                        "is_live": false,
+                        "added_at": "2026-03-02T08:00:00Z",
+                        "removed_at": "2026-04-18T22:00:00Z"
+                      }
+                    }
+                  ],
+                  "pagination": {
+                    "next_cursor": "MjAyNi0wNC0xOFQyMjowMDowMHwwMS0xMS0wMDAw",
+                    "has_more": true,
+                    "total": 247
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Unrecognized query parameter (`unknown_parameter`), or an invalid\nparameter value or cursor (`invalid_parameter` / `invalid_cursor`).\n",
+            "headers": {
+              "X-RateLimit-Limit": {
+                "$ref": "#/components/headers/XRateLimitLimit"
+              },
+              "X-RateLimit-Remaining": {
+                "$ref": "#/components/headers/XRateLimitRemaining"
+              },
+              "X-RateLimit-Reset": {
+                "$ref": "#/components/headers/XRateLimitReset"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ForbiddenCompetitor"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/activity/{row_uuid}": {
+      "get": {
+        "tags": [
+          "Activity"
+        ],
+        "operationId": "getActivityRow",
+        "summary": "Resolve a single activity item",
+        "description": "Look up a single activity row by its UUID. Returns 404 if the row is\nunknown, belongs to another workspace, or belongs to an inactive\ncompetitor.\n",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RowIdPath"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Activity row.",
+            "headers": {
+              "X-RateLimit-Limit": {
+                "$ref": "#/components/headers/XRateLimitLimit"
+              },
+              "X-RateLimit-Remaining": {
+                "$ref": "#/components/headers/XRateLimitRemaining"
+              },
+              "X-RateLimit-Reset": {
+                "$ref": "#/components/headers/XRateLimitReset"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActivityDetailResponse"
+                },
+                "example": {
+                  "data": {
+                    "id": "9f6d22aa-3c72-4a31-b81a-0e72a3c44b11",
+                    "section": "blog-posts",
+                    "competitor": {
+                      "id": "5b2e21a4-9d4a-4f1b-8e75-2f5a1c11de01",
+                      "name": "Acme Inc"
+                    },
+                    "payload": {
+                      "competitor": "Acme Inc",
+                      "tags": [
+                        "product",
+                        "launch"
+                      ],
+                      "discovered_at": "2026-04-19T08:12:11Z",
+                      "initial_run": false,
+                      "title": "Introducing Acme Pulse",
+                      "url": "https://acme.example/blog/introducing-pulse",
+                      "description": "A new real-time analytics surface for Acme customers.",
+                      "key_points": [
+                        "Real-time event stream",
+                        "First-class Slack integration"
+                      ],
+                      "image_url": "https://cdn.acme.example/blog/pulse-hero.png",
+                      "posted_date": "2026-04-18T15:00:00Z"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      }
+    },
+    "/activity/items": {
+      "get": {
+        "tags": [
+          "Activity"
+        ],
+        "operationId": "getActivityItems",
+        "summary": "Resolve multiple activity items",
+        "description": "Batch sibling of `GET /activity/{row_uuid}` — resolves one-or-more row UUIDs\nto their full (untrimmed) payloads in a single request. Use it to drill into\nseveral rows spotted in the lean `GET /activity` list without N round-trips.\n\nPartial success is normal: ids that don't resolve (unknown, in another\nworkspace, recorded during an inactive period, or malformed) are returned in\n`not_found` rather than failing the call. The `data` array order is NOT\nguaranteed — match results back to your request by `id`.\n",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "query",
+            "required": true,
+            "description": "Comma-separated list of activity row UUIDs (max 100, deduped).\nRepeating the key (`?id=A&id=B`) is also accepted and merges into\nthe same list.\n",
+            "schema": {
+              "type": "string"
+            },
+            "example": "9f6d22aa-3c72-4a31-b81a-0e72a3c44b11,4d11ac88-6f0e-4ed7-9b21-77bdb9c41122"
+          },
+          {
+            "name": "ids",
+            "in": "query",
+            "required": false,
+            "deprecated": true,
+            "description": "Deprecated alias for `id`. Supply one spelling or the other, not both.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "row_uuids",
+            "in": "query",
+            "required": false,
+            "deprecated": true,
+            "description": "Deprecated alias for `id`. Supply one spelling or the other, not both.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Resolved activity items plus any ids that were not found.",
+            "headers": {
+              "X-RateLimit-Limit": {
+                "$ref": "#/components/headers/XRateLimitLimit"
+              },
+              "X-RateLimit-Remaining": {
+                "$ref": "#/components/headers/XRateLimitRemaining"
+              },
+              "X-RateLimit-Reset": {
+                "$ref": "#/components/headers/XRateLimitReset"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActivityItemsResponse"
+                },
+                "example": {
+                  "data": [
+                    {
+                      "id": "9f6d22aa-3c72-4a31-b81a-0e72a3c44b11",
+                      "section": "blog-posts",
+                      "competitor": {
+                        "id": "5b2e21a4-9d4a-4f1b-8e75-2f5a1c11de01",
+                        "name": "Acme Inc"
+                      },
+                      "payload": {
+                        "competitor": "Acme Inc",
+                        "tags": [
+                          "product",
+                          "launch"
+                        ],
+                        "discovered_at": "2026-04-19T08:12:11Z",
+                        "initial_run": false,
+                        "title": "Introducing Acme Pulse",
+                        "url": "https://acme.example/blog/introducing-pulse",
+                        "description": "A new real-time analytics surface for Acme customers.",
+                        "key_points": [
+                          "Real-time event stream",
+                          "First-class Slack integration"
+                        ],
+                        "image_url": "https://cdn.acme.example/blog/pulse-hero.png",
+                        "posted_date": "2026-04-18T15:00:00Z"
+                      }
+                    }
+                  ],
+                  "not_found": [
+                    "4d11ac88-6f0e-4ed7-9b21-77bdb9c41122"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Missing `id`, too many ids, or no usable ids\n(`invalid_parameter`); or an unrecognized query parameter\n(`unknown_parameter`).\n",
+            "headers": {
+              "X-RateLimit-Limit": {
+                "$ref": "#/components/headers/XRateLimitLimit"
+              },
+              "X-RateLimit-Remaining": {
+                "$ref": "#/components/headers/XRateLimitRemaining"
+              },
+              "X-RateLimit-Reset": {
+                "$ref": "#/components/headers/XRateLimitReset"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/digests": {
+      "get": {
+        "tags": [
+          "Digests"
+        ],
+        "operationId": "listDigests",
+        "summary": "List weekly digests",
+        "description": "Paginated list of weekly digests across active competitors.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CompetitorIdQuery"
+          },
+          {
+            "$ref": "#/components/parameters/FromQuery"
+          },
+          {
+            "$ref": "#/components/parameters/ToQuery"
+          },
+          {
+            "$ref": "#/components/parameters/LimitQuery"
+          },
+          {
+            "$ref": "#/components/parameters/CursorQuery"
+          },
+          {
+            "$ref": "#/components/parameters/CompetitorIdsQueryDeprecated"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Paginated digest list.",
+            "headers": {
+              "X-RateLimit-Limit": {
+                "$ref": "#/components/headers/XRateLimitLimit"
+              },
+              "X-RateLimit-Remaining": {
+                "$ref": "#/components/headers/XRateLimitRemaining"
+              },
+              "X-RateLimit-Reset": {
+                "$ref": "#/components/headers/XRateLimitReset"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DigestListResponse"
+                },
+                "example": {
+                  "data": [
+                    {
+                      "id": "f12a8c44-44b2-4e30-9f3d-66dde4ab2f10",
+                      "competitor": {
+                        "id": "5b2e21a4-9d4a-4f1b-8e75-2f5a1c11de01",
+                        "name": "Acme Inc"
+                      },
+                      "period_start": "2026-04-13T00:00:00Z",
+                      "period_end": "2026-04-20T00:00:00Z",
+                      "summary": {
+                        "executive_summary": "Acme launched Pulse and raised the Growth tier price.",
+                        "themes": [
+                          {
+                            "title": "Product launches",
+                            "bullets": [
+                              "Acme Pulse - real-time analytics surface"
+                            ]
+                          },
+                          {
+                            "title": "Pricing",
+                            "bullets": [
+                              "Growth tier raised from $179 to $199"
+                            ]
+                          }
+                        ]
+                      },
+                      "update_count": 14,
+                      "tags": [
+                        "product-launch",
+                        "pricing-change"
+                      ],
+                      "created_at": "2026-04-20T05:00:00Z"
+                    }
+                  ],
+                  "pagination": {
+                    "next_cursor": "MjAyNi0wNC0xM1QwMDowMDowMHwwMS00YS01ZTAx",
+                    "has_more": true
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Unrecognized query parameter (`unknown_parameter`), or an invalid\nparameter value or cursor (`invalid_parameter` / `invalid_cursor`).\n",
+            "headers": {
+              "X-RateLimit-Limit": {
+                "$ref": "#/components/headers/XRateLimitLimit"
+              },
+              "X-RateLimit-Remaining": {
+                "$ref": "#/components/headers/XRateLimitRemaining"
+              },
+              "X-RateLimit-Reset": {
+                "$ref": "#/components/headers/XRateLimitReset"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ForbiddenCompetitor"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/digests/latest": {
+      "get": {
+        "tags": [
+          "Digests"
+        ],
+        "operationId": "getLatestDigests",
+        "summary": "Latest digest per competitor",
+        "description": "Returns the latest digest per active competitor, restricted to digests\nfrom the most recent shared batch day. Not paginated.\n",
+        "responses": {
+          "200": {
+            "description": "One digest per active competitor (same batch day).",
+            "headers": {
+              "X-RateLimit-Limit": {
+                "$ref": "#/components/headers/XRateLimitLimit"
+              },
+              "X-RateLimit-Remaining": {
+                "$ref": "#/components/headers/XRateLimitRemaining"
+              },
+              "X-RateLimit-Reset": {
+                "$ref": "#/components/headers/XRateLimitReset"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DigestLatestResponse"
+                },
+                "example": {
+                  "data": [
+                    {
+                      "id": "f12a8c44-44b2-4e30-9f3d-66dde4ab2f10",
+                      "competitor": {
+                        "id": "5b2e21a4-9d4a-4f1b-8e75-2f5a1c11de01",
+                        "name": "Acme Inc"
+                      },
+                      "period_start": "2026-04-13T00:00:00Z",
+                      "period_end": "2026-04-20T00:00:00Z",
+                      "summary": {
+                        "executive_summary": "Acme launched Pulse and raised the Growth tier price.",
+                        "themes": [
+                          {
+                            "title": "Product launches",
+                            "bullets": [
+                              "Acme Pulse - real-time analytics surface"
+                            ]
+                          }
+                        ]
+                      },
+                      "update_count": 14,
+                      "tags": [
+                        "product-launch",
+                        "pricing-change"
+                      ],
+                      "created_at": "2026-04-20T05:00:00Z"
+                    },
+                    {
+                      "id": "81bd3a99-c1d8-4ef4-b220-2cf73a07a2a1",
+                      "competitor": {
+                        "id": "a13f0e22-c55a-44d8-8b39-f64c1a7d33b6",
+                        "name": "Globex"
+                      },
+                      "period_start": "2026-04-13T00:00:00Z",
+                      "period_end": "2026-04-20T00:00:00Z",
+                      "summary": {
+                        "executive_summary": "Globex closed three engineering reqs but published no new content.",
+                        "themes": []
+                      },
+                      "update_count": 3,
+                      "tags": [
+                        "hiring-slowdown"
+                      ],
+                      "created_at": "2026-04-20T05:00:00Z"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      }
+    },
+    "/digests/{id}": {
+      "get": {
+        "tags": [
+          "Digests"
+        ],
+        "operationId": "getDigest",
+        "summary": "Get one digest",
+        "description": "Fetch a single digest by UUID. Scoped to the workspace's active\ncompetitors - digests for deactivated competitors return 404 even if\nthe caller knew the UUID previously.\n",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/DigestIdPath"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Digest resource.",
+            "headers": {
+              "X-RateLimit-Limit": {
+                "$ref": "#/components/headers/XRateLimitLimit"
+              },
+              "X-RateLimit-Remaining": {
+                "$ref": "#/components/headers/XRateLimitRemaining"
+              },
+              "X-RateLimit-Reset": {
+                "$ref": "#/components/headers/XRateLimitReset"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DigestResponse"
+                },
+                "example": {
+                  "data": {
+                    "id": "f12a8c44-44b2-4e30-9f3d-66dde4ab2f10",
+                    "competitor": {
+                      "id": "5b2e21a4-9d4a-4f1b-8e75-2f5a1c11de01",
+                      "name": "Acme Inc"
+                    },
+                    "period_start": "2026-04-13T00:00:00Z",
+                    "period_end": "2026-04-20T00:00:00Z",
+                    "summary": {
+                      "executive_summary": "Acme launched Pulse and raised the Growth tier price.",
+                      "themes": [
+                        {
+                          "title": "Product launches",
+                          "bullets": [
+                            "Acme Pulse - real-time analytics surface"
+                          ]
+                        },
+                        {
+                          "title": "Pricing",
+                          "bullets": [
+                            "Growth tier raised from $179 to $199"
+                          ]
+                        }
+                      ]
+                    },
+                    "update_count": 14,
+                    "tags": [
+                      "product-launch",
+                      "pricing-change"
+                    ],
+                    "created_at": "2026-04-20T05:00:00Z"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "BearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "mt_live_<base64url secret>",
+        "description": "Provision API keys at Settings → API Keys in the meertrack app.\nPlaintext is shown once at creation; meertrack stores only a SHA-256\nhash of the secret. Lost keys can only be revoked and re-issued.\n"
+      }
+    },
+    "headers": {
+      "XRateLimitLimit": {
+        "description": "Requests allowed per 60-second window, per workspace, per serverless\ninstance. Aggregate across instances may briefly exceed this - see\nthe rate-limit notes in the API description.\n",
+        "schema": {
+          "type": "integer",
+          "example": 60
+        }
+      },
+      "XRateLimitRemaining": {
+        "description": "Requests remaining in the current window on the instance that\nserved this request. Not monotonic across requests (the next\nrequest may land on a different instance with its own counter).\n",
+        "schema": {
+          "type": "integer",
+          "minimum": 0,
+          "example": 57
+        }
+      },
+      "XRateLimitReset": {
+        "description": "Unix timestamp (seconds) at which the current window resets on\nthe instance that served this request. Use as the authoritative\nbackoff signal when paired with a 429.\n",
+        "schema": {
+          "type": "integer",
+          "example": 1745228400
+        }
+      },
+      "WWWAuthenticate": {
+        "description": "Authentication challenge.",
+        "schema": {
+          "type": "string",
+          "example": "Bearer realm=\"meertrack\""
+        }
+      }
+    },
+    "parameters": {
+      "CompetitorIdPath": {
+        "name": "id",
+        "in": "path",
+        "required": true,
+        "description": "Competitor UUID, as returned by `GET /competitors`.",
+        "schema": {
+          "type": "string",
+          "format": "uuid"
+        }
+      },
+      "RowIdPath": {
+        "name": "row_uuid",
+        "in": "path",
+        "required": true,
+        "description": "Activity row UUID, as returned by `GET /activity`.",
+        "schema": {
+          "type": "string",
+          "format": "uuid"
+        }
+      },
+      "DigestIdPath": {
+        "name": "id",
+        "in": "path",
+        "required": true,
+        "description": "Digest UUID.",
+        "schema": {
+          "type": "string",
+          "format": "uuid"
+        }
+      },
+      "LimitQuery": {
+        "name": "limit",
+        "in": "query",
+        "required": false,
+        "description": "Page size. Max 500. Default 100. Use the smallest page that fits\nyour UI - smaller pages keep `next_cursor` round-trips fast and\ncap per-request memory in the API.\n\nValues above 500 are clamped to 500 rather than rejected. A\nnon-integer value, or anything below 1, yields 400\n`invalid_parameter`.\n",
+        "schema": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 500,
+          "default": 100
+        }
+      },
+      "CursorQuery": {
+        "name": "cursor",
+        "in": "query",
+        "required": false,
+        "description": "Opaque cursor from a previous page's `pagination.next_cursor`.",
+        "schema": {
+          "type": "string"
+        }
+      },
+      "FromQuery": {
+        "name": "from",
+        "in": "query",
+        "required": false,
+        "description": "ISO 8601 - inclusive lower bound. On `/activity`, omitting BOTH `from` and `to` returns the full all-time roster (incl. backfill); supplying `from` defaults the window to start 30d ago when only `to` is given.",
+        "schema": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "ToQuery": {
+        "name": "to",
+        "in": "query",
+        "required": false,
+        "description": "ISO 8601 - inclusive upper bound. On `/activity`, defaults to now when `from` is supplied. Omitting BOTH `from` and `to` returns the full all-time roster.",
+        "schema": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "CompetitorIdQuery": {
+        "name": "competitor_id",
+        "in": "query",
+        "required": false,
+        "description": "Filter to specific competitors. Comma-separated, e.g.\n`?competitor_id=A,B`. Repeating the key (`?competitor_id=A&competitor_id=B`)\nis also accepted and merges into the same list. Values referencing\ndeactivated competitors yield 403 `competitor_inactive`; values not in\nyour workspace yield 403 `forbidden_competitor`.\n",
+        "style": "form",
+        "explode": false,
+        "schema": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "SectionQuery": {
+        "name": "section",
+        "in": "query",
+        "required": false,
+        "description": "Filter by section slug(s). Comma-separated, e.g.\n`?section=blog-posts,pricing`. Repeating the key is also accepted and\nmerges into the same list. Unknown slugs yield 400.\n",
+        "style": "form",
+        "explode": false,
+        "schema": {
+          "type": "array",
+          "items": {
+            "$ref": "#/components/schemas/SectionSlug"
+          }
+        }
+      },
+      "ChangeTypeQuery": {
+        "name": "change_type",
+        "in": "query",
+        "required": false,
+        "description": "Filter by change type(s). Comma-separated, e.g.\n`?change_type=added,updated`. Repeating the key is also accepted and\nmerges into the same list.\n",
+        "style": "form",
+        "explode": false,
+        "schema": {
+          "type": "array",
+          "items": {
+            "$ref": "#/components/schemas/ChangeType"
+          }
+        }
+      },
+      "CompetitorIdsQueryDeprecated": {
+        "name": "competitor_ids",
+        "in": "query",
+        "required": false,
+        "deprecated": true,
+        "description": "Deprecated alias for `competitor_id`. Supply one spelling or the other, not both.",
+        "style": "form",
+        "explode": false,
+        "schema": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "SectionsQueryDeprecated": {
+        "name": "sections",
+        "in": "query",
+        "required": false,
+        "deprecated": true,
+        "description": "Deprecated alias for `section`. Supply one spelling or the other, not both.",
+        "style": "form",
+        "explode": false,
+        "schema": {
+          "type": "array",
+          "items": {
+            "$ref": "#/components/schemas/SectionSlug"
+          }
+        }
+      },
+      "ChangeTypesQueryDeprecated": {
+        "name": "change_types",
+        "in": "query",
+        "required": false,
+        "deprecated": true,
+        "description": "Deprecated alias for `change_type`. Supply one spelling or the other, not both.",
+        "style": "form",
+        "explode": false,
+        "schema": {
+          "type": "array",
+          "items": {
+            "$ref": "#/components/schemas/ChangeType"
+          }
+        }
+      }
+    },
+    "responses": {
+      "Unauthorized": {
+        "description": "Missing, malformed, or revoked API key.",
+        "headers": {
+          "WWW-Authenticate": {
+            "$ref": "#/components/headers/WWWAuthenticate"
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorBody"
+            },
+            "example": {
+              "error": {
+                "code": "unauthorized",
+                "message": "Missing or invalid API key"
+              }
+            }
+          }
+        }
+      },
+      "RateLimited": {
+        "description": "Rate limit (60 requests/min/workspace/instance) exceeded.",
+        "headers": {
+          "X-RateLimit-Limit": {
+            "$ref": "#/components/headers/XRateLimitLimit"
+          },
+          "X-RateLimit-Remaining": {
+            "$ref": "#/components/headers/XRateLimitRemaining"
+          },
+          "X-RateLimit-Reset": {
+            "$ref": "#/components/headers/XRateLimitReset"
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorBody"
+            },
+            "example": {
+              "error": {
+                "code": "rate_limited",
+                "message": "Rate limit of 60 requests per minute exceeded"
+              }
+            }
+          }
+        }
+      },
+      "NotFound": {
+        "description": "Resource not found or belongs to another workspace.",
+        "headers": {
+          "X-RateLimit-Limit": {
+            "$ref": "#/components/headers/XRateLimitLimit"
+          },
+          "X-RateLimit-Remaining": {
+            "$ref": "#/components/headers/XRateLimitRemaining"
+          },
+          "X-RateLimit-Reset": {
+            "$ref": "#/components/headers/XRateLimitReset"
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorBody"
+            },
+            "example": {
+              "error": {
+                "code": "not_found",
+                "message": "Resource not found"
+              }
+            }
+          }
+        }
+      },
+      "CompetitorInactive": {
+        "description": "Competitor exists but is deactivated in the workspace.",
+        "headers": {
+          "X-RateLimit-Limit": {
+            "$ref": "#/components/headers/XRateLimitLimit"
+          },
+          "X-RateLimit-Remaining": {
+            "$ref": "#/components/headers/XRateLimitRemaining"
+          },
+          "X-RateLimit-Reset": {
+            "$ref": "#/components/headers/XRateLimitReset"
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorBody"
+            },
+            "example": {
+              "error": {
+                "code": "competitor_inactive",
+                "message": "Competitor is deactivated. Reactivate it in the app to access its data via the API."
+              }
+            }
+          }
+        }
+      },
+      "ForbiddenCompetitor": {
+        "description": "Either a `competitor_id` value doesn't belong to your workspace\n(`forbidden_competitor`), or it belongs to a deactivated competitor\nin your workspace (`competitor_inactive`). Inspect `error.code` to\ndistinguish - the inactive case can be resolved by reactivating the\ncompetitor in the app.\n",
+        "headers": {
+          "X-RateLimit-Limit": {
+            "$ref": "#/components/headers/XRateLimitLimit"
+          },
+          "X-RateLimit-Remaining": {
+            "$ref": "#/components/headers/XRateLimitRemaining"
+          },
+          "X-RateLimit-Reset": {
+            "$ref": "#/components/headers/XRateLimitReset"
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorBody"
+            },
+            "examples": {
+              "forbidden_competitor": {
+                "summary": "competitor_id is not in your workspace",
+                "value": {
+                  "error": {
+                    "code": "forbidden_competitor",
+                    "message": "One or more competitor_id values don't belong to your company"
+                  }
+                }
+              },
+              "competitor_inactive": {
+                "summary": "competitor_id refers to a deactivated competitor",
+                "value": {
+                  "error": {
+                    "code": "competitor_inactive",
+                    "message": "Competitor \"abc-123\" is deactivated. Reactivate it in the app to access its data via the API."
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "InternalError": {
+        "description": "Unexpected server error - safe to retry with backoff.",
+        "headers": {
+          "X-RateLimit-Limit": {
+            "$ref": "#/components/headers/XRateLimitLimit"
+          },
+          "X-RateLimit-Remaining": {
+            "$ref": "#/components/headers/XRateLimitRemaining"
+          },
+          "X-RateLimit-Reset": {
+            "$ref": "#/components/headers/XRateLimitReset"
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorBody"
+            },
+            "example": {
+              "error": {
+                "code": "internal_error",
+                "message": "Unexpected server error"
+              }
+            }
+          }
+        }
+      }
+    },
+    "schemas": {
+      "ErrorBody": {
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "error": {
+            "type": "object",
+            "required": [
+              "code",
+              "message"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "type": "string",
+                "enum": [
+                  "invalid_parameter",
+                  "unknown_parameter",
+                  "invalid_cursor",
+                  "unauthorized",
+                  "competitor_inactive",
+                  "forbidden_competitor",
+                  "not_found",
+                  "rate_limited",
+                  "internal_error"
+                ]
+              },
+              "message": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "Pagination": {
+        "type": "object",
+        "required": [
+          "next_cursor",
+          "has_more"
+        ],
+        "additionalProperties": false,
+        "description": "`next_cursor === null` and `has_more === false` always agree (one is\nderived from the other server-side). Either field is sufficient to\ndrive a pagination loop; both are returned so client code can read\nwhichever fits the idiom better.\n",
+        "properties": {
+          "next_cursor": {
+            "description": "Opaque cursor; pass as `?cursor=` to fetch the next page. `null` on the last page.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "has_more": {
+            "description": "True iff another page is available. Loop until false. Equivalent to `next_cursor !== null`.",
+            "type": "boolean"
+          }
+        }
+      },
+      "ActivityPagination": {
+        "type": "object",
+        "required": [
+          "next_cursor",
+          "has_more",
+          "total"
+        ],
+        "additionalProperties": false,
+        "description": "Extension of `Pagination` for `/activity`. Adds `total` - the count of\nactivity rows matching the filters across the requested window. Only\nexposed here because the activity feed merges 14 tables in memory, so\nthe count is computed for free during paging. Don't expect `total` on\nother paginated responses.\n",
+        "properties": {
+          "next_cursor": {
+            "description": "Opaque cursor; pass as `?cursor=` to fetch the next page. `null` on the last page.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "has_more": {
+            "description": "True iff another page is available. Equivalent to `next_cursor !== null`.",
+            "type": "boolean"
+          },
+          "total": {
+            "description": "Total rows matching the filters across the entire window - not\njust this page. Stable for the duration of the request; the\nunderlying data may change between calls so successive pages may\nsee slightly different totals.\n",
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "SectionSlug": {
+        "type": "string",
+        "description": "Public section slug used on `/activity` responses and as the\n`section` query parameter on `/activity`. Unknown slugs yield\n`400 invalid_parameter`.\n",
+        "enum": [
+          "blog-posts",
+          "press-posts",
+          "job-listings",
+          "ads",
+          "pricing",
+          "case-studies",
+          "linkedin-posts",
+          "x-posts",
+          "reviews",
+          "youtube-videos",
+          "events",
+          "messaging",
+          "metrics-claimed",
+          "logos",
+          "sitemap-urls"
+        ]
+      },
+      "ChangeType": {
+        "type": "string",
+        "enum": [
+          "added",
+          "updated",
+          "removed"
+        ]
+      },
+      "SubscriptionTier": {
+        "type": "string",
+        "description": "Subscription tier. `free_trial` for trials, `paid` for quantity-based\npaid subscriptions.\n",
+        "enum": [
+          "free_trial",
+          "paid"
+        ]
+      },
+      "SubscriptionStatus": {
+        "type": "string",
+        "enum": [
+          "active",
+          "trialing",
+          "past_due",
+          "canceled",
+          "incomplete",
+          "incomplete_expired",
+          "unpaid"
+        ]
+      },
+      "CompetitorRef": {
+        "type": "object",
+        "required": [
+          "id",
+          "name"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "ApiKey": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "key_prefix",
+          "scopes",
+          "created_at",
+          "last_used_at"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "key_prefix": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "e.g. `mt_live_a1b2`"
+          },
+          "scopes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "created_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "last_used_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        }
+      },
+      "Subscription": {
+        "type": "object",
+        "required": [
+          "tier",
+          "status",
+          "competitor_limit",
+          "competitors_used",
+          "current_period_end",
+          "trial_ends_at"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "tier": {
+            "$ref": "#/components/schemas/SubscriptionTier"
+          },
+          "status": {
+            "$ref": "#/components/schemas/SubscriptionStatus"
+          },
+          "competitor_limit": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "competitors_used": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "current_period_end": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "trial_ends_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        }
+      },
+      "RateLimitSnapshot": {
+        "type": "object",
+        "required": [
+          "window_seconds",
+          "requests_per_window",
+          "remaining_this_instance",
+          "reset_at"
+        ],
+        "additionalProperties": false,
+        "description": "Caller's current rate-limit state on the instance that served this\nrequest. Same caveats as the `X-RateLimit-*` headers - values are\nper-instance, not workspace-global.\n",
+        "properties": {
+          "window_seconds": {
+            "type": "integer",
+            "example": 60
+          },
+          "requests_per_window": {
+            "type": "integer",
+            "example": 60
+          },
+          "remaining_this_instance": {
+            "type": "integer",
+            "minimum": 0,
+            "example": 57
+          },
+          "reset_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "Workspace": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "created_at",
+          "subscription",
+          "rate_limit"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "subscription": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Subscription"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "rate_limit": {
+            "$ref": "#/components/schemas/RateLimitSnapshot"
+          }
+        }
+      },
+      "MeResponse": {
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "type": "object",
+            "required": [
+              "auth_type",
+              "subject",
+              "key",
+              "workspace"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "auth_type": {
+                "type": "string",
+                "enum": [
+                  "api_key",
+                  "oauth"
+                ],
+                "description": "How this request authenticated. `api_key` callers also get a\npopulated `key` block below; `oauth` callers have no API-key\nrecord, so `key` is `null`.\n"
+              },
+              "subject": {
+                "type": "string",
+                "description": "Stable caller identifier used for rate limiting and auditing —\nthe Supabase `sub` claim for OAuth callers, the workspace id for\n`mt_live_` API-key callers.\n"
+              },
+              "key": {
+                "description": "`null` for OAuth callers, which have no API-key record.",
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/ApiKey"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "workspace": {
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/Workspace"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            }
+          }
+        }
+      },
+      "CompetitorSummary": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "website",
+          "category",
+          "active"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "website": {
+            "type": "string",
+            "format": "uri"
+          },
+          "category": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "active": {
+            "type": "boolean"
+          }
+        }
+      },
+      "CompetitorListResponse": {
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CompetitorSummary"
+            }
+          }
+        }
+      },
+      "CompetitorSocial": {
+        "type": "object",
+        "required": [
+          "linkedin",
+          "twitter",
+          "facebook",
+          "instagram",
+          "youtube",
+          "tiktok"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "linkedin": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uri"
+          },
+          "twitter": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uri"
+          },
+          "facebook": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uri"
+          },
+          "instagram": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uri"
+          },
+          "youtube": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uri"
+          },
+          "tiktok": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uri"
+          }
+        }
+      },
+      "CompetitorPages": {
+        "type": "object",
+        "required": [
+          "pricing",
+          "case_studies",
+          "blog",
+          "press",
+          "release_notes",
+          "job_listings",
+          "events",
+          "shopify"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "pricing": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uri"
+          },
+          "case_studies": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uri"
+          },
+          "blog": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uri"
+          },
+          "press": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uri"
+          },
+          "release_notes": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uri"
+          },
+          "job_listings": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uri"
+          },
+          "events": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uri"
+          },
+          "shopify": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uri"
+          }
+        }
+      },
+      "CompetitorDetail": {
+        "description": "Full competitor profile as returned by `GET /competitors?expand=full`\nand as the profile block on `GET /competitors/{id}` (minus the\n`active` boolean, which is always true on the single-competitor\nendpoint since inactive competitors 403). The bulk list can include\ndeactivated competitors, so consumers need a way to distinguish\nthem.\n",
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "website",
+          "category",
+          "image_icon",
+          "created_at",
+          "active",
+          "social",
+          "pages"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "website": {
+            "type": "string",
+            "format": "uri"
+          },
+          "category": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "image_icon": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uri"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "active": {
+            "type": "boolean"
+          },
+          "social": {
+            "$ref": "#/components/schemas/CompetitorSocial"
+          },
+          "pages": {
+            "$ref": "#/components/schemas/CompetitorPages"
+          }
+        }
+      },
+      "CompetitorDetailListResponse": {
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CompetitorDetail"
+            }
+          }
+        }
+      },
+      "CompetitorOverviewItems": {
+        "description": "Per-section item lists for the overview page. Keys are section slugs;\nvalues are arrays of `SectionItem` (see the `SectionItem` union for\nthe per-section shape). All 14 keys are always present; empty\nsections are returned as `[]`.\n",
+        "type": "object",
+        "required": [
+          "blog-posts",
+          "press-posts",
+          "case-studies",
+          "job-listings",
+          "ads",
+          "pricing",
+          "messaging",
+          "metrics-claimed",
+          "logos",
+          "linkedin-posts",
+          "x-posts",
+          "reviews",
+          "youtube-videos",
+          "events"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "blog-posts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BlogPostItem"
+            }
+          },
+          "press-posts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PressPostItem"
+            }
+          },
+          "case-studies": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CaseStudyItem"
+            }
+          },
+          "job-listings": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/JobListingItem"
+            }
+          },
+          "ads": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AdItem"
+            }
+          },
+          "pricing": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PricingItem"
+            }
+          },
+          "messaging": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MessagingItem"
+            }
+          },
+          "metrics-claimed": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MetricsClaimedItem"
+            }
+          },
+          "logos": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LogoItem"
+            }
+          },
+          "linkedin-posts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LinkedInPostItem"
+            }
+          },
+          "x-posts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/XPostItem"
+            }
+          },
+          "reviews": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ReviewItem"
+            }
+          },
+          "youtube-videos": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/YouTubeVideoItem"
+            }
+          },
+          "events": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/EventItem"
+            }
+          }
+        }
+      },
+      "CompetitorOverviewResponse": {
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "type": "object",
+            "required": [
+              "id",
+              "name",
+              "website",
+              "category",
+              "image_icon",
+              "created_at",
+              "social",
+              "pages",
+              "items"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "name": {
+                "type": "string"
+              },
+              "website": {
+                "type": "string",
+                "format": "uri"
+              },
+              "category": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "image_icon": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "uri"
+              },
+              "created_at": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "social": {
+                "$ref": "#/components/schemas/CompetitorSocial"
+              },
+              "pages": {
+                "$ref": "#/components/schemas/CompetitorPages"
+              },
+              "items": {
+                "$ref": "#/components/schemas/CompetitorOverviewItems"
+              }
+            }
+          }
+        }
+      },
+      "SectionItemBase": {
+        "type": "object",
+        "required": [
+          "competitor",
+          "tags",
+          "discovered_at"
+        ],
+        "properties": {
+          "competitor": {
+            "description": "Competitor display name. Carried on every section item for\nsymmetry with the file-export format used by the in-app CSV\nand JSON exports - so the same DTO can be flattened to a row\nwithout joining against a separate competitor table.\n\nOn `/activity` and `/activity/{row_uuid}` responses this name\nis **redundant** with the envelope's `competitor.name`; the\nenvelope additionally carries the competitor `id`. When you\nneed to key by competitor in those responses, use the\nenvelope. The duplicate is preserved for export-shape\ncompatibility and won't be removed in `v1`.\n",
+            "type": "string"
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "discovered_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "initial_run": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          }
+        }
+      },
+      "BlogPostItem": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/SectionItemBase"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "title": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "url": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "uri"
+              },
+              "description": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "key_points": {
+                "oneOf": [
+                  {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "image_url": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "uri"
+              },
+              "posted_date": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time"
+              }
+            }
+          }
+        ]
+      },
+      "PressPostItem": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/BlogPostItem"
+          }
+        ]
+      },
+      "CaseStudyItem": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/BlogPostItem"
+          }
+        ]
+      },
+      "JobListingItem": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/SectionItemBase"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "title": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "url": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "uri"
+              },
+              "category": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "location": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "posted_date": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time"
+              },
+              "is_live": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              },
+              "added_at": {
+                "description": "Most recent time the listing was observed appearing on the page (snapshot+event).",
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time"
+              },
+              "removed_at": {
+                "description": "Most recent time the listing was observed disappearing from the page.",
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time"
+              }
+            }
+          }
+        ]
+      },
+      "AdItem": {
+        "description": "Competitor advertisement (Google or LinkedIn). Snapshot table keyed off\nadd/remove events - same access pattern as `JobListingItem`. Ads have no\ntitle; `content` is the ad copy (present on LinkedIn ads, absent on\nimage-only Google ads), `image_url` is the creative (or a video thumbnail\nwhen `ad_format` is `VIDEO`), and `ad_url` is the ad's landing URL when\navailable (present on Google ads, `null` otherwise).\n",
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/SectionItemBase"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "platform": {
+                "description": "Ad platform - lowercase `google` or `linkedin`.",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "ad_format": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "content": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "image_url": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "uri"
+              },
+              "ad_url": {
+                "description": "The ad's landing URL when available (Google ads); `null` otherwise.",
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "uri"
+              },
+              "is_live": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              },
+              "added_at": {
+                "description": "Most recent time the ad was observed running.",
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time"
+              },
+              "removed_at": {
+                "description": "Most recent time the ad was observed no longer running.",
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time"
+              }
+            }
+          }
+        ]
+      },
+      "PricingItem": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/SectionItemBase"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "pricing_data": {
+                "description": "Opaque JSON payload - the scraped pricing tiers and structure\nas the parser saw them. Shape is not stable across competitors\nor releases; treat as untyped JSON unless you've inspected\nsamples for the specific competitor.\n",
+                "type": [
+                  "object",
+                  "null"
+                ],
+                "additionalProperties": true
+              },
+              "changes": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "is_live": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              },
+              "last_updated_at": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time"
+              }
+            }
+          }
+        ]
+      },
+      "LinkedInPostItem": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/SectionItemBase"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "url": {
+                "description": "Rewritten from `post_id` into `https://www.linkedin.com/feed/update/{post_id}`.",
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "uri"
+              },
+              "content": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "posted_date": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time"
+              }
+            }
+          }
+        ]
+      },
+      "XPostItem": {
+        "description": "X (formerly Twitter) post. Stored append-only, keyed off `posted_date` -\nsame access pattern as `LinkedInPostItem`. Unlike LinkedIn, X posts\npersist `url` and `post_id` separately in the source table, so both\nare returned as-is rather than rewriting one from the other.\n",
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/SectionItemBase"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "post_id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "url": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "uri"
+              },
+              "content": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "name": {
+                "description": "Account display name on X (the post author's handle/profile name).",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "posted_date": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time"
+              }
+            }
+          }
+        ]
+      },
+      "ReviewItem": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/SectionItemBase"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "title": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "rating": {
+                "description": "Free-text rating, e.g. `\"5/5\"` or `\"4 out of 5\"`. Not normalized.",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "sentiment": {
+                "description": "Free-text sentiment label, e.g. `\"positive\"`, `\"negative\"`, `\"mixed\"`. Not an enum.",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "url": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "uri"
+              },
+              "excerpt": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "posted_date": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time"
+              }
+            }
+          }
+        ]
+      },
+      "YouTubeVideoItem": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/SectionItemBase"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "title": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "url": {
+                "description": "Rewritten from `video_id` into `https://www.youtube.com/watch?v={video_id}`.",
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "uri"
+              },
+              "description": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "posted_date": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time"
+              }
+            }
+          }
+        ]
+      },
+      "EventItem": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/SectionItemBase"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "title": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "url": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "uri"
+              },
+              "description": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "image_url": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "uri"
+              },
+              "event_type": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "location": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "is_virtual": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              },
+              "event_date": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time"
+              }
+            }
+          }
+        ]
+      },
+      "MessagingItem": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/SectionItemBase"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "message_text": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "message_level": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "order_on_page": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "is_live": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              },
+              "added_at": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time"
+              },
+              "removed_at": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time"
+              }
+            }
+          }
+        ]
+      },
+      "MetricsClaimedItem": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/SectionItemBase"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "metric": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "context_brand": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "is_live": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              },
+              "added_at": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time"
+              },
+              "removed_at": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time"
+              }
+            }
+          }
+        ]
+      },
+      "LogoItem": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/SectionItemBase"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "logo_url": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "uri"
+              },
+              "image_url": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "uri"
+              },
+              "is_live": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              },
+              "added_at": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time"
+              },
+              "removed_at": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time"
+              }
+            }
+          }
+        ]
+      },
+      "SitemapUrlItem": {
+        "description": "Append-only feed of newly-discovered URLs in the competitor's\nsitemap. Useful for catching pages that haven't surfaced anywhere\nelse yet (new product launches, hidden landing pages, lifecycle\nchanges). On its own, a row only tells you a URL appeared - pair\nwith the corresponding section feed for content.\n\nBecause the feed is append-only, `change_type` is always `added`\nand `change_date` always equals `discovered_at` (the date the URL\nwas first seen). URLs that have since started returning 404 are\nexcluded.\n\nThis is a high-volume section - a single crawl can add several\nhundred URLs for one competitor, which will dominate the front of\nan unfiltered `/activity` feed. Use `?section=` to include or\nexclude it deliberately.\n",
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/SectionItemBase"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "url": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "uri"
+              }
+            }
+          }
+        ]
+      },
+      "SectionItem": {
+        "description": "Union of all section item shapes. The branch is selected by the\nenvelope's `section` value (path param on the per-section endpoint;\nthe `section` field on `ActivityItem` / `ActivityDetailResponse`),\nnot by inspecting properties - there is no in-payload discriminator,\nbecause several branches overlap on `title`/`url`/`posted_date`.\n\nMapping: `blog-posts` → `BlogPostItem`, `press-posts` →\n`PressPostItem`, `case-studies` → `CaseStudyItem`, `job-listings` →\n`JobListingItem`, `ads` → `AdItem`, `pricing` → `PricingItem`,\n`linkedin-posts` → `LinkedInPostItem`, `x-posts` → `XPostItem`,\n`reviews` → `ReviewItem`, `youtube-videos` → `YouTubeVideoItem`,\n`events` → `EventItem`, `messaging` → `MessagingItem`,\n`metrics-claimed` → `MetricsClaimedItem`, `logos` → `LogoItem`,\n`sitemap-urls` → `SitemapUrlItem`.\n\n`PressPostItem` and `CaseStudyItem` are intentionally identical to\n`BlogPostItem` today and so are not included as separate branches\n(validators would treat the union as ambiguous). Use the `section`\nenvelope value to know which branch you got.\n",
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/BlogPostItem"
+          },
+          {
+            "$ref": "#/components/schemas/JobListingItem"
+          },
+          {
+            "$ref": "#/components/schemas/AdItem"
+          },
+          {
+            "$ref": "#/components/schemas/PricingItem"
+          },
+          {
+            "$ref": "#/components/schemas/LinkedInPostItem"
+          },
+          {
+            "$ref": "#/components/schemas/XPostItem"
+          },
+          {
+            "$ref": "#/components/schemas/ReviewItem"
+          },
+          {
+            "$ref": "#/components/schemas/YouTubeVideoItem"
+          },
+          {
+            "$ref": "#/components/schemas/EventItem"
+          },
+          {
+            "$ref": "#/components/schemas/MessagingItem"
+          },
+          {
+            "$ref": "#/components/schemas/MetricsClaimedItem"
+          },
+          {
+            "$ref": "#/components/schemas/LogoItem"
+          },
+          {
+            "$ref": "#/components/schemas/SitemapUrlItem"
+          }
+        ]
+      },
+      "ActivityItem": {
+        "type": "object",
+        "required": [
+          "id",
+          "section",
+          "change_type",
+          "change_date",
+          "competitor",
+          "data"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "section": {
+            "$ref": "#/components/schemas/SectionSlug"
+          },
+          "change_type": {
+            "$ref": "#/components/schemas/ChangeType"
+          },
+          "change_date": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "competitor": {
+            "$ref": "#/components/schemas/CompetitorRef"
+          },
+          "data": {
+            "$ref": "#/components/schemas/SectionItem"
+          }
+        }
+      },
+      "ActivityListResponse": {
+        "type": "object",
+        "required": [
+          "data",
+          "pagination"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ActivityItem"
+            }
+          },
+          "pagination": {
+            "$ref": "#/components/schemas/ActivityPagination"
+          }
+        }
+      },
+      "ActivityDetailItem": {
+        "type": "object",
+        "required": [
+          "id",
+          "section",
+          "competitor",
+          "payload"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "section": {
+            "$ref": "#/components/schemas/SectionSlug"
+          },
+          "competitor": {
+            "$ref": "#/components/schemas/CompetitorRef"
+          },
+          "payload": {
+            "$ref": "#/components/schemas/SectionItem"
+          }
+        }
+      },
+      "ActivityDetailResponse": {
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ActivityDetailItem"
+          }
+        }
+      },
+      "ActivityItemsResponse": {
+        "type": "object",
+        "required": [
+          "data",
+          "not_found"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ActivityDetailItem"
+            }
+          },
+          "not_found": {
+            "type": "array",
+            "description": "Requested ids that did not resolve (unknown, cross-workspace, inactive, or malformed).",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        }
+      },
+      "DigestSummary": {
+        "type": "object",
+        "description": "LLM-generated summary payload. The shape documented here is the\ntarget - older digests may omit `themes` entirely, and the LLM\noccasionally adds new top-level keys ahead of a corresponding\nspec bump (which is why `additionalProperties` is permissive).\nTreat unrecognized keys as opaque and don't fail validation on\nthem; we'll bump the schema and `info.version` when we promise a\nnew key as stable.\n",
+        "additionalProperties": true,
+        "properties": {
+          "executive_summary": {
+            "type": "string"
+          },
+          "themes": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "title": {
+                  "type": "string"
+                },
+                "bullets": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "Digest": {
+        "type": "object",
+        "required": [
+          "id",
+          "competitor",
+          "period_start",
+          "period_end",
+          "summary",
+          "update_count",
+          "tags",
+          "created_at"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "competitor": {
+            "$ref": "#/components/schemas/CompetitorRef"
+          },
+          "period_start": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "period_end": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "summary": {
+            "description": "LLM-generated summary. Newer digests are objects shaped like\n`DigestSummary`; older digests may be plain strings; either may\nbe `null`. Treat as opaque unless you've verified the shape.\n",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/DigestSummary"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "update_count": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "DigestListResponse": {
+        "type": "object",
+        "required": [
+          "data",
+          "pagination"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Digest"
+            }
+          },
+          "pagination": {
+            "$ref": "#/components/schemas/Pagination"
+          }
+        }
+      },
+      "DigestLatestResponse": {
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Digest"
+            }
+          }
+        }
+      },
+      "DigestResponse": {
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/Digest"
+          }
+        }
+      }
+    }
+  },
+  "security": [
+    {
+      "BearerAuth": []
+    }
+  ],
+  "tags": [
+    {
+      "name": "Introspection",
+      "description": "Caller context - which key is in use and which workspace it belongs to."
+    },
+    {
+      "name": "Competitors",
+      "description": "The competitors tracked by the authenticated workspace."
+    },
+    {
+      "name": "Activity",
+      "description": "Cross-competitor delta feed. Adds / updates / removals across every section."
+    },
+    {
+      "name": "Digests",
+      "description": "AI-generated weekly per-competitor summaries."
+    }
+  ]
+}
