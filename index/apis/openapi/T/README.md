@@ -1,6 +1,6 @@
 # APIs — T
 
-Browsing 302 APIs starting with **T**.
+Browsing 303 APIs starting with **T**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · **T** · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -50,6 +50,7 @@ Browsing 302 APIs starting with **T**.
 | [taxjar.com](../../../../apis/openapi/taxjar.com) | [main](../../../../apis/openapi/taxjar.com/main) |
 | [taxrates.io](../../../../apis/openapi/taxrates.io) | [main](../../../../apis/openapi/taxrates.io/main) · [taxrates.io-api](../../../../apis/openapi/taxrates.io/taxrates.io-api) |
 | [tcdial.com](../../../../apis/openapi/tcdial.com) | [main](../../../../apis/openapi/tcdial.com/main) |
+| [tcgapi.dev](../../../../apis/openapi/tcgapi.dev) | [main](../../../../apis/openapi/tcgapi.dev/main) |
 | [tcgdex.net](../../../../apis/openapi/tcgdex.net) | [main](../../../../apis/openapi/tcgdex.net/main) |
 | [tdox.com](../../../../apis/openapi/tdox.com) | [main](../../../../apis/openapi/tdox.com/main) |
 | [teachable.com](../../../../apis/openapi/teachable.com) | [teachable-api](../../../../apis/openapi/teachable.com/teachable-api) |

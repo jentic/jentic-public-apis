@@ -1,6 +1,6 @@
 # APIs — J
 
-Browsing 54 APIs starting with **J**.
+Browsing 55 APIs starting with **J**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · **J** · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -29,6 +29,7 @@ Browsing 54 APIs starting with **J**.
 | [jobadderapi](../../../../apis/openapi/jobadderapi) | [main](../../../../apis/openapi/jobadderapi/main) |
 | [jobbooker.ai](../../../../apis/openapi/jobbooker.ai) | [main](../../../../apis/openapi/jobbooker.ai/main) |
 | [jobicy.com](../../../../apis/openapi/jobicy.com) | [main](../../../../apis/openapi/jobicy.com/main) |
+| [jobopportunitiesapi.org](../../../../apis/openapi/jobopportunitiesapi.org) | [main](../../../../apis/openapi/jobopportunitiesapi.org/main) |
 | [join.me](../../../../apis/openapi/join.me) | [main](../../../../apis/openapi/join.me/main) |
 | [joinblink.com](../../../../apis/openapi/joinblink.com) | [main](../../../../apis/openapi/joinblink.com/main) |
 | [joinmastodon.org](../../../../apis/openapi/joinmastodon.org) | [main](../../../../apis/openapi/joinmastodon.org/main) |
