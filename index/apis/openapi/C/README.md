@@ -1,6 +1,6 @@
 # APIs — C
 
-Browsing 520 APIs starting with **C**.
+Browsing 522 APIs starting with **C**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · **C** · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -349,6 +349,7 @@ Browsing 520 APIs starting with **C**.
 | [conduit.ai](../../../../apis/openapi/conduit.ai) | [main](../../../../apis/openapi/conduit.ai/main) |
 | [conekta.com](../../../../apis/openapi/conekta.com) | [main](../../../../apis/openapi/conekta.com/main) |
 | [confetti.events](../../../../apis/openapi/confetti.events) | [main](../../../../apis/openapi/confetti.events/main) |
+| [confident-ai.com](../../../../apis/openapi/confident-ai.com) | [main](../../../../apis/openapi/confident-ai.com/main) |
 | [configcat.com](../../../../apis/openapi/configcat.com) | [main](../../../../apis/openapi/configcat.com/main) |
 | [confluence.dimagi.com](../../../../apis/openapi/confluence.dimagi.com) | [main](../../../../apis/openapi/confluence.dimagi.com/main) |
 | [confluent.io](../../../../apis/openapi/confluent.io) | [main](../../../../apis/openapi/confluent.io/main) |
@@ -499,6 +500,7 @@ Browsing 520 APIs starting with **C**.
 | [cumuluslabs.io](../../../../apis/openapi/cumuluslabs.io) | [main](../../../../apis/openapi/cumuluslabs.io/main) |
 | [cupixworks.com](../../../../apis/openapi/cupixworks.com) | [main](../../../../apis/openapi/cupixworks.com/main) |
 | [cuponerapp.com](../../../../apis/openapi/cuponerapp.com) | [main](../../../../apis/openapi/cuponerapp.com/main) |
+| [curacel.co](../../../../apis/openapi/curacel.co) | [main](../../../../apis/openapi/curacel.co/main) |
 | [curlshot.com](../../../../apis/openapi/curlshot.com) | [main](../../../../apis/openapi/curlshot.com/main) |
 | [currencyalliance.com](../../../../apis/openapi/currencyalliance.com) | [main](../../../../apis/openapi/currencyalliance.com/main) |
 | [currencyapi.com](../../../../apis/openapi/currencyapi.com) | [main](../../../../apis/openapi/currencyapi.com/main) |
