@@ -1,0 +1,1750 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "TruVerifAI External API V1",
+    "version": "2026-05-01",
+    "description": "Multi-model verification by API. Run any prompt through GPT, Claude,\nGemini, and Grok in parallel, then synthesize a single answer with\nsources, conflicts, and confidence — depending on the mode you pick.\n\nThree modes:\n  - **unify** (~1 credit) — fast synthesis across all four providers\n  - **justify** (~2.5 credits) — multi-round deliberation that\n    surfaces real disagreement\n  - **verify** (~5 credits) — full claim extraction with web-grounded\n    per-claim verdicts\n\nThe 1 / 2.5 / 5 baselines assume Standard-tier models across all\nfour families. Actual credits charged per query are derived from\nmeasured provider cost + a fixed margin (Credit System v2) — call\n`POST /v1/estimate-cost` for a pre-flight estimate of the current\nselection.\n\nAuth: Bearer token (`tvai_…`). Get a key at\n`https://truverif.ai/settings/api-keys`.\n",
+    "contact": {
+      "email": "support@truverif.ai",
+      "url": "https://truverif.ai/api"
+    },
+    "license": {
+      "name": "TruVerifAI Acceptable Use Policy",
+      "url": "https://truverif.ai/terms"
+    },
+    "x-jentic-source-url": "https://truverif.ai/openapi.yaml"
+  },
+  "servers": [
+    {
+      "url": "https://api.truverif.ai",
+      "description": "Production"
+    }
+  ],
+  "paths": {
+    "/v1/queries": {
+      "post": {
+        "tags": [
+          "Queries"
+        ],
+        "summary": "Submit a verification query",
+        "description": "Returns 202 with a `request_id`. The job runs asynchronously\n(10s–5min depending on mode). Two ways to retrieve the result:\n\n- **Polling** — `GET /v1/queries/{id}` every 5–10 seconds until\n  `status == \"completed\"`. Recommended cadence: 5s for the\n  first 60s, then 10s.\n- **SSE** — `GET /v1/queries/{id}/stream` to receive\n  `progress` events plus a final `result`.\n\n### Idempotency\n\nPass an `Idempotency-Key` header (any unique string ≤ 200 chars)\nto make submission idempotent. Replays within 24h with the same\nbody return the original `request_id` with\n`idempotent_replayed: true`. Replays with a different body\nreturn 409 `idempotency_conflict`.\n\n### Restart caveat (V1)\n\nIn V1, in-flight jobs live in process memory. If the worker\nrestarts mid-run, polling returns 404. Retry with the same\n`Idempotency-Key` — the next submit will re-enqueue without\ndouble-charging credits. We're migrating to durable queues\npost-V1; until then, set client retry policy on 404.\n",
+        "operationId": "submitQuery",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/QueryRequest"
+              },
+              "examples": {
+                "unify_default": {
+                  "summary": "Unify with default models",
+                  "value": {
+                    "mode": "unify",
+                    "prompt": "What is the capital of France?"
+                  }
+                },
+                "verify_with_web": {
+                  "summary": "Verify mode with explicit web-search preference",
+                  "value": {
+                    "mode": "verify",
+                    "prompt": "Fact-check this article: ...",
+                    "web_search": "always",
+                    "metadata": {
+                      "article_id": "9482"
+                    }
+                  }
+                },
+                "one_provider_only": {
+                  "summary": "Single-provider Unify (skip the others)",
+                  "value": {
+                    "mode": "unify",
+                    "prompt": "Summarize: ...",
+                    "models": {
+                      "openai": "gpt-5.4-2026-03-05",
+                      "anthropic": null,
+                      "google": null,
+                      "xai": null
+                    }
+                  }
+                },
+                "with_files": {
+                  "summary": "Verify mode with a PDF attachment",
+                  "value": {
+                    "mode": "verify",
+                    "prompt": "Verify the claims in this report.",
+                    "files": [
+                      {
+                        "file_id": "file_1234abcd"
+                      }
+                    ]
+                  }
+                },
+                "with_byom": {
+                  "summary": "3 first-party + 1 BYOM (4 participants, the per-query max)",
+                  "value": {
+                    "mode": "unify",
+                    "prompt": "Compare the defaults with our fine-tuned model.",
+                    "models": {
+                      "openai": "gpt-5.4-2026-03-05",
+                      "anthropic": "claude-opus-4-7",
+                      "google": "gemini-2.5-pro",
+                      "xai": null
+                    },
+                    "custom_models": [
+                      "byom_42"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Job accepted; poll or stream for the result.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubmitAccepted"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthenticated"
+          },
+          "402": {
+            "$ref": "#/components/responses/InsufficientCredits"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/IdempotencyConflict"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      }
+    },
+    "/v1/queries/{request_id}": {
+      "get": {
+        "tags": [
+          "Queries"
+        ],
+        "summary": "Get the result of a submitted query",
+        "description": "Returns one of:\n\n- **200** with `status: \"queued\"` or `status: \"running\"` while\n  the job is in flight. Repeat until `status == \"completed\"`.\n- **200** with `status: \"completed\"` and the full response body\n  once the job finishes.\n- **200** with `status: \"failed\"` and an `error` block if the\n  aggregation pipeline raised. Don't retry on this — the\n  underlying problem won't fix itself.\n- **404** if the `request_id` isn't found (expired or worker\n  restart — see Idempotency on POST).\n",
+        "operationId": "getQuery",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "request_id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^req_[a-f0-9]+$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Query result (status varies — check the `status` field).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QueryResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthenticated"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/v1/queries/{request_id}/stream": {
+      "get": {
+        "tags": [
+          "Queries"
+        ],
+        "summary": "Stream the result via Server-Sent Events",
+        "description": "Opens a long-lived SSE connection. Emits `progress` events while\nthe job is running and a final `result` event when complete (or\nan `error` event on failure). The connection closes after the\nterminal event.\n\n### Event types\n\n- `progress` — payload `{stage, message, percent, eta}`\n- `result` — payload is the same shape as\n  `GET /v1/queries/{id}` returns at status=completed\n- `error` — payload `{error: {...}}` matching the V1 error\n  envelope\n\nReconnection is a manual concern — re-issuing this endpoint\nwith the same `request_id` is safe; you'll get only `result`\nor `error` if the job is already done.\n",
+        "operationId": "streamQuery",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "request_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "SSE stream.",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "type": "string",
+                  "description": "Server-Sent Events payload."
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthenticated"
+          },
+          "403": {
+            "description": "The stream belongs to a different API key (`permission_denied`).\nA not-found request is delivered as an in-stream `error` event on\nan open 200 stream rather than an HTTP error.\n",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/models": {
+      "get": {
+        "tags": [
+          "Models"
+        ],
+        "summary": "List available models grouped by provider",
+        "description": "Returns the catalog of models the API can select from. Group\nkeys are public provider names (`openai`, `anthropic`, `google`,\n`xai`); each group is an ordered array of models.\n\nEach model lists its `model_id` (the value to pass in the\n`models` field on `POST /v1/queries`), pricing per million\ntokens, and a `tier` hint (`budget`, `standard`, `premium`).\n",
+        "operationId": "listModels",
+        "responses": {
+          "200": {
+            "description": "Model catalog.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelCatalog"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthenticated"
+          }
+        }
+      }
+    },
+    "/v1/estimate-cost": {
+      "post": {
+        "tags": [
+          "Queries"
+        ],
+        "summary": "Pre-flight credit estimate for a hypothetical query",
+        "description": "Returns per-mode credit estimates for the caller's model\nselection, plus a `can_afford` pre-flight against the tier\nbalance. Mirrors the Credit Cost Preview surfaced on the web\n`/models` page.\n\nThe numbers are estimates — actual credit deduction is post-hoc\ncost+ from `provider_call_log` data, so real credits charged\nmay differ in either direction. The response always carries a\n`disclaimer` field explaining the variance.\n\nUse this endpoint to:\n- show \"this would cost ~X credits\" pre-submit UIs\n- check `can_afford` before submitting a query\n- illustrate how switching models / modes changes the estimate\n  (the response includes all three modes' estimates, not just\n  the one requested)\n",
+        "operationId": "estimateCost",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "mode"
+                ],
+                "properties": {
+                  "mode": {
+                    "$ref": "#/components/schemas/Mode",
+                    "description": "The mode to gate-check with `can_afford` /\n`reservation_credits`. The response also includes\nestimates for the other two modes under\n`credits_by_mode`.\n"
+                  },
+                  "models": {
+                    "type": "object",
+                    "description": "Same shape as the field on `POST /v1/queries`.\nWhen supplied, the preview reflects this selection\ninstead of the user's saved defaults. Pass\n`null` for a family to exclude it from the preview.\n",
+                    "properties": {
+                      "openai": {
+                        "type": "string",
+                        "nullable": true
+                      },
+                      "anthropic": {
+                        "type": "string",
+                        "nullable": true
+                      },
+                      "google": {
+                        "type": "string",
+                        "nullable": true
+                      },
+                      "xai": {
+                        "type": "string",
+                        "nullable": true
+                      }
+                    }
+                  },
+                  "custom_models": {
+                    "type": "array",
+                    "description": "BYOM ids that would participate. Echoed back in the\nresponse; BYOMs are zero variable cost so they do\nnot change the per-mode estimate.\n",
+                    "items": {
+                      "type": "string",
+                      "pattern": "^byom_[0-9]+$"
+                    }
+                  }
+                }
+              },
+              "examples": {
+                "default": {
+                  "summary": "Estimate for Verify with the user's default models",
+                  "value": {
+                    "mode": "verify"
+                  }
+                },
+                "with_overrides": {
+                  "summary": "Estimate with explicit model selection",
+                  "value": {
+                    "mode": "justify",
+                    "models": {
+                      "openai": "gpt-5.4-2026-03-05",
+                      "anthropic": "claude-opus-4-7"
+                    }
+                  }
+                },
+                "byom_only": {
+                  "summary": "BYOM-only query estimate",
+                  "value": {
+                    "mode": "unify",
+                    "models": {
+                      "openai": null,
+                      "anthropic": null,
+                      "google": null,
+                      "xai": null
+                    },
+                    "custom_models": [
+                      "byom_42"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Credit estimate.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "requested_mode": {
+                      "$ref": "#/components/schemas/Mode"
+                    },
+                    "reservation_credits": {
+                      "type": "number",
+                      "description": "Per-mode credit estimate for `requested_mode`.\nSame value as `credits_by_mode[mode]`. Echoed at\nthe top level for callers that only care about\none mode.\n"
+                    },
+                    "credits_by_mode": {
+                      "type": "object",
+                      "description": "Per-mode estimates for all three modes — lets the\ncaller render \"switching to Verify would cost X\nmore\" UI without a second round-trip.\n",
+                      "properties": {
+                        "unify": {
+                          "type": "number"
+                        },
+                        "justify": {
+                          "type": "number"
+                        },
+                        "verify": {
+                          "type": "number"
+                        }
+                      }
+                    },
+                    "model_multiplier": {
+                      "type": "number",
+                      "description": "Display-only — the selected-set credit ratio\nrelative to the four default Standard-tier models.\n`1.0` means the selection has identical cost to\nthe defaults; `>1.0` means more expensive.\n"
+                    },
+                    "selected_models": {
+                      "type": "object",
+                      "description": "Echo of which models the preview was computed\nagainst. Includes a `custom` array when\n`custom_models` was supplied in the request.\n",
+                      "additionalProperties": true
+                    },
+                    "can_afford": {
+                      "type": "boolean",
+                      "description": "True when the user has enough remaining credits\nAND is within their monthly tier ceiling /\nspend-cap for the requested mode.\n"
+                    },
+                    "remaining_credits": {
+                      "type": "number"
+                    },
+                    "estimated_remaining_after_query": {
+                      "type": "number"
+                    },
+                    "disclaimer": {
+                      "type": "string",
+                      "description": "Plain-English variance explanation. Surface this\nverbatim alongside any credit estimate.\n"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthenticated"
+          }
+        }
+      }
+    },
+    "/v1/usage": {
+      "get": {
+        "tags": [
+          "Usage"
+        ],
+        "summary": "Current credit usage snapshot",
+        "operationId": "getUsage",
+        "responses": {
+          "200": {
+            "description": "Tier, allotment, used, remaining, mode weights.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "description": "Usage snapshot for the key's owner. Fields vary by tier and\naccount state; the stable ones are below and the object may\ncarry additional fields.\n",
+                  "properties": {
+                    "tier": {
+                      "type": "string",
+                      "enum": [
+                        "anonymous",
+                        "free",
+                        "basic",
+                        "pro",
+                        "admin"
+                      ]
+                    },
+                    "tier_name": {
+                      "type": "string"
+                    },
+                    "allocated": {
+                      "type": "number"
+                    },
+                    "remaining": {
+                      "type": "number"
+                    },
+                    "total_remaining": {
+                      "type": "number",
+                      "nullable": true
+                    },
+                    "reset_period": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "billing_cycle_start": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "credit_breakdown": {
+                      "type": "object",
+                      "nullable": true,
+                      "additionalProperties": true
+                    },
+                    "query_weights": {
+                      "type": "object",
+                      "properties": {
+                        "unify": {
+                          "type": "number"
+                        },
+                        "justify": {
+                          "type": "number"
+                        },
+                        "verify": {
+                          "type": "number"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthenticated"
+          }
+        }
+      }
+    },
+    "/v1/usage/queries": {
+      "get": {
+        "tags": [
+          "Usage"
+        ],
+        "summary": "Per-query usage history",
+        "description": "Paginated list of `QueryCost` rows. Cursor pagination via\n`cursor` (an ISO-8601 timestamp from a prior response's\n`next_cursor`). `format=csv` returns a downloadable CSV\nattachment; pagination is disabled in CSV mode (max 5000 rows).\n",
+        "operationId": "listUsageQueries",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "type": "integer",
+              "default": 50,
+              "maximum": 100
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "in": "query",
+            "name": "api_key_only",
+            "schema": {
+              "type": "boolean",
+              "default": false
+            }
+          },
+          {
+            "in": "query",
+            "name": "format",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "json",
+                "csv"
+              ],
+              "default": "json"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Usage history.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "queries": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/QueryCostRow"
+                      }
+                    },
+                    "limit": {
+                      "type": "integer"
+                    },
+                    "next_cursor": {
+                      "type": "string",
+                      "format": "date-time",
+                      "nullable": true
+                    }
+                  }
+                }
+              },
+              "text/csv": {
+                "schema": {
+                  "type": "string",
+                  "description": "CSV with columns: timestamp / mode / fingerprint /\ncredits_charged / file_attached / file_category /\nsuccess.\n"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthenticated"
+          }
+        }
+      }
+    },
+    "/v1/files": {
+      "post": {
+        "tags": [
+          "Files"
+        ],
+        "summary": "Upload a file",
+        "description": "Multipart upload. Returns a `file_id` you can pass to\n`POST /v1/queries` via the `files` array.\n\nSupported categories (per provider capability matrix):\n  - **Images** PNG / JPG / GIF / WEBP — max 20 MB\n  - **PDF** — max 32 MB\n  - **Documents** DOC / DOCX — max 32 MB\n  - **Code** py / js / ts / html / css / json / yaml / sql — max 10 MB\n\nPer-request: max 5 files, 30 MB combined size.\n",
+        "operationId": "uploadFile",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "file"
+                ],
+                "properties": {
+                  "file": {
+                    "type": "string",
+                    "format": "binary"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "File uploaded — file metadata.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FileMetadata"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthenticated"
+          }
+        }
+      }
+    },
+    "/v1/files/{file_id}": {
+      "get": {
+        "tags": [
+          "Files"
+        ],
+        "summary": "Get file metadata",
+        "operationId": "getFile",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "file_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "File metadata.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FileMetadata"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthenticated"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Files"
+        ],
+        "summary": "Delete a file",
+        "operationId": "deleteFile",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "file_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Deleted.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "deleted": {
+                      "type": "boolean"
+                    },
+                    "file_id": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthenticated"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/v1/audit/events": {
+      "get": {
+        "tags": [
+          "Audit"
+        ],
+        "summary": "Audit log scoped to the calling key",
+        "description": "Tamper-evident log of every authenticated call (and every failed\nauth attempt) made with this key. Cursor pagination; pass\n`format=csv` for a downloadable CSV.\n",
+        "operationId": "listAuditEvents",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "from",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "in": "query",
+            "name": "to",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "in": "query",
+            "name": "event_type",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "request",
+                "auth_failed",
+                "rate_limited",
+                "idempotency_replay",
+                "idempotency_conflict",
+                "aup_rejected",
+                "cap_rejected",
+                "key_created",
+                "key_revoked",
+                "key_suspended",
+                "key_unsuspended",
+                "key_disabled",
+                "key_enabled"
+              ]
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "type": "integer",
+              "default": 50,
+              "maximum": 200
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Audit events.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "events": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/AuditEvent"
+                      }
+                    },
+                    "limit": {
+                      "type": "integer"
+                    },
+                    "next_cursor": {
+                      "type": "string",
+                      "format": "date-time",
+                      "nullable": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthenticated"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "BearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "tvai",
+        "description": "`Authorization: Bearer tvai_…`. Get a key at\n`https://truverif.ai/settings/api-keys`. Treat keys like\npasswords — they're shown exactly once at creation.\n"
+      }
+    },
+    "parameters": {
+      "IdempotencyKey": {
+        "in": "header",
+        "name": "Idempotency-Key",
+        "required": false,
+        "description": "Any unique string ≤ 200 chars. Replays within 24h with the same\nbody return the original `request_id` with\n`idempotent_replayed: true`. Different body with the same key\nreturns 409 `idempotency_conflict`.\n",
+        "schema": {
+          "type": "string",
+          "maxLength": 200
+        }
+      }
+    },
+    "schemas": {
+      "Mode": {
+        "type": "string",
+        "enum": [
+          "unify",
+          "justify",
+          "verify"
+        ],
+        "description": "- **unify** (~1 credit) — single-pass synthesis across all four\n  providers\n- **justify** (~2.5 credits) — multi-round deliberation\n- **verify** (~5 credits) — claim extraction + web verification\n\nBaselines assume Standard-tier models across all four families.\nActual credits charged depend on query complexity, model\nselection, and web-search activity (Credit System v2 cost+).\nCall `POST /v1/estimate-cost` for a pre-flight estimate.\n"
+      },
+      "Provider": {
+        "type": "string",
+        "enum": [
+          "openai",
+          "anthropic",
+          "google",
+          "xai",
+          "custom"
+        ],
+        "description": "Public provider identifier. `custom` indicates a Bring-Your-Own-Model\n(BYOM) participant — when this value appears, the same response\nobject carries a `custom_model` field echoing the `byom_<id>` the\ncaller passed in `custom_models`.\n"
+      },
+      "QueryRequest": {
+        "type": "object",
+        "required": [
+          "mode",
+          "prompt"
+        ],
+        "description": "Submission payload for `POST /v1/queries`. A single query may\nhave at most **4 participants** total — first-party providers\n(`models`) + BYOMs (`custom_models`) combined. The synthesizer\nwas tuned for ≤4 inputs; requests exceeding the cap return 400\nwith `error.code = \"invalid_request\"`. Override via the\n`PARTICIPANT_CAP` env var server-side.\n",
+        "properties": {
+          "mode": {
+            "$ref": "#/components/schemas/Mode"
+          },
+          "prompt": {
+            "type": "string",
+            "maxLength": 32000,
+            "description": "User prompt. 32 KB ceiling enforced server-side."
+          },
+          "models": {
+            "type": "object",
+            "description": "Optional per-provider model selection. Only the providers you\nlist run: pass a `model_id` (string) to use that specific model,\nor `null` to skip the provider. Omitting a provider inside this\nobject also skips it. Omit the entire `models` field to fall\nback to the user's default selection.\n\nExample: `{\"openai\": \"gpt-5.4-2026-03-05\", \"anthropic\": null,\n\"google\": null, \"xai\": null}` runs only OpenAI.\n",
+            "properties": {
+              "openai": {
+                "type": "string",
+                "nullable": true
+              },
+              "anthropic": {
+                "type": "string",
+                "nullable": true
+              },
+              "google": {
+                "type": "string",
+                "nullable": true
+              },
+              "xai": {
+                "type": "string",
+                "nullable": true
+              }
+            }
+          },
+          "custom_models": {
+            "type": "array",
+            "description": "Add Bring-Your-Own-Model participants to the deliberation.\nEach entry is a `byom_<id>` string — the same ids returned in\nthe `custom` group of `GET /v1/models`. The BYOM must be\nactive and owned by the calling API key's user.\n\nPair with `models: {openai: null, anthropic: null, google: null,\nxai: null}` for a BYOM-only query.\n",
+            "items": {
+              "type": "string",
+              "pattern": "^byom_[0-9]+$"
+            },
+            "example": [
+              "byom_42"
+            ]
+          },
+          "web_search": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "always",
+              "never"
+            ],
+            "default": "auto",
+            "description": "Accepted on all three modes. `auto` defers to the engine's\nheuristic, `always` forces web search, `never` disables it.\nVerify additionally runs web search as part of fact-checking;\nfor Verify, `mode_options.verify_with_web` overrides this field.\n"
+          },
+          "files": {
+            "type": "array",
+            "maxItems": 5,
+            "items": {
+              "type": "object",
+              "required": [
+                "file_id"
+              ],
+              "properties": {
+                "file_id": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "mode_options": {
+            "type": "object",
+            "description": "Mode-specific options. Currently: `verify_with_web`\n(`auto` / `always` / `never`) for Verify mode, which overrides\nthe top-level `web_search`.\n",
+            "properties": {
+              "verify_with_web": {
+                "type": "string",
+                "enum": [
+                  "auto",
+                  "always",
+                  "never"
+                ]
+              }
+            },
+            "additionalProperties": true
+          },
+          "aggregation_model": {
+            "type": "string",
+            "nullable": true,
+            "description": "Optional synthesizer override — the model that merges the\npanel's responses into the final answer. A first-party catalog\n`model_id`, or a `byom_<id>` for a Bring-Your-Own-Model\nsynthesizer. Defaults to the account's configured synthesizer.\n",
+            "example": "byom_42"
+          },
+          "client_request_id": {
+            "type": "string",
+            "maxLength": 200,
+            "description": "Echoed in response metadata.client_request_id."
+          },
+          "metadata": {
+            "type": "object",
+            "description": "Free-form key/value bag echoed back in\nresponse.metadata.metadata. Use for your own tracing.\n",
+            "additionalProperties": true
+          }
+        }
+      },
+      "SubmitAccepted": {
+        "type": "object",
+        "properties": {
+          "request_id": {
+            "type": "string",
+            "example": "req_2x847dca91b3"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "queued"
+            ]
+          },
+          "mode": {
+            "$ref": "#/components/schemas/Mode"
+          },
+          "estimated_credits": {
+            "type": "number",
+            "nullable": true,
+            "description": "Estimated credit cost for this query. Present on a fresh\nsubmission; omitted on an idempotency replay.\n"
+          },
+          "idempotent_replayed": {
+            "type": "boolean",
+            "description": "Present and `true` only when this 202 was served from the\nidempotency cache (a replay). Absent on a fresh submission.\n"
+          },
+          "links": {
+            "type": "object",
+            "properties": {
+              "self": {
+                "type": "string",
+                "format": "uri-reference",
+                "example": "/v1/queries/req_2x847dca91b3"
+              },
+              "stream": {
+                "type": "string",
+                "format": "uri-reference",
+                "example": "/v1/queries/req_2x847dca91b3/stream"
+              }
+            }
+          }
+        }
+      },
+      "QueryResponse": {
+        "type": "object",
+        "properties": {
+          "request_id": {
+            "type": "string"
+          },
+          "mode": {
+            "$ref": "#/components/schemas/Mode"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "running",
+              "completed",
+              "failed"
+            ]
+          },
+          "error": {
+            "type": "object",
+            "nullable": true,
+            "description": "Present only on a failed poll response (status failed).",
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            }
+          },
+          "stage": {
+            "type": "string",
+            "nullable": true,
+            "description": "Present on in-flight (status running) responses."
+          },
+          "progress_percent": {
+            "type": "integer",
+            "nullable": true,
+            "description": "Present on in-flight responses (0-100)."
+          },
+          "message": {
+            "type": "string",
+            "nullable": true,
+            "description": "Present on in-flight responses."
+          },
+          "eta_seconds": {
+            "type": "integer",
+            "nullable": true,
+            "description": "Present on in-flight responses."
+          },
+          "answer": {
+            "type": "object",
+            "properties": {
+              "text": {
+                "type": "string"
+              },
+              "stop_reason": {
+                "type": "string"
+              },
+              "truncated": {
+                "type": "boolean"
+              }
+            }
+          },
+          "models": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "provider": {
+                  "$ref": "#/components/schemas/Provider"
+                },
+                "model": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "ok",
+                    "error"
+                  ]
+                },
+                "response": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "error": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "custom_model": {
+                  "type": "string",
+                  "nullable": true,
+                  "description": "Present only when `provider == \"custom\"`. Echoes the\n`byom_<id>` the caller passed in `custom_models`, so\nresponses can be mapped back to the BYOM that produced\nthem.\n"
+                }
+              }
+            }
+          },
+          "skipped_models": {
+            "type": "array",
+            "description": "Preselected BYOMs dropped from this query's fan-out because they\nwere inactive (kill-switched) or could not be found (deleted /\nnot owned). Present only when the request omitted `custom_models`\n(so the saved preselection was used) AND at least one preselected\nBYOM was dropped — omitted entirely otherwise.\n",
+            "items": {
+              "type": "object",
+              "properties": {
+                "model": {
+                  "type": "string",
+                  "description": "The `byom_<id>` identifier from the saved preselection."
+                },
+                "reason": {
+                  "type": "string",
+                  "enum": [
+                    "inactive",
+                    "not_found"
+                  ],
+                  "description": "`inactive` — the BYOM is kill-switched; re-test it to\nre-enable. `not_found` — it was deleted or isn't owned by\nthis account; remove it from the saved preselection.\n"
+                }
+              }
+            }
+          },
+          "evidence_sources": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "integer",
+                  "nullable": true
+                },
+                "url": {
+                  "type": "string"
+                },
+                "title": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "snippet": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "providers": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Provider"
+                  }
+                },
+                "published_date": {
+                  "type": "string",
+                  "nullable": true
+                }
+              }
+            }
+          },
+          "usage": {
+            "type": "object",
+            "description": "Credits actually charged for this query under the Credit\nSystem v2 cost-plus formula. V1 multi-axis fields\n(`mode_weight`, `model_multiplier`, `file_multiplier`) were\nremoved when V2 shipped — credits are now derived from\nmeasured provider cost + a fixed margin, not a multiplier\nstack.\n",
+            "properties": {
+              "credits_charged": {
+                "type": "number",
+                "nullable": true
+              }
+            }
+          },
+          "timing": {
+            "type": "object",
+            "properties": {
+              "queued_ms": {
+                "type": "integer",
+                "nullable": true
+              },
+              "model_calls_ms": {
+                "type": "integer",
+                "nullable": true
+              },
+              "aggregation_ms": {
+                "type": "integer",
+                "nullable": true
+              },
+              "total_ms": {
+                "type": "integer",
+                "nullable": true
+              }
+            }
+          },
+          "metadata": {
+            "type": "object",
+            "properties": {
+              "client_request_id": {
+                "type": "string",
+                "nullable": true
+              },
+              "metadata": {
+                "type": "object",
+                "nullable": true
+              },
+              "idempotent_replayed": {
+                "type": "boolean"
+              },
+              "api_version": {
+                "type": "string"
+              }
+            }
+          },
+          "justify": {
+            "type": "object",
+            "nullable": true,
+            "description": "Present only when mode == \"justify\".",
+            "properties": {
+              "rounds": {
+                "type": "integer"
+              },
+              "conflicts": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "topic": {
+                      "type": "string"
+                    },
+                    "severity": {
+                      "type": "string",
+                      "enum": [
+                        "high",
+                        "medium",
+                        "low"
+                      ]
+                    },
+                    "positions": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "string"
+                      }
+                    },
+                    "consensus": {
+                      "type": "string",
+                      "nullable": true
+                    }
+                  }
+                }
+              },
+              "deliberation": {
+                "type": "object",
+                "properties": {
+                  "initial": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "provider": {
+                          "$ref": "#/components/schemas/Provider"
+                        },
+                        "response": {
+                          "type": "string",
+                          "nullable": true
+                        }
+                      }
+                    }
+                  },
+                  "revised": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "provider": {
+                          "$ref": "#/components/schemas/Provider"
+                        },
+                        "action": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "response": {
+                          "type": "string",
+                          "nullable": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "verify": {
+            "type": "object",
+            "nullable": true,
+            "description": "Present only when mode == \"verify\".",
+            "properties": {
+              "facts": {
+                "type": "object",
+                "properties": {
+                  "verified": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/components/schemas/VerifiedFact"
+                    }
+                  },
+                  "disputed": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/components/schemas/VerifiedFact"
+                    }
+                  }
+                }
+              },
+              "summary": {
+                "type": "object",
+                "properties": {
+                  "total_extracted": {
+                    "type": "integer"
+                  },
+                  "consensus": {
+                    "type": "integer"
+                  },
+                  "web_verified": {
+                    "type": "integer"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "VerifiedFact": {
+        "type": "object",
+        "properties": {
+          "claim": {
+            "type": "string"
+          },
+          "supporting_providers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Provider"
+            }
+          },
+          "agreement_level": {
+            "type": "string",
+            "nullable": true
+          },
+          "status": {
+            "type": "string",
+            "nullable": true
+          },
+          "confidence": {
+            "type": "string",
+            "nullable": true
+          },
+          "verification": {
+            "type": "object",
+            "properties": {
+              "verified": {
+                "type": "boolean",
+                "nullable": true
+              },
+              "note": {
+                "type": "string",
+                "nullable": true
+              },
+              "perplexity_reasoning": {
+                "type": "string",
+                "nullable": true
+              },
+              "sources": {
+                "type": "array",
+                "description": "Raw engine source objects (shape passed through untransformed).",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      },
+      "ModelCatalog": {
+        "type": "object",
+        "properties": {
+          "openai": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ModelInfo"
+            }
+          },
+          "anthropic": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ModelInfo"
+            }
+          },
+          "google": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ModelInfo"
+            }
+          },
+          "xai": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ModelInfo"
+            }
+          },
+          "custom": {
+            "type": "array",
+            "description": "The calling API key's active BYOMs. Pass any `id` from this\nlist to `POST /v1/queries` via `custom_models`. Absent when\nthe user has no BYOMs configured.\n",
+            "items": {
+              "$ref": "#/components/schemas/CustomModelInfo"
+            }
+          }
+        }
+      },
+      "ModelInfo": {
+        "type": "object",
+        "properties": {
+          "model_id": {
+            "type": "string"
+          },
+          "display_name": {
+            "type": "string"
+          },
+          "tier": {
+            "type": "string",
+            "enum": [
+              "budget",
+              "standard",
+              "premium"
+            ]
+          },
+          "is_default": {
+            "type": "boolean"
+          },
+          "input_per_million": {
+            "type": "number",
+            "nullable": true
+          },
+          "output_per_million": {
+            "type": "number",
+            "nullable": true
+          }
+        }
+      },
+      "CustomModelInfo": {
+        "type": "object",
+        "description": "A BYOM (Bring-Your-Own-Model) entry from `GET /v1/models`'s\n`custom` group. `id` is the value to pass in `custom_models` on\n`POST /v1/queries`. The `model_id` and `wire_protocol` fields\nare echoed from the BYOM's setup for informational purposes —\nthe request only needs the `id`.\n",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^byom_[0-9]+$",
+            "example": "byom_42"
+          },
+          "display_name": {
+            "type": "string"
+          },
+          "model_id": {
+            "type": "string"
+          },
+          "wire_protocol": {
+            "type": "string",
+            "description": "The wire protocol the BYOM uses to talk to its host.\n",
+            "enum": [
+              "openai_chat",
+              "anthropic_messages",
+              "google_generate_content",
+              "custom_openai_chat",
+              "bedrock_converse",
+              "vertex_gemini",
+              "anthropic_messages_bedrock",
+              "anthropic_messages_vertex",
+              "vertex_openai_chat"
+            ]
+          }
+        }
+      },
+      "QueryCostRow": {
+        "type": "object",
+        "description": "One row of per-query usage history. V2-aligned shape — V1\nmulti-axis multipliers and the raw cost surface\n(`estimated_cost_usd`, `tavily_searches`, `perplexity_calls`)\nare no longer exposed; `credits_charged` is the only price\nfield.\n",
+        "properties": {
+          "id": {
+            "type": "integer"
+          },
+          "mode": {
+            "$ref": "#/components/schemas/Mode"
+          },
+          "credits_charged": {
+            "type": "number"
+          },
+          "file_attached": {
+            "type": "boolean"
+          },
+          "file_category": {
+            "type": "string",
+            "nullable": true
+          },
+          "success": {
+            "type": "boolean"
+          },
+          "api_key_attributed": {
+            "type": "boolean"
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "FileMetadata": {
+        "type": "object",
+        "properties": {
+          "file_id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "size_bytes": {
+            "type": "integer"
+          },
+          "category": {
+            "type": "string",
+            "enum": [
+              "image",
+              "pdf",
+              "document",
+              "code"
+            ]
+          },
+          "mime_type": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Files auto-expire 30 days after upload (FILE_RETENTION_DAYS)."
+          }
+        }
+      },
+      "AuditEvent": {
+        "type": "object",
+        "properties": {
+          "timestamp": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "event_type": {
+            "type": "string",
+            "description": "See the event_type query param for the full enum."
+          },
+          "request_id": {
+            "type": "string",
+            "nullable": true
+          },
+          "endpoint": {
+            "type": "string",
+            "nullable": true
+          },
+          "status_code": {
+            "type": "integer",
+            "nullable": true
+          },
+          "error_code": {
+            "type": "string",
+            "nullable": true
+          },
+          "ip": {
+            "type": "string",
+            "nullable": true
+          },
+          "user_agent": {
+            "type": "string",
+            "nullable": true
+          },
+          "latency_ms": {
+            "type": "integer",
+            "nullable": true
+          },
+          "metadata": {
+            "type": "object",
+            "nullable": true,
+            "additionalProperties": true
+          }
+        }
+      },
+      "ErrorEnvelope": {
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "type": "object",
+            "required": [
+              "code",
+              "message",
+              "retriable",
+              "docs_url"
+            ],
+            "properties": {
+              "code": {
+                "type": "string",
+                "description": "Stable machine-readable error code.",
+                "enum": [
+                  "invalid_request",
+                  "invalid_prompt",
+                  "invalid_mode",
+                  "invalid_model",
+                  "invalid_models",
+                  "unsupported_file_type",
+                  "file_too_large",
+                  "file_not_found",
+                  "request_not_found",
+                  "file_expired",
+                  "unauthenticated",
+                  "invalid_api_key",
+                  "key_revoked",
+                  "key_suspended",
+                  "key_disabled",
+                  "aup_required",
+                  "permission_denied",
+                  "insufficient_credits",
+                  "monthly_cap_exceeded",
+                  "rate_limited",
+                  "idempotency_conflict",
+                  "provider_error",
+                  "aggregation_failed",
+                  "service_restarting",
+                  "internal_error",
+                  "service_unavailable"
+                ]
+              },
+              "message": {
+                "type": "string",
+                "description": "Human-readable explanation. Subject to change."
+              },
+              "request_id": {
+                "type": "string",
+                "nullable": true
+              },
+              "retriable": {
+                "type": "boolean",
+                "description": "True for 5xx and 429. False for 4xx (which means fix\nthe request, don't retry it).\n"
+              },
+              "retry_after_seconds": {
+                "type": "integer",
+                "nullable": true
+              },
+              "docs_url": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    "responses": {
+      "BadRequest": {
+        "description": "Invalid request body or parameters.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorEnvelope"
+            }
+          }
+        }
+      },
+      "Unauthenticated": {
+        "description": "Missing or invalid Bearer token.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorEnvelope"
+            }
+          }
+        }
+      },
+      "Forbidden": {
+        "description": "Authenticated but the action isn't permitted (key suspended,\nAUP not yet accepted, etc.).\n",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorEnvelope"
+            }
+          }
+        }
+      },
+      "NotFound": {
+        "description": "Resource doesn't exist (or has expired).",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorEnvelope"
+            }
+          }
+        }
+      },
+      "InsufficientCredits": {
+        "description": "Tier allotment exhausted, or per-key monthly spend cap exceeded.\n",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorEnvelope"
+            }
+          }
+        }
+      },
+      "IdempotencyConflict": {
+        "description": "Same Idempotency-Key with a different body within the 24h TTL.\n",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorEnvelope"
+            }
+          }
+        }
+      },
+      "RateLimited": {
+        "description": "Up to 8 concurrent in-flight queries per API key; submitting while at\nthe cap returns 429 `rate_limited`. There is no fixed per-minute\nrequest cap — the effective ceiling is the account's credit balance.\nHonor the `Retry-After` header.\n",
+        "headers": {
+          "Retry-After": {
+            "schema": {
+              "type": "integer"
+            },
+            "description": "Seconds to wait before retrying."
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorEnvelope"
+            }
+          }
+        }
+      }
+    }
+  },
+  "security": [
+    {
+      "BearerAuth": []
+    }
+  ],
+  "tags": [
+    {
+      "name": "Queries",
+      "description": "Submit and retrieve verification jobs."
+    },
+    {
+      "name": "Models",
+      "description": "Catalog of provider/model combinations available for selection."
+    },
+    {
+      "name": "Usage",
+      "description": "Credit usage and per-request history."
+    },
+    {
+      "name": "Files",
+      "description": "Upload files and reference them in queries."
+    },
+    {
+      "name": "Audit",
+      "description": "Tamper-evident log of every authenticated call."
+    }
+  ]
+}
