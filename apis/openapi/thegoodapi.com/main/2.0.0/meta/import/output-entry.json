@@ -1,0 +1,2551 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "GoodAPI",
+    "version": "2.0.0",
+    "description": "GoodAPI is a REST API for tracking environmental impact actions — planting trees, recovering ocean-bound plastic bottles, and recording charity donations — for your organization. Every action is metered, billed monthly via Stripe, and rolls up into public-facing impact totals.\n\n## Authentication\n\nAll endpoints require an API key passed in the `Authorization` header — raw, with **no `Bearer ` prefix**:\n\n```\nAuthorization: live_sk_abc123\n```\n\nYou receive both a production key (`api_key_prod`) and a test key (`api_key_test`) on signup. Requests made with the test key do not generate Stripe charges. A missing key returns `401` on `/dashboard_url`; everywhere else missing and invalid keys both return `403`.\n\n## Idempotency\n\nPlant, rescue, and donate endpoints accept an optional `idempotency_key` in the request body. The first request creates a new record; subsequent requests with the same key return the originally-created record without creating a duplicate or generating new billing. For `POST /charities/donate`, an idempotent replay sets the response header `Idempotent-Replayed: true`. Idempotency keys are scoped to your organization and remembered indefinitely — choose keys that are unique to the underlying action (e.g. order ID, event ID).\n\n## Attribution and metadata\n\nEvery registration accepts two optional grouping fields:\n\n- `attribution` — a free-form string for one primary grouping dimension (e.g. order ID, campaign code, partner name). Filter on it later via `attribution_key` on the `GET` list endpoints.\n- `metadata` — an arbitrary JSON object for everything else. Filter on it later via the `metadata` query parameter (JSON-encoded).\n\nUse `attribution` for the dimension you'll filter by most often; use `metadata` for everything else you want to store for your own records.\n\n## Fractional counting\n\nFor organizations with fractional counting enabled, each registration stores both an integer `count` and a floating-point `fractional_count`. Use `fractional_count` when you need to credit partial impact (e.g. 0.5 trees per purchase). The integer `count` is what's reported to Stripe for billing.\n\n## Billing and refunds\n\nTree and bottle registrations are reported to Stripe as metered usage in the background — `POST` calls return immediately and Stripe reporting happens asynchronously. Donations are recorded but not billed through metered usage.\n\nA registration can be refunded via `POST /refund/trees` or `POST /refund/plastic_bottles` only while it's still in the **current billing cycle** and has an attached Stripe usage record. Refunds outside the current cycle (or for registrations created before the enhanced refund system) require contacting saif@thegoodapi.com.\n\n## Rate limits\n\nCharity endpoints (`/charities/search`, `/charities/donate`, `/charities/donations`) are rate-limited to **20 requests per second per API key per endpoint**. Excess requests receive a `429` response with a `Retry-After: 1` header and body `{\"error\": \"rate limit exceeded\"}`. Tree and bottle endpoints are not rate-limited at this time.\n\n## Errors\n\nAll errors are JSON objects of the shape `{\"error\": \"human-readable message\"}`. Status codes follow REST conventions: `400` for validation errors, `401` for a missing `Authorization` header on `/dashboard_url`, `403` for invalid auth or an ineligible refund, `429` for rate-limit violations on charity endpoints, and `500` for unexpected server errors.\n\n## Early access\n\nEndpoints under `/charities/*` are marked `x-early-access: true`. The interface may change without notice while we collect partner feedback. Production integrations should pin to the current spec and watch our changelog before upgrading.",
+    "contact": {
+      "name": "GoodAPI Support",
+      "email": "saif@thegoodapi.com",
+      "url": "https://thegoodapi.com"
+    },
+    "x-jentic-source-url": "https://app.thegoodapi.com/openapi.json"
+  },
+  "servers": [
+    {
+      "url": "https://app.thegoodapi.com",
+      "description": "Production"
+    }
+  ],
+  "paths": {
+    "/plant/trees": {
+      "post": {
+        "tags": [
+          "Trees"
+        ],
+        "summary": "Plant trees",
+        "description": "Plant trees and record the impact against the authenticated organization. Call this when a user completes an action that should generate impact (e.g. completing checkout, finishing a campaign goal, signing up). The response includes both the newly-created registration and rolling totals (`total_planted_trees` all-time, `total_planted_trees_month` for the current calendar month) so you can confirm and display the impact immediately. Pass an `idempotency_key` when the same triggering event could fire twice — duplicate keys return the original record without re-charging. The Stripe usage report happens asynchronously after the response is returned; it does not block the request.",
+        "operationId": "plantTrees",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PlantTreesRequest"
+              },
+              "example": {
+                "count": 10,
+                "attribution": "order-1234",
+                "metadata": {
+                  "campaign": "earth-day",
+                  "order_id": 786
+                },
+                "idempotency_key": "unique-request-id-123"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Trees planted successfully.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlantTreesResponse"
+                },
+                "example": {
+                  "total_planted_trees": 45,
+                  "total_planted_trees_month": 10,
+                  "tree_details": [
+                    {
+                      "id": "i2SeocFjwNayo7PI7DpI",
+                      "count": 10,
+                      "fractional_count": 10.0,
+                      "created_at": "2026-05-01T22:07:31.374582-04:00",
+                      "idempotency_key": "unique-request-id-123",
+                      "metadata": {
+                        "campaign": "earth-day",
+                        "order_id": 786
+                      },
+                      "attribution": "order-1234",
+                      "refunded": false
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError"
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "Trees"
+        ],
+        "summary": "List planted trees",
+        "description": "Retrieve planted tree registrations and rolling totals. Use this for impact dashboards, reconciliation against your own records, or backfilling missed events. Combine `created_at` + `end_at` for a date range (inclusive), `attribution_key` for a single grouping dimension, or `metadata` (JSON-encoded) for free-form filters. Without filters, returns every registration for the organization — there is no pagination on this endpoint, so use filters when the result set is large.",
+        "operationId": "getPlantedTrees",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/AttributionKey"
+          },
+          {
+            "$ref": "#/components/parameters/RegistrationID"
+          },
+          {
+            "$ref": "#/components/parameters/CreatedAt"
+          },
+          {
+            "$ref": "#/components/parameters/EndAt"
+          },
+          {
+            "$ref": "#/components/parameters/MetadataFilter"
+          },
+          {
+            "$ref": "#/components/parameters/ProjectIDFilter"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Returns total planted trees and tree details array.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetTreesResponse"
+                },
+                "example": {
+                  "total_planted_trees": 45,
+                  "total_planted_trees_month": 10,
+                  "tree_details": [
+                    {
+                      "id": "i2SeocFjwNayo7PI7DpI",
+                      "count": 10,
+                      "fractional_count": 10.0,
+                      "created_at": "2026-05-01T22:07:31.374582-04:00",
+                      "idempotency_key": "unique-request-id-123",
+                      "metadata": {
+                        "campaign": "earth-day"
+                      },
+                      "attribution": "order-1234"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError"
+          }
+        }
+      }
+    },
+    "/refund/trees": {
+      "post": {
+        "tags": [
+          "Refunds",
+          "Trees"
+        ],
+        "summary": "Refund a tree registration",
+        "description": "Refund a tree registration and zero the corresponding Stripe usage record. Pass the tree `id` from a `POST /plant/trees` response or `GET /plant/trees`. Refunds succeed only when the registration is in the **current Stripe billing cycle** (typically up to ~30 days, depending on your billing day) and has an attached Stripe usage record. Registrations outside the current cycle return `403`; registrations created before the enhanced refund system (no Stripe usage record on file) return `400` — for both cases contact saif@thegoodapi.com. The refund is partial-only via the `count` field; omit it to refund the full registration.",
+        "operationId": "refundTrees",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RefundRequest"
+              },
+              "example": {
+                "id": "i2SeocFjwNayo7PI7DpI",
+                "reason": "Customer requested refund"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Returns details about the refunded trees and remaining total.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RefundTreesResponse"
+                },
+                "example": {
+                  "refunded_trees": 10,
+                  "total_planted_trees": 35,
+                  "refund_details": [
+                    {
+                      "id": "i2SeocFjwNayo7PI7DpI",
+                      "count": 10,
+                      "fractional_count": 10.0,
+                      "created_at": "2026-05-01T22:07:31.374582-04:00",
+                      "idempotency_key": "unique-request-id-123",
+                      "metadata": {},
+                      "attribution": "order-1234",
+                      "refunded": true
+                    }
+                  ],
+                  "refund_id": "refund-i2SeocFjwNayo7PI7DpI"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error or the registration cannot be refunded by the API.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "examples": {
+                  "preEnhancedRefundSystem": {
+                    "summary": "Registration predates the enhanced refund system",
+                    "value": {
+                      "error": "This tree cannot be refunded as it was planted before the enhanced refund system was implemented"
+                    }
+                  },
+                  "missingID": {
+                    "summary": "Missing tree id",
+                    "value": {
+                      "error": "tree id is required"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Invalid API key or registration is outside the current billing cycle.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "examples": {
+                  "notInCurrentCycle": {
+                    "summary": "Registration is outside the current billing cycle",
+                    "value": {
+                      "error": "Tree can only be refunded if it was planted in the current billing cycle"
+                    }
+                  },
+                  "invalidKey": {
+                    "summary": "Invalid or missing API key",
+                    "value": {
+                      "error": "Invalid API key"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError"
+          }
+        }
+      }
+    },
+    "/tree/projects": {
+      "get": {
+        "tags": [
+          "Trees"
+        ],
+        "summary": "List tree planting projects",
+        "description": "Retrieve available tree planting projects with their pricing, region, and metadata. By default, returns public projects. Pass `locale` for localized titles and descriptions.",
+        "operationId": "getTreeProjects",
+        "parameters": [
+          {
+            "name": "locale",
+            "in": "query",
+            "required": false,
+            "description": "Locale code for localized text (e.g. 'en', 'fr', 'de', 'es', 'ja', 'nl', 'zh-CN'). Defaults to 'en'.",
+            "schema": {
+              "type": "string",
+              "default": "en"
+            }
+          },
+          {
+            "name": "all",
+            "in": "query",
+            "required": false,
+            "description": "If true, includes private projects.",
+            "schema": {
+              "type": "boolean",
+              "default": false
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of tree projects.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TreeProjectsResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/tree/projects/{id}": {
+      "get": {
+        "tags": [
+          "Trees"
+        ],
+        "summary": "Get tree planting project by ID",
+        "description": "Retrieve details of a specific tree planting project by its identifier.",
+        "operationId": "getTreeProjectByID",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Project identifier (e.g. 'veritree-kenya', 'veritree-us').",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "locale",
+            "in": "query",
+            "required": false,
+            "description": "Locale code for localized text (e.g. 'en', 'fr', 'de', 'es'). Defaults to 'en'.",
+            "schema": {
+              "type": "string",
+              "default": "en"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Project details.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Project"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/rescue/plastic_bottles": {
+      "post": {
+        "tags": [
+          "Plastic Bottles"
+        ],
+        "summary": "Rescue ocean-bound plastic bottles",
+        "description": "Rescue plastic bottles and record the impact against the authenticated organization. Behaves identically to `POST /plant/trees`: same request shape, same idempotency model, same attribution/metadata conventions, same async Stripe usage reporting. The integer `count` is what's reported to Stripe; `fractional_count` in the response is for proportional impact accounting if your organization has fractional counting enabled.",
+        "operationId": "rescuePlasticBottles",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RescuePlasticRequest"
+              },
+              "example": {
+                "count": 50,
+                "attribution": "order-1234",
+                "metadata": {
+                  "campaign": "ocean-cleanup"
+                },
+                "idempotency_key": "unique-request-id-456"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Bottles rescued successfully.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RescuePlasticResponse"
+                },
+                "example": {
+                  "total_rescued_bottles": 250,
+                  "total_rescued_bottles_month": 50,
+                  "bottle_details": [
+                    {
+                      "id": "j3TfpdGkxObzp8QJ8EqJ",
+                      "count": 50,
+                      "fractional_count": 50.0,
+                      "created_at": "2026-05-01T22:07:31.374582-04:00",
+                      "idempotency_key": "unique-request-id-456",
+                      "metadata": {
+                        "campaign": "ocean-cleanup"
+                      },
+                      "attribution": "order-1234",
+                      "refunded": false
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError"
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "Plastic Bottles"
+        ],
+        "summary": "List rescued bottles",
+        "description": "Retrieve rescued bottle registrations and rolling totals. Behaves identically to `GET /plant/trees`: combine `created_at` + `end_at` for a date range (inclusive), `attribution_key` for a single grouping dimension, or `metadata` (JSON-encoded) for free-form filters. Without filters, returns every registration — there is no pagination, so use filters when the result set is large.",
+        "operationId": "getRescuedBottles",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/AttributionKey"
+          },
+          {
+            "$ref": "#/components/parameters/RegistrationID"
+          },
+          {
+            "$ref": "#/components/parameters/CreatedAt"
+          },
+          {
+            "$ref": "#/components/parameters/EndAt"
+          },
+          {
+            "$ref": "#/components/parameters/MetadataFilter"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Returns total rescued bottles and bottle details array.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetBottlesResponse"
+                },
+                "example": {
+                  "total_rescued_bottles": 250,
+                  "total_rescued_bottles_month": 50,
+                  "bottle_details": [
+                    {
+                      "id": "j3TfpdGkxObzp8QJ8EqJ",
+                      "count": 50,
+                      "created_at": "2026-05-01T22:07:31.374582-04:00",
+                      "idempotency_key": "unique-request-id-456",
+                      "metadata": {
+                        "campaign": "ocean-cleanup"
+                      },
+                      "attribution": "order-1234"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError"
+          }
+        }
+      }
+    },
+    "/refund/plastic_bottles": {
+      "post": {
+        "tags": [
+          "Refunds",
+          "Plastic Bottles"
+        ],
+        "summary": "Refund a plastic bottle registration",
+        "description": "Refund a bottle registration and zero the corresponding Stripe usage record. Behaves identically to `POST /refund/trees`: succeeds only when the registration is in the **current Stripe billing cycle** (typically up to ~30 days, depending on your billing day) and has an attached Stripe usage record. Registrations outside the current cycle return `403`; registrations created before the enhanced refund system return `400` — for both cases contact saif@thegoodapi.com.",
+        "operationId": "refundPlasticBottles",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RefundRequest"
+              },
+              "example": {
+                "id": "j3TfpdGkxObzp8QJ8EqJ",
+                "reason": "Order cancelled"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Returns details about the refunded bottles and remaining total.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RefundBottlesResponse"
+                },
+                "example": {
+                  "refunded_bottles": 50,
+                  "total_rescued_bottles": 200,
+                  "refund_details": [
+                    {
+                      "id": "j3TfpdGkxObzp8QJ8EqJ",
+                      "count": 50,
+                      "fractional_count": 50.0,
+                      "created_at": "2026-05-01T22:07:31.374582-04:00",
+                      "idempotency_key": "unique-request-id-456",
+                      "metadata": {},
+                      "attribution": "order-1234",
+                      "refunded": true
+                    }
+                  ],
+                  "refund_id": "refund-j3TfpdGkxObzp8QJ8EqJ"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error or the registration cannot be refunded by the API.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "examples": {
+                  "preEnhancedRefundSystem": {
+                    "summary": "Registration predates the enhanced refund system",
+                    "value": {
+                      "error": "This bottle cannot be refunded as it was rescued before the enhanced refund system was implemented"
+                    }
+                  },
+                  "missingID": {
+                    "summary": "Missing bottle id",
+                    "value": {
+                      "error": "bottle id is required"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Invalid API key or registration is outside the current billing cycle.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "examples": {
+                  "notInCurrentCycle": {
+                    "summary": "Registration is outside the current billing cycle",
+                    "value": {
+                      "error": "Bottle can only be refunded if it was rescued in the current billing cycle"
+                    }
+                  },
+                  "invalidKey": {
+                    "summary": "Invalid or missing API key",
+                    "value": {
+                      "error": "Invalid API key"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError"
+          }
+        }
+      }
+    },
+    "/evidence": {
+      "get": {
+        "tags": [
+          "Evidence"
+        ],
+        "summary": "Get aggregated planting evidence",
+        "description": "Return aggregated tree-planting verification statistics and per-region evidence (photos, videos, field reports) from our field-operations partner. Use this to power a verified-planting page on your site, build trust with customers, or pull a one-shot impact report. The response is cached for 30 days at the platform level — consecutive calls return identical responses until the cache expires. The data reflects planting verified by our field partner; it is not filtered to only your organization's contributions.",
+        "operationId": "getEvidence",
+        "responses": {
+          "200": {
+            "description": "Aggregated evidence and per-region statistics.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvidenceResponse"
+                },
+                "example": {
+                  "summary": {
+                    "total_trees": 1500000,
+                    "trees_planted": 1450000,
+                    "carbon_offset_tons": 32500.5,
+                    "area_restored_hectares": 1820.7,
+                    "countries": [
+                      "Kenya",
+                      "Madagascar",
+                      "Brazil"
+                    ]
+                  },
+                  "regions": [
+                    {
+                      "id": "region-001",
+                      "name": "Mikoko Pamoja",
+                      "country": "Kenya",
+                      "evidence": [
+                        {
+                          "id": "ev-001",
+                          "type": "photo",
+                          "url": "https://cdn.thegoodapi.com/evidence/ev-001.jpg",
+                          "date": "2026-04-12"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError"
+          }
+        }
+      }
+    },
+    "/evidence/tree/{id}": {
+      "get": {
+        "tags": [
+          "Evidence"
+        ],
+        "summary": "Get tree planting timeline and evidence",
+        "description": "Retrieve the full verifiably-tracked milestone timeline and event-specific field evidence (funds distribution records, planting site locations, community team details, and field verification media) for a specific planted tree registration. As the tree moves through its lifecycle from initial order to nursery allocation to active planting in the ground, milestones update from `pending` to `completed` dynamically.",
+        "operationId": "getTreeEvidence",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "The unique tree registration ID.",
+            "schema": {
+              "type": "string"
+            },
+            "example": "i2SeocFjwNayo7PI7DpI"
+          },
+          {
+            "name": "evidence_stage",
+            "in": "query",
+            "required": false,
+            "description": "Optional testing parameter to return a mocked evidence response at a specific milestone stage (`registered`, `funds_distributed`, or `planted`). Only permitted for test API keys. Seeded from a verified Kenya planting registration.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "registered",
+                "funds_distributed",
+                "planted",
+                "planted_and_verified"
+              ]
+            },
+            "example": "planted"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Timeline and detailed evidence response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TreeEvidenceResponse"
+                },
+                "example": {
+                  "tree_id": "i2SeocFjwNayo7PI7DpI",
+                  "status": "planted",
+                  "timeline": [
+                    {
+                      "event": "registered",
+                      "title": "Tree Registered",
+                      "status": "completed",
+                      "date": "2026-05-19T22:07:31Z",
+                      "description": "The tree was officially registered and recorded in our database.",
+                      "evidence": {
+                        "tree_id": "i2SeocFjwNayo7PI7DpI",
+                        "registered_at": "2026-05-19T22:07:31Z",
+                        "count": 10,
+                        "fractional_count": 10.0,
+                        "attribution": "order-1234"
+                      }
+                    },
+                    {
+                      "event": "funds_distributed",
+                      "title": "Funds Distributed",
+                      "status": "completed",
+                      "date": "2026-05-19T23:15:00Z",
+                      "description": "Funds were successfully distributed to our planting partner (Veritree) under Order #VO-456.",
+                      "evidence": {
+                        "partner": "veritree",
+                        "tree_order_id": "456",
+                        "tree_order_public_id": "VO-456",
+                        "buyer_name": "Acme Corp"
+                      }
+                    },
+                    {
+                      "event": "allocated",
+                      "title": "Allocated to Planting Site",
+                      "status": "completed",
+                      "date": "2026-05-20T00:45:00Z",
+                      "description": "The tree was allocated to a specific planting site across 1 allocation(s).",
+                      "evidence": {
+                        "partner": "veritree",
+                        "allocations": [
+                          {
+                            "allocation_id": 789,
+                            "date_allocated": "2026-05-20 00:45:00",
+                            "planting_site": {
+                              "id": 12,
+                              "name": "Mikoko Pamoja",
+                              "subsite_name": "Mangrove Restoration Zone B",
+                              "organization_name": "Eden Reforestation Projects",
+                              "latitude": -4.4172,
+                              "longitude": 39.4083,
+                              "main_image": "https://cdn.thegoodapi.com/sites/site-12.jpg"
+                            },
+                            "crew": {
+                              "leader": "John Doe",
+                              "style": "mangrove planting",
+                              "total_members": 15,
+                              "women_members": 9
+                            }
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "event": "planted",
+                      "title": "Tree Planted",
+                      "status": "completed",
+                      "date": "2026-05-20T02:00:00Z",
+                      "description": "The tree has been successfully planted in the ground and verified by field crews.",
+                      "evidence": {
+                        "partner": "veritree",
+                        "date_planted": "2026-05-20 02:00:00",
+                        "media": [
+                          {
+                            "id": 101,
+                            "type": "image",
+                            "url": "https://cdn.thegoodapi.com/evidence/planted-101.jpg",
+                            "thumbnail_url": "https://cdn.thegoodapi.com/evidence/planted-101-thumb.jpg",
+                            "latitude": -4.4175,
+                            "longitude": 39.4085
+                          }
+                        ]
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "description": "Tree registration not found.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "error": "failed to find tree"
+                }
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError"
+          }
+        }
+      }
+    },
+    "/charities/search": {
+      "get": {
+        "tags": [
+          "Charities"
+        ],
+        "summary": "Search charities",
+        "description": "Search for charities by name or EIN. Results come from the configured search provider (Change.org or PayPal Giving Fund, depending on your account). Use this to validate that a charity exists before calling `POST /charities/donate`, or to power a charity picker in your UI. Each result includes both `nonprofit_id` (provider-specific) and `ein` (universal); either can identify the charity in the donate call. Rate-limited to 20 req/sec per API key.",
+        "operationId": "searchCharities",
+        "x-early-access": true,
+        "parameters": [
+          {
+            "name": "name",
+            "in": "query",
+            "required": false,
+            "description": "Search by charity name.",
+            "schema": {
+              "type": "string"
+            },
+            "example": "red cross"
+          },
+          {
+            "name": "ein",
+            "in": "query",
+            "required": false,
+            "description": "Search by Employer Identification Number.",
+            "schema": {
+              "type": "string"
+            },
+            "example": "53-0196605"
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "required": false,
+            "description": "Number of results per page.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 20,
+              "default": 20
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "description": "Page number (1-indexed).",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Paginated charity search results.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CharitySearchResponse"
+                },
+                "example": {
+                  "total_items": 42,
+                  "total_pages": 3,
+                  "charities": [
+                    {
+                      "nonprofit_id": "american-red-cross",
+                      "name": "American National Red Cross",
+                      "ein": "53-0196605",
+                      "description": "Humanitarian organization providing emergency assistance.",
+                      "website": "https://www.redcross.org",
+                      "icon_url": "https://cdn.thegoodapi.com/charities/red-cross.png"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError"
+          }
+        }
+      }
+    },
+    "/charities/donate": {
+      "post": {
+        "tags": [
+          "Charities"
+        ],
+        "summary": "Record a charity donation",
+        "description": "Record a donation to a charity for the authenticated organization. At least one of `ein` or `nonprofit_id` must be supplied; the charity is validated against the search provider before the donation is created, so calling `GET /charities/search` first is a safe pre-check. If `charity_name` is omitted it is auto-filled from the validation result. The currency is always USD; the `amount_cents` field must be a positive integer. Pass `idempotency_key` for safe retries — duplicates return the original record with response header `Idempotent-Replayed: true`. Rate-limited to 20 req/sec per API key. **Early access** — signature may change.",
+        "operationId": "createDonation",
+        "x-early-access": true,
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DonateRequest"
+              },
+              "example": {
+                "amount_cents": 2500,
+                "ein": "53-0196605",
+                "charity_name": "American National Red Cross",
+                "attribution": "checkout-campaign",
+                "metadata": {
+                  "order_id": "ord_789"
+                },
+                "idempotency_key": "donation-2026-05-19-001"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Donation created (or idempotent replay).",
+            "headers": {
+              "Idempotent-Replayed": {
+                "description": "Present and set to \"true\" when an existing donation is returned via idempotency.",
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "true"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DonateResponse"
+                },
+                "example": {
+                  "donation_id": "don_abc123",
+                  "amount_cents": 2500,
+                  "charity_name": "American National Red Cross",
+                  "ein": "53-0196605",
+                  "nonprofit_id": "american-red-cross",
+                  "total_donations": 5,
+                  "donation_details": [
+                    {
+                      "id": "don_abc123",
+                      "amount_cents": 2500,
+                      "currency": "USD",
+                      "ein": "53-0196605",
+                      "nonprofit_id": "american-red-cross",
+                      "charity_name": "American National Red Cross",
+                      "created_at": "2026-05-19T10:15:00Z",
+                      "idempotency_key": "donation-2026-05-19-001",
+                      "attribution": "checkout-campaign",
+                      "metadata": {
+                        "order_id": "ord_789"
+                      },
+                      "refunded": false
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "examples": {
+                  "missingIdentifier": {
+                    "summary": "Missing ein and nonprofit_id",
+                    "value": {
+                      "error": "ein or nonprofit_id is required"
+                    }
+                  },
+                  "invalidAmount": {
+                    "summary": "Amount must be greater than 0",
+                    "value": {
+                      "error": "amount_cents must be greater than 0"
+                    }
+                  },
+                  "charityNotFound": {
+                    "summary": "No matching charity",
+                    "value": {
+                      "error": "no charity found for the provided ein"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError"
+          }
+        }
+      }
+    },
+    "/charities/donations": {
+      "get": {
+        "tags": [
+          "Charities"
+        ],
+        "summary": "List donations",
+        "description": "List donations recorded by the authenticated organization, with filtering and pagination. Use this for reconciliation, impact reporting, or showing a user their donation history. Filter by `attribution`, a `metadata_key` (with optional `metadata_value`), or a date range (`start_date`/`end_date`, both inclusive, YYYY-MM-DD). Combine with pagination for large result sets. Refunded donations are included in results with `refunded: true`. Rate-limited to 20 req/sec per API key. **Early access** — signature may change.",
+        "operationId": "listDonations",
+        "x-early-access": true,
+        "parameters": [
+          {
+            "name": "attribution",
+            "in": "query",
+            "required": false,
+            "description": "Filter by attribution tag.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "metadata_key",
+            "in": "query",
+            "required": false,
+            "description": "Filter by metadata key (existence check unless `metadata_value` is also provided).",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "metadata_value",
+            "in": "query",
+            "required": false,
+            "description": "Filter by metadata value. Requires `metadata_key`.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "start_date",
+            "in": "query",
+            "required": false,
+            "description": "Filter donations on or after this date (YYYY-MM-DD).",
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
+          },
+          {
+            "name": "end_date",
+            "in": "query",
+            "required": false,
+            "description": "Filter donations on or before this date (YYYY-MM-DD, inclusive).",
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "description": "Page number (1-indexed).",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1
+            }
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "required": false,
+            "description": "Number of results per page.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Paginated list of donations.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListDonationsResponse"
+                },
+                "example": {
+                  "total_items": 12,
+                  "total_pages": 1,
+                  "page": 1,
+                  "page_size": 20,
+                  "donations": [
+                    {
+                      "id": "don_abc123",
+                      "amount_cents": 2500,
+                      "currency": "USD",
+                      "ein": "53-0196605",
+                      "nonprofit_id": "american-red-cross",
+                      "charity_name": "American National Red Cross",
+                      "created_at": "2026-05-19T10:15:00Z",
+                      "idempotency_key": "donation-2026-05-19-001",
+                      "attribution": "checkout-campaign",
+                      "metadata": {
+                        "order_id": "ord_789"
+                      },
+                      "refunded": false
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError"
+          }
+        }
+      }
+    },
+    "/charities/subscribe": {
+      "post": {
+        "tags": [
+          "Charities"
+        ],
+        "summary": "Subscribe to donations billing",
+        "description": "Provisions the Stripe subscription items for flat-rate and metered billing on the organization's existing subscription. This must be called once before making any live donations. Rate-limited to 20 req/sec per API key. **Early access** — signature may change.",
+        "operationId": "subscribeDonations",
+        "x-early-access": true,
+        "responses": {
+          "200": {
+            "description": "Subscription activated successfully.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubscribeDonationResponse"
+                },
+                "example": {
+                  "success": true,
+                  "message": "Successfully activated donation subscription"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError"
+          }
+        }
+      }
+    },
+    "/refund/donations": {
+      "post": {
+        "tags": [
+          "Refunds",
+          "Charities"
+        ],
+        "summary": "Refund a donation",
+        "description": "Refund a charity donation by setting its status to refunded. Pass the donation `id`. This is a soft-delete in Firestore; it does not automatically reverse the Stripe metered usage. **Early access** — signature may change.",
+        "operationId": "refundDonation",
+        "x-early-access": true,
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RefundDonationRequest"
+              },
+              "example": {
+                "id": "don_abc123",
+                "reason": "Customer cancelled order"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Returns details about the refunded donation.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RefundDonationResponse"
+                },
+                "example": {
+                  "refunded_amount_cents": 5000,
+                  "total_donations": 14,
+                  "refund_details": [
+                    {
+                      "id": "don_abc123",
+                      "amount_cents": 5000,
+                      "currency": "USD",
+                      "ein": "53-0196605",
+                      "nonprofit_id": "american-red-cross",
+                      "charity_name": "American National Red Cross",
+                      "created_at": "2026-05-19T10:15:00Z",
+                      "idempotency_key": "donation-2026-05-19-001",
+                      "attribution": "checkout-campaign",
+                      "metadata": {
+                        "order_id": "ord_789"
+                      },
+                      "refunded": true
+                    }
+                  ],
+                  "refund_id": "refund-don_abc123"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError"
+          }
+        }
+      }
+    },
+    "/dashboard_url": {
+      "get": {
+        "tags": [
+          "Dashboard"
+        ],
+        "summary": "Get the public impact dashboard URL",
+        "description": "Return the public impact dashboard URL for the authenticated organization. The dashboard is a shareable page showing total impact, monthly trends, and per-attribution breakdowns. Use this to link customers or visitors to the impact page from your own site. The URL is stable for the lifetime of the organization. Unlike most endpoints, a missing `Authorization` header returns `401` here (other endpoints conflate missing/invalid as `403`).",
+        "operationId": "getDashboardURL",
+        "responses": {
+          "200": {
+            "description": "Dashboard URL and organization ID.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DashboardURLResponse"
+                },
+                "example": {
+                  "dashboard_url": "https://dashboard.thegoodapi.com/org_abc123?source=apiv2",
+                  "org_id": "org_abc123"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing Authorization header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "error": "Missing Authorization header"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "ApiKeyAuth": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "Authorization",
+        "description": "Raw API key in the `Authorization` header. Do NOT prefix with `Bearer `. Example: `Authorization: live_sk_abc123`."
+      }
+    },
+    "parameters": {
+      "AttributionKey": {
+        "name": "attribution_key",
+        "in": "query",
+        "required": false,
+        "description": "Filter by attribution tag.",
+        "schema": {
+          "type": "string"
+        },
+        "example": "order-1234"
+      },
+      "RegistrationID": {
+        "name": "id",
+        "in": "query",
+        "required": false,
+        "description": "Fetch a single registration by ID.",
+        "schema": {
+          "type": "string"
+        }
+      },
+      "CreatedAt": {
+        "name": "created_at",
+        "in": "query",
+        "required": false,
+        "description": "Registrations created on or after this date (YYYY-MM-DD).",
+        "schema": {
+          "type": "string",
+          "format": "date"
+        }
+      },
+      "EndAt": {
+        "name": "end_at",
+        "in": "query",
+        "required": false,
+        "description": "Registrations created on or before this date (YYYY-MM-DD).",
+        "schema": {
+          "type": "string",
+          "format": "date"
+        }
+      },
+      "MetadataFilter": {
+        "name": "metadata",
+        "in": "query",
+        "required": false,
+        "description": "JSON-encoded metadata filter, e.g. `{\"order_id\":\"ord_123\"}`.",
+        "schema": {
+          "type": "string"
+        },
+        "example": "{\"campaign\":\"earth-day\"}"
+      },
+      "ProjectIDFilter": {
+        "name": "project_id",
+        "in": "query",
+        "required": false,
+        "description": "Filter registrations by project identifier (e.g. 'veritree-kenya', 'veritree-us').",
+        "schema": {
+          "type": "string"
+        },
+        "example": "veritree-kenya"
+      }
+    },
+    "responses": {
+      "BadRequest": {
+        "description": "Invalid request.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            },
+            "example": {
+              "error": "invalid request body"
+            }
+          }
+        }
+      },
+      "Forbidden": {
+        "description": "Missing or invalid API key.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            },
+            "example": {
+              "error": "Invalid API key"
+            }
+          }
+        }
+      },
+      "TooManyRequests": {
+        "description": "Rate limit exceeded. Charity endpoints allow 20 req/sec per API key per endpoint; retry after the window resets.",
+        "headers": {
+          "Retry-After": {
+            "description": "Seconds to wait before retrying.",
+            "schema": {
+              "type": "integer",
+              "example": 1
+            }
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            },
+            "example": {
+              "error": "rate limit exceeded"
+            }
+          }
+        }
+      },
+      "InternalServerError": {
+        "description": "Unexpected server error.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            },
+            "example": {
+              "error": "internal server error"
+            }
+          }
+        }
+      }
+    },
+    "schemas": {
+      "ErrorResponse": {
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "type": "string",
+            "description": "Human-readable error message."
+          }
+        },
+        "example": {
+          "error": "Invalid API key"
+        }
+      },
+      "PlantTreesRequest": {
+        "type": "object",
+        "required": [
+          "count"
+        ],
+        "properties": {
+          "count": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Number of trees to plant."
+          },
+          "project_id": {
+            "type": "string",
+            "description": "Optional project identifier to direct the tree planting to a specific project (e.g. 'veritree-kenya', 'veritree-us', 'veritree-bc-kelp', 'samauma-brazil', 'arbor-michigan', 'veritree-haiti'). Defaults to 'veritree-kenya'."
+          },
+          "attribution": {
+            "type": "string",
+            "description": "Free-form tag for grouping registrations (e.g. order ID, campaign)."
+          },
+          "metadata": {
+            "type": "object",
+            "additionalProperties": true,
+            "description": "Arbitrary key-value pairs stored with the registration."
+          },
+          "idempotency_key": {
+            "type": "string",
+            "description": "Unique key to prevent duplicate registrations."
+          }
+        }
+      },
+      "RescuePlasticRequest": {
+        "type": "object",
+        "required": [
+          "count"
+        ],
+        "properties": {
+          "count": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Number of plastic bottles to rescue."
+          },
+          "attribution": {
+            "type": "string",
+            "description": "Free-form tag for grouping registrations."
+          },
+          "metadata": {
+            "type": "object",
+            "additionalProperties": true,
+            "description": "Arbitrary key-value pairs stored with the registration."
+          },
+          "idempotency_key": {
+            "type": "string",
+            "description": "Unique key to prevent duplicate registrations."
+          }
+        }
+      },
+      "RefundRequest": {
+        "type": "object",
+        "required": [
+          "id"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Registration ID to refund."
+          },
+          "count": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Optional partial refund count. If omitted, the full registration is refunded."
+          },
+          "reason": {
+            "type": "string",
+            "description": "Optional human-readable reason for the refund."
+          },
+          "idempotency_key": {
+            "type": "string",
+            "description": "Unique key to prevent duplicate refund processing."
+          },
+          "metadata": {
+            "type": "object",
+            "additionalProperties": true,
+            "description": "Arbitrary key-value pairs stored with the refund."
+          }
+        }
+      },
+      "TreeDetail": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Tree registration ID."
+          },
+          "count": {
+            "type": "integer",
+            "description": "Number of trees in this registration."
+          },
+          "fractional_count": {
+            "type": "number",
+            "description": "Fractional tree count for proportional contributions."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Registration timestamp (RFC 3339)."
+          },
+          "idempotency_key": {
+            "type": "string",
+            "description": "Idempotency key used for this registration."
+          },
+          "metadata": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "attribution": {
+            "type": "string"
+          },
+          "project_id": {
+            "type": "string",
+            "description": "Identifier of the planting project (e.g. 'veritree-kenya', 'veritree-us')."
+          },
+          "project_name": {
+            "type": "string",
+            "description": "Human-readable name of the planting project."
+          },
+          "region": {
+            "type": "string",
+            "description": "Geographical region or country of the project."
+          },
+          "cost_per_tree": {
+            "type": "number",
+            "description": "Cost per tree in USD for this project."
+          },
+          "refunded": {
+            "type": "boolean",
+            "description": "Whether this registration has been refunded."
+          }
+        }
+      },
+      "BottleDetail": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Bottle registration ID."
+          },
+          "count": {
+            "type": "integer",
+            "description": "Number of bottles in this registration."
+          },
+          "fractional_count": {
+            "type": "number",
+            "description": "Fractional bottle count for proportional contributions."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Registration timestamp (RFC 3339)."
+          },
+          "idempotency_key": {
+            "type": "string",
+            "description": "Idempotency key used for this registration."
+          },
+          "metadata": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "attribution": {
+            "type": "string"
+          },
+          "refunded": {
+            "type": "boolean",
+            "description": "Whether this registration has been refunded."
+          }
+        }
+      },
+      "DonationDetail": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Donation ID."
+          },
+          "amount_cents": {
+            "type": "integer",
+            "description": "Donation amount in cents."
+          },
+          "currency": {
+            "type": "string",
+            "enum": [
+              "USD"
+            ],
+            "description": "Currency code (always USD)."
+          },
+          "ein": {
+            "type": "string",
+            "description": "EIN of the charity (if provided)."
+          },
+          "nonprofit_id": {
+            "type": "string",
+            "description": "Provider-specific nonprofit identifier (if provided)."
+          },
+          "charity_name": {
+            "type": "string",
+            "description": "Human-readable charity name."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Donation timestamp (RFC 3339)."
+          },
+          "idempotency_key": {
+            "type": "string"
+          },
+          "attribution": {
+            "type": "string"
+          },
+          "metadata": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "refunded": {
+            "type": "boolean",
+            "description": "Whether the donation has been refunded."
+          }
+        }
+      },
+      "PlantTreesResponse": {
+        "type": "object",
+        "properties": {
+          "total_planted_trees": {
+            "type": "integer",
+            "description": "Total non-refunded trees planted by this organization."
+          },
+          "total_planted_trees_month": {
+            "type": "integer",
+            "description": "Total trees planted in the current calendar month."
+          },
+          "tree_details": {
+            "type": "array",
+            "description": "Array containing the newly created tree registration(s).",
+            "items": {
+              "$ref": "#/components/schemas/TreeDetail"
+            }
+          }
+        }
+      },
+      "GetTreesResponse": {
+        "type": "object",
+        "properties": {
+          "total_planted_trees": {
+            "type": "integer"
+          },
+          "total_planted_trees_month": {
+            "type": "integer"
+          },
+          "tree_details": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TreeDetail"
+            }
+          }
+        }
+      },
+      "RescuePlasticResponse": {
+        "type": "object",
+        "properties": {
+          "total_rescued_bottles": {
+            "type": "integer",
+            "description": "Total non-refunded bottles rescued by this organization."
+          },
+          "total_rescued_bottles_month": {
+            "type": "integer",
+            "description": "Total bottles rescued in the current calendar month."
+          },
+          "bottle_details": {
+            "type": "array",
+            "description": "Array containing the newly created bottle registration(s).",
+            "items": {
+              "$ref": "#/components/schemas/BottleDetail"
+            }
+          }
+        }
+      },
+      "GetBottlesResponse": {
+        "type": "object",
+        "properties": {
+          "total_rescued_bottles": {
+            "type": "integer"
+          },
+          "total_rescued_bottles_month": {
+            "type": "integer"
+          },
+          "bottle_details": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BottleDetail"
+            }
+          }
+        }
+      },
+      "RefundTreesResponse": {
+        "type": "object",
+        "properties": {
+          "refunded_trees": {
+            "type": "integer",
+            "description": "Number of trees refunded."
+          },
+          "total_planted_trees": {
+            "type": "integer",
+            "description": "Total remaining (non-refunded) trees after the refund."
+          },
+          "refund_details": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TreeDetail"
+            }
+          },
+          "refund_id": {
+            "type": "string",
+            "description": "Unique identifier for this refund."
+          }
+        }
+      },
+      "RefundBottlesResponse": {
+        "type": "object",
+        "properties": {
+          "refunded_bottles": {
+            "type": "integer",
+            "description": "Number of bottles refunded."
+          },
+          "total_rescued_bottles": {
+            "type": "integer",
+            "description": "Total remaining (non-refunded) bottles after the refund."
+          },
+          "refund_details": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BottleDetail"
+            }
+          },
+          "refund_id": {
+            "type": "string",
+            "description": "Unique identifier for this refund."
+          }
+        }
+      },
+      "SubscribeDonationResponse": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean"
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      },
+      "RefundDonationRequest": {
+        "type": "object",
+        "required": [
+          "id"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Unique donation ID to refund."
+          },
+          "reason": {
+            "type": "string",
+            "description": "Reason for refund."
+          },
+          "idempotency_key": {
+            "type": "string",
+            "description": "Unique key to prevent duplicate refund processing."
+          },
+          "metadata": {
+            "type": "object",
+            "additionalProperties": true,
+            "description": "Arbitrary key-value pairs stored with the refund."
+          }
+        }
+      },
+      "RefundDonationResponse": {
+        "type": "object",
+        "properties": {
+          "refunded_amount_cents": {
+            "type": "integer",
+            "description": "Amount refunded in cents."
+          },
+          "total_donations": {
+            "type": "integer",
+            "description": "Total non-refunded donations remaining for this organization."
+          },
+          "refund_details": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DonationDetail"
+            }
+          },
+          "refund_id": {
+            "type": "string",
+            "description": "Unique identifier for this refund."
+          }
+        }
+      },
+      "DonateRequest": {
+        "type": "object",
+        "required": [
+          "amount_cents"
+        ],
+        "properties": {
+          "amount_cents": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Donation amount in cents (must be > 0)."
+          },
+          "ein": {
+            "type": "string",
+            "description": "Employer Identification Number of the charity. At least one of `ein` or `nonprofit_id` is required."
+          },
+          "nonprofit_id": {
+            "type": "string",
+            "description": "Provider-specific nonprofit identifier. At least one of `ein` or `nonprofit_id` is required."
+          },
+          "charity_name": {
+            "type": "string",
+            "description": "Human-readable charity name. Auto-filled from the search result if omitted."
+          },
+          "idempotency_key": {
+            "type": "string",
+            "description": "Unique key to prevent duplicate donations."
+          },
+          "attribution": {
+            "type": "string",
+            "description": "Free-form tag for grouping donations."
+          },
+          "metadata": {
+            "type": "object",
+            "additionalProperties": true,
+            "description": "Arbitrary key-value pairs stored with the donation."
+          }
+        }
+      },
+      "DonateResponse": {
+        "type": "object",
+        "properties": {
+          "donation_id": {
+            "type": "string",
+            "description": "ID of the created (or replayed) donation."
+          },
+          "amount_cents": {
+            "type": "integer"
+          },
+          "charity_name": {
+            "type": "string"
+          },
+          "ein": {
+            "type": "string"
+          },
+          "nonprofit_id": {
+            "type": "string"
+          },
+          "total_donations": {
+            "type": "integer",
+            "description": "Total non-refunded donations for this organization."
+          },
+          "donation_details": {
+            "type": "array",
+            "description": "Array containing the created (or replayed) donation record.",
+            "items": {
+              "$ref": "#/components/schemas/DonationDetail"
+            }
+          }
+        }
+      },
+      "ListDonationsResponse": {
+        "type": "object",
+        "properties": {
+          "total_items": {
+            "type": "integer",
+            "description": "Total number of matching donations."
+          },
+          "total_pages": {
+            "type": "integer",
+            "description": "Total number of pages."
+          },
+          "page": {
+            "type": "integer",
+            "description": "Current page number."
+          },
+          "page_size": {
+            "type": "integer",
+            "description": "Number of items per page."
+          },
+          "donations": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DonationDetail"
+            }
+          }
+        }
+      },
+      "CharityResult": {
+        "type": "object",
+        "properties": {
+          "nonprofit_id": {
+            "type": "string",
+            "description": "Provider-specific nonprofit identifier."
+          },
+          "name": {
+            "type": "string",
+            "description": "Charity name."
+          },
+          "ein": {
+            "type": "string",
+            "description": "Employer Identification Number."
+          },
+          "description": {
+            "type": "string",
+            "description": "Charity description or mission statement."
+          },
+          "website": {
+            "type": "string",
+            "format": "uri",
+            "description": "Charity website URL."
+          },
+          "icon_url": {
+            "type": "string",
+            "format": "uri",
+            "description": "Charity icon image URL."
+          }
+        }
+      },
+      "CharitySearchResponse": {
+        "type": "object",
+        "properties": {
+          "total_items": {
+            "type": "integer",
+            "description": "Total number of matching charities."
+          },
+          "total_pages": {
+            "type": "integer",
+            "description": "Total number of pages."
+          },
+          "charities": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CharityResult"
+            }
+          }
+        }
+      },
+      "EvidenceItem": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "photo",
+              "video"
+            ],
+            "description": "Evidence media type."
+          },
+          "url": {
+            "type": "string",
+            "format": "uri",
+            "description": "URL to the evidence asset."
+          },
+          "date": {
+            "type": "string",
+            "format": "date",
+            "description": "Date the evidence was captured (YYYY-MM-DD)."
+          }
+        }
+      },
+      "EvidenceRegion": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string",
+            "description": "Region or planting site name."
+          },
+          "country": {
+            "type": "string",
+            "description": "Country the region is located in."
+          },
+          "evidence": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/EvidenceItem"
+            }
+          }
+        }
+      },
+      "EvidenceSummary": {
+        "type": "object",
+        "properties": {
+          "total_trees": {
+            "type": "integer",
+            "description": "Total trees committed across all regions."
+          },
+          "trees_planted": {
+            "type": "integer",
+            "description": "Total trees actually planted (verified)."
+          },
+          "carbon_offset_tons": {
+            "type": "number",
+            "description": "Estimated carbon offset in metric tons."
+          },
+          "area_restored_hectares": {
+            "type": "number",
+            "description": "Restored area in hectares."
+          },
+          "countries": {
+            "type": "array",
+            "description": "Countries with active planting sites.",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "EvidenceResponse": {
+        "type": "object",
+        "properties": {
+          "summary": {
+            "$ref": "#/components/schemas/EvidenceSummary"
+          },
+          "regions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/EvidenceRegion"
+            }
+          }
+        }
+      },
+      "DashboardURLResponse": {
+        "type": "object",
+        "properties": {
+          "dashboard_url": {
+            "type": "string",
+            "format": "uri",
+            "description": "Public impact dashboard URL for this organization."
+          },
+          "org_id": {
+            "type": "string",
+            "description": "Organization ID."
+          }
+        }
+      },
+      "TreeEvidenceResponse": {
+        "type": "object",
+        "required": [
+          "tree_id",
+          "status",
+          "timeline"
+        ],
+        "properties": {
+          "tree_id": {
+            "type": "string",
+            "description": "The unique identifier of the tree registration."
+          },
+          "record_id": {
+            "type": "string",
+            "description": "Canonical impact record identifier (mirrored from tree_id for multi-impact compatibility)."
+          },
+          "impact_type": {
+            "type": "string",
+            "description": "The type of impact (e.g. 'trees', 'kelp', 'ocean-plastic')."
+          },
+          "impact_provider": {
+            "type": "string",
+            "description": "The impact execution partner or provider."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "registered",
+              "funds_distributed",
+              "allocated",
+              "planted",
+              "planted_and_verified"
+            ],
+            "description": "The current overall lifecycle status of the tree."
+          },
+          "provider_meta": {
+            "type": "object",
+            "description": "Provider-specific metadata and tracking IDs.",
+            "additionalProperties": true
+          },
+          "timeline": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TimelineEvent"
+            },
+            "description": "Chronological milestones showing the progression of the tree from registration to planting."
+          }
+        }
+      },
+      "TimelineEvent": {
+        "type": "object",
+        "required": [
+          "event",
+          "title",
+          "status",
+          "description"
+        ],
+        "properties": {
+          "step": {
+            "type": "integer",
+            "description": "1-indexed sequential milestone position."
+          },
+          "event": {
+            "type": "string",
+            "enum": [
+              "registered",
+              "funds_distributed",
+              "allocated",
+              "planted",
+              "planted_and_verified"
+            ],
+            "description": "The type identifier of this timeline event milestone."
+          },
+          "title": {
+            "type": "string",
+            "description": "The user-friendly title of this event milestone."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "completed",
+              "pending"
+            ],
+            "description": "Whether this milestone is completed or still pending."
+          },
+          "date": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true,
+            "description": "Timestamp when this event occurred (null/omitted if pending)."
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true,
+            "description": "Canonical RFC3339 timestamp when this event occurred (mirrors date)."
+          },
+          "description": {
+            "type": "string",
+            "description": "A descriptive, user-friendly summary of this milestone's state."
+          },
+          "evidence": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/RegistrationEvidence"
+              },
+              {
+                "$ref": "#/components/schemas/FundsDistributedEvidence"
+              },
+              {
+                "$ref": "#/components/schemas/AllocatedEvidence"
+              },
+              {
+                "$ref": "#/components/schemas/PlantedEvidence"
+              }
+            ],
+            "nullable": true,
+            "description": "Milestone-specific evidence details (null/omitted if pending)."
+          }
+        }
+      },
+      "RegistrationEvidence": {
+        "type": "object",
+        "required": [
+          "tree_id",
+          "registered_at",
+          "count",
+          "fractional_count"
+        ],
+        "properties": {
+          "tree_id": {
+            "type": "string",
+            "description": "The unique identifier of the tree registration."
+          },
+          "registered_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "The timestamp when the tree was recorded."
+          },
+          "count": {
+            "type": "integer",
+            "description": "Integer count of trees planted."
+          },
+          "fractional_count": {
+            "type": "number",
+            "description": "Proportional fractional count for fractional tree-planting integrations."
+          },
+          "attribution": {
+            "type": "string",
+            "description": "The attribution string associated with the tree registration."
+          }
+        }
+      },
+      "FundsDistributedEvidence": {
+        "type": "object",
+        "required": [
+          "partner",
+          "tree_order_id",
+          "tree_order_public_id",
+          "buyer_name"
+        ],
+        "properties": {
+          "partner": {
+            "type": "string",
+            "description": "The planting partner receiving the funds (e.g. 'veritree')."
+          },
+          "tree_order_id": {
+            "type": "string",
+            "description": "The database order ID for the partner organization."
+          },
+          "tree_order_public_id": {
+            "type": "string",
+            "description": "The public invoice/order identifier from the planting partner."
+          },
+          "buyer_name": {
+            "type": "string",
+            "description": "The name of the purchasing organization/entity."
+          },
+          "metadata": {
+            "type": "object",
+            "description": "Extensible partner-specific metadata fields.",
+            "additionalProperties": true
+          }
+        }
+      },
+      "AllocatedEvidence": {
+        "type": "object",
+        "required": [
+          "partner",
+          "allocations"
+        ],
+        "properties": {
+          "partner": {
+            "type": "string",
+            "description": "The planting partner handling allocation."
+          },
+          "allocations": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/EventAllocation"
+            },
+            "description": "Planting site allocations assigned to this tree order."
+          },
+          "metadata": {
+            "type": "object",
+            "description": "Partner-specific allocation metadata.",
+            "additionalProperties": true
+          }
+        }
+      },
+      "EventAllocation": {
+        "type": "object",
+        "required": [
+          "allocation_id",
+          "planting_site",
+          "crew"
+        ],
+        "properties": {
+          "allocation_id": {
+            "type": "integer",
+            "description": "The allocation record ID."
+          },
+          "date_allocated": {
+            "type": "string",
+            "description": "Date when this allocation record was processed."
+          },
+          "planting_site": {
+            "$ref": "#/components/schemas/CleanPlantingSite"
+          },
+          "crew": {
+            "$ref": "#/components/schemas/CleanCrewDetails"
+          }
+        }
+      },
+      "CleanPlantingSite": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "latitude",
+          "longitude"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "description": "Planting site ID."
+          },
+          "name": {
+            "type": "string",
+            "description": "Name of the planting site."
+          },
+          "subsite_name": {
+            "type": "string",
+            "description": "Name of the specific subsite area."
+          },
+          "organization_name": {
+            "type": "string",
+            "description": "Name of the local planting organization/community partner."
+          },
+          "latitude": {
+            "type": "number",
+            "description": "Planting site latitude."
+          },
+          "longitude": {
+            "type": "number",
+            "description": "Planting site longitude."
+          },
+          "main_image": {
+            "type": "string",
+            "format": "uri",
+            "description": "A prominent overview photograph of the planting site."
+          }
+        }
+      },
+      "CleanCrewDetails": {
+        "type": "object",
+        "required": [
+          "total_members",
+          "women_members"
+        ],
+        "properties": {
+          "leader": {
+            "type": "string",
+            "description": "The local community crew team leader."
+          },
+          "style": {
+            "type": "string",
+            "description": "The technical planting method employed (e.g. 'direct seed', 'bare root seedling')."
+          },
+          "total_members": {
+            "type": "integer",
+            "description": "Total number of community members in the planting team."
+          },
+          "women_members": {
+            "type": "integer",
+            "description": "Number of women in the planting crew."
+          }
+        }
+      },
+      "PlantedEvidence": {
+        "type": "object",
+        "required": [
+          "partner",
+          "media"
+        ],
+        "properties": {
+          "partner": {
+            "type": "string",
+            "description": "The planting partner verifying the tree."
+          },
+          "date_planted": {
+            "type": "string",
+            "description": "Verification date when the tree was planted in the ground."
+          },
+          "media": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CleanMedia"
+            },
+            "description": "Field-crew photographs or video assets verifying the planted trees."
+          },
+          "metadata": {
+            "type": "object",
+            "description": "Partner-specific verification metadata.",
+            "additionalProperties": true
+          }
+        }
+      },
+      "CleanMedia": {
+        "type": "object",
+        "required": [
+          "id",
+          "type",
+          "url"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "description": "Media asset ID."
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "image",
+              "video"
+            ],
+            "description": "Type of media file."
+          },
+          "url": {
+            "type": "string",
+            "format": "uri",
+            "description": "Direct asset URL."
+          },
+          "thumbnail_url": {
+            "type": "string",
+            "format": "uri",
+            "description": "Optimized preview thumbnail URL."
+          },
+          "latitude": {
+            "type": "number",
+            "description": "GPS latitude where the asset was captured."
+          },
+          "longitude": {
+            "type": "number",
+            "description": "GPS longitude where the asset was captured."
+          }
+        }
+      },
+      "TreeProjectsResponse": {
+        "type": "object",
+        "properties": {
+          "projects": {
+            "type": "array",
+            "description": "List of tree planting projects.",
+            "items": {
+              "$ref": "#/components/schemas/Project"
+            }
+          }
+        }
+      },
+      "Project": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Unique identifier for the project."
+          },
+          "provider": {
+            "type": "string",
+            "description": "Reforestation partner or provider."
+          },
+          "region": {
+            "type": "string",
+            "description": "Project location region."
+          },
+          "cost_per_tree": {
+            "type": "number",
+            "description": "Cost per tree in USD."
+          },
+          "image_url": {
+            "type": "string",
+            "description": "Primary project banner image URL."
+          },
+          "title": {
+            "type": "string",
+            "description": "Localized project title."
+          },
+          "description": {
+            "type": "string",
+            "description": "Localized project description."
+          },
+          "default": {
+            "type": "boolean",
+            "description": "Whether this is the universal default project."
+          },
+          "deprecated": {
+            "type": "boolean",
+            "description": "Whether this project is deprecated."
+          }
+        }
+      }
+    }
+  },
+  "security": [
+    {
+      "ApiKeyAuth": []
+    }
+  ],
+  "tags": [
+    {
+      "name": "Trees",
+      "description": "Plant trees and read back planting registrations. Trees are reported to Stripe as metered usage in the background — `POST` returns immediately and billing reconciles asynchronously. Tree counts roll up into the organization's all-time and monthly totals, which are surfaced both in responses and on the public dashboard."
+    },
+    {
+      "name": "Plastic Bottles",
+      "description": "Rescue ocean-bound plastic bottles and read back rescue registrations. The shape and semantics mirror the Trees endpoints exactly — same request body, same idempotency model, same billing path."
+    },
+    {
+      "name": "Charities",
+      "description": "Search charities and record donations against the authenticated organization. **Early access** — these endpoints are stabilizing and the interface may change with notice. Donations are not billed through Stripe metered usage; they're a separate charge model and currency is always USD. All charity endpoints are rate-limited to 20 req/sec per API key per endpoint."
+    },
+    {
+      "name": "Refunds",
+      "description": "Reverse a tree or bottle registration. Refunds are allowed only while the registration is in the current Stripe billing cycle and has an attached usage record. The refund zeroes the Stripe usage at the original timestamp and marks the registration as `refunded: true`."
+    },
+    {
+      "name": "Evidence",
+      "description": "Aggregated planting verification statistics from our field-operations partner. Includes per-region photos, videos, and field reports. Responses are cached for 30 days to keep field-partner API costs bounded."
+    },
+    {
+      "name": "Dashboard",
+      "description": "The public-facing impact dashboard for the authenticated organization — a shareable page showing total impact, monthly trends, and per-attribution breakdowns."
+    }
+  ]
+}
