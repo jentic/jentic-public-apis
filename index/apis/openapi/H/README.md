@@ -1,6 +1,6 @@
 # APIs — H
 
-Browsing 145 APIs starting with **H**.
+Browsing 148 APIs starting with **H**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · **H** · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -97,6 +97,7 @@ Browsing 145 APIs starting with **H**.
 | [hivelight.com](../../../../apis/openapi/hivelight.com) | [main](../../../../apis/openapi/hivelight.com/main) |
 | [hjarni.com](../../../../apis/openapi/hjarni.com) | [main](../../../../apis/openapi/hjarni.com/main) |
 | [hlaverify.com](../../../../apis/openapi/hlaverify.com) | [main](../../../../apis/openapi/hlaverify.com/main) |
+| [hmsovereign.com](../../../../apis/openapi/hmsovereign.com) | [main](../../../../apis/openapi/hmsovereign.com/main) |
 | [hn.algolia.com](../../../../apis/openapi/hn.algolia.com) | [hn-search-api](../../../../apis/openapi/hn.algolia.com/hn-search-api) |
 | [hnry.co](../../../../apis/openapi/hnry.co) | [main](../../../../apis/openapi/hnry.co/main) |
 | [hol.org](../../../../apis/openapi/hol.org) | [registry-broker](../../../../apis/openapi/hol.org/registry-broker) |
@@ -108,10 +109,12 @@ Browsing 145 APIs starting with **H**.
 | [honeywellhome.com](../../../../apis/openapi/honeywellhome.com) | [main](../../../../apis/openapi/honeywellhome.com/main) |
 | [hookdeck.com](../../../../apis/openapi/hookdeck.com) | [main](../../../../apis/openapi/hookdeck.com/main) |
 | [hootlens.com](../../../../apis/openapi/hootlens.com) | [main](../../../../apis/openapi/hootlens.com/main) |
+| [hoplite.sh](../../../../apis/openapi/hoplite.sh) | [main](../../../../apis/openapi/hoplite.sh/main) |
 | [hospitable.com](../../../../apis/openapi/hospitable.com) | [main](../../../../apis/openapi/hospitable.com/main) |
 | [host.io](../../../../apis/openapi/host.io) | [main](../../../../apis/openapi/host.io/main) |
 | [hostfully.com](../../../../apis/openapi/hostfully.com) | [main](../../../../apis/openapi/hostfully.com/main) |
 | [hotels.cloudbeds.com](../../../../apis/openapi/hotels.cloudbeds.com) | [main](../../../../apis/openapi/hotels.cloudbeds.com/main) |
+| [hotglue.com](../../../../apis/openapi/hotglue.com) | [main](../../../../apis/openapi/hotglue.com/main) |
 | [hotstoks.com](../../../../apis/openapi/hotstoks.com) | [main](../../../../apis/openapi/hotstoks.com/main) |
 | [hourtick.com](../../../../apis/openapi/hourtick.com) | [main](../../../../apis/openapi/hourtick.com/main) |
 | [housingsentinel.cn](../../../../apis/openapi/housingsentinel.cn) | [main](../../../../apis/openapi/housingsentinel.cn/main) |

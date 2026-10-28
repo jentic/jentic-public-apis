@@ -1,6 +1,6 @@
 # APIs — R
 
-Browsing 282 APIs starting with **R**.
+Browsing 284 APIs starting with **R**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · **R** · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -130,6 +130,7 @@ Browsing 282 APIs starting with **R**.
 | [rentry.co](../../../../apis/openapi/rentry.co) | [main](../../../../apis/openapi/rentry.co/main) |
 | [reonomy.com](../../../../apis/openapi/reonomy.com) | [main](../../../../apis/openapi/reonomy.com/main) |
 | [rephonic.com](../../../../apis/openapi/rephonic.com) | [main](../../../../apis/openapi/rephonic.com/main) |
+| [replicas.dev](../../../../apis/openapi/replicas.dev) | [main](../../../../apis/openapi/replicas.dev/main) |
 | [replicate.com](../../../../apis/openapi/replicate.com) | [main](../../../../apis/openapi/replicate.com/main) |
 | [replicate.so](../../../../apis/openapi/replicate.so) | [main](../../../../apis/openapi/replicate.so/main) |
 | [repliers.io](../../../../apis/openapi/repliers.io) | [main](../../../../apis/openapi/repliers.io/main) |
@@ -217,6 +218,7 @@ Browsing 282 APIs starting with **R**.
 | [ritekit.com](../../../../apis/openapi/ritekit.com) | [main](../../../../apis/openapi/ritekit.com/main) · [ritekit-api](../../../../apis/openapi/ritekit.com/ritekit-api) |
 | [riverty.com](../../../../apis/openapi/riverty.com) | [main](../../../../apis/openapi/riverty.com/main) |
 | [rivery.io](../../../../apis/openapi/rivery.io) | [rivery](../../../../apis/openapi/rivery.io/rivery) |
+| [riveterhq.com](../../../../apis/openapi/riveterhq.com) | [main](../../../../apis/openapi/riveterhq.com/main) |
 | [ro.am](../../../../apis/openapi/ro.am) | [main](../../../../apis/openapi/ro.am/main) |
 | [roadgoat.com](../../../../apis/openapi/roadgoat.com) | [main](../../../../apis/openapi/roadgoat.com/main) · [roadgoat-cities](../../../../apis/openapi/roadgoat.com/roadgoat-cities) |
 | [roadie.com](../../../../apis/openapi/roadie.com) | [main](../../../../apis/openapi/roadie.com/main) |

@@ -1,6 +1,6 @@
 # APIs — S
 
-Browsing 774 APIs starting with **S**.
+Browsing 776 APIs starting with **S**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · **S** · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -23,6 +23,7 @@ Browsing 774 APIs starting with **S**.
 | [sailthru.com](../../../../apis/openapi/sailthru.com) | [main](../../../../apis/openapi/sailthru.com/main) |
 | [sakari.io](../../../../apis/openapi/sakari.io) | [main](../../../../apis/openapi/sakari.io/main) |
 | [salad.cloud](../../../../apis/openapi/salad.cloud) | [main](../../../../apis/openapi/salad.cloud/main) |
+| [saldor.com](../../../../apis/openapi/saldor.com) | [main](../../../../apis/openapi/saldor.com/main) |
 | [sales-api.postoo.io](../../../../apis/openapi/sales-api.postoo.io) | [pluuug](../../../../apis/openapi/sales-api.postoo.io/pluuug) |
 | [sales.app.redkik.com](../../../../apis/openapi/sales.app.redkik.com) | [main](../../../../apis/openapi/sales.app.redkik.com/main) |
 | [salesflare.com](../../../../apis/openapi/salesflare.com) | [salesflare](../../../../apis/openapi/salesflare.com/salesflare) |
@@ -186,6 +187,7 @@ Browsing 774 APIs starting with **S**.
 | [sezzle.com](../../../../apis/openapi/sezzle.com) | [main](../../../../apis/openapi/sezzle.com/main) |
 | [sfbay511.org](../../../../apis/openapi/sfbay511.org) | [main](../../../../apis/openapi/sfbay511.org/main) |
 | [sfu.mirotalk.com](../../../../apis/openapi/sfu.mirotalk.com) | [main](../../../../apis/openapi/sfu.mirotalk.com/main) |
+| [shadeform.ai](../../../../apis/openapi/shadeform.ai) | [main](../../../../apis/openapi/shadeform.ai/main) |
 | [shadowserver.org](../../../../apis/openapi/shadowserver.org) | [main](../../../../apis/openapi/shadowserver.org/main) |
 | [shakerhotel.ir](../../../../apis/openapi/shakerhotel.ir) | [main](../../../../apis/openapi/shakerhotel.ir/main) |
 | [sharpapi.io](../../../../apis/openapi/sharpapi.io) | [main](../../../../apis/openapi/sharpapi.io/main) |

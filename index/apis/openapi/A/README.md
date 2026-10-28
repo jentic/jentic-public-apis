@@ -1,6 +1,6 @@
 # APIs — A
 
-Browsing 509 APIs starting with **A**.
+Browsing 511 APIs starting with **A**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · **A** · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -96,6 +96,7 @@ Browsing 509 APIs starting with **A**.
 | [agco-ats.com](../../../../apis/openapi/agco-ats.com) | [main](../../../../apis/openapi/agco-ats.com/main) |
 | [agendor.com.br](../../../../apis/openapi/agendor.com.br) | [agendor](../../../../apis/openapi/agendor.com.br/agendor) · [agendor-api](../../../../apis/openapi/agendor.com.br/agendor-api) · [main](../../../../apis/openapi/agendor.com.br/main) |
 | [agentboxd.com](../../../../apis/openapi/agentboxd.com) | [main](../../../../apis/openapi/agentboxd.com/main) |
+| [agentcard.sh](../../../../apis/openapi/agentcard.sh) | [main](../../../../apis/openapi/agentcard.sh/main) |
 | [agentedigitalkasnet.com](../../../../apis/openapi/agentedigitalkasnet.com) | [main](../../../../apis/openapi/agentedigitalkasnet.com/main) |
 | [agentfilings.com](../../../../apis/openapi/agentfilings.com) | [main](../../../../apis/openapi/agentfilings.com/main) |
 | [agentic-endpoints.com](../../../../apis/openapi/agentic-endpoints.com) | [main](../../../../apis/openapi/agentic-endpoints.com/main) |
@@ -360,6 +361,7 @@ Browsing 509 APIs starting with **A**.
 | [apiflash.com](../../../../apis/openapi/apiflash.com) | [main](../../../../apis/openapi/apiflash.com/main) |
 | [apify.com](../../../../apis/openapi/apify.com) | [main](../../../../apis/openapi/apify.com/main) |
 | [apigee.local](../../../../apis/openapi/apigee.local) | [registry](../../../../apis/openapi/apigee.local/registry) |
+| [apiguru.app](../../../../apis/openapi/apiguru.app) | [main](../../../../apis/openapi/apiguru.app/main) |
 | [apiip.net](../../../../apis/openapi/apiip.net) | [apiip](../../../../apis/openapi/apiip.net/apiip) · [main](../../../../apis/openapi/apiip.net/main) |
 | [apilayer.com](../../../../apis/openapi/apilayer.com) | [main](../../../../apis/openapi/apilayer.com/main) |
 | [apillow.co](../../../../apis/openapi/apillow.co) | [main](../../../../apis/openapi/apillow.co/main) |
