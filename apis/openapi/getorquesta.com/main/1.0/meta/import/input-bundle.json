@@ -1,0 +1,1749 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Orquesta Public API",
+    "version": "1.0",
+    "summary": "Programmatic access to prompts, logs, projects, agents, users, and the Batuta LLM proxy.",
+    "description": "The Orquesta Public API exposes read access to your organization's prompts, execution logs,\nprojects, agents, and users, plus an OpenAI-compatible chat-completions proxy (\"Batuta LLM\")\nthat routes across multiple upstream models with smart per-prompt classification.\n\nAll endpoints under `/api/v1/*` are stable, versioned, and safe to integrate against. Internal\ndashboard endpoints (`/api/projects/[id]/batuta/*`, `/api/agent/*`, `/api/auth/*`, etc.) are\nNOT part of this contract and may change without notice.\n\n## Authentication\n\nPass an API key on every request via either header:\n\n  - `Authorization: Bearer <token>`\n  - `X-API-Key: <token>`\n\nThree token prefixes are accepted; each carries different scope semantics:\n\n  | Prefix   | Type              | Scope             | Scopes granted                                          |\n  |----------|-------------------|-------------------|---------------------------------------------------------|\n  | `oak_`   | Org API key       | Organization, or a chosen subset of its projects | DB-configured (any of `prompts:read`, `prompts:write`, `logs:read`, ...) |\n  | `oclt_`  | CLI token         | Organization      | All four read scopes (synthesized), plus prompt submit    |\n  | `oat_`   | Agent token       | Project (single)  | All four read scopes; queries restricted to its project  |\n\nAn `oclt_` inherits its creator's access: an org owner or admin reaches every project,\nanyone else only the projects they are a member of. Projects outside that set are\nreported as not found.\n\nAn `oak_` is org-wide unless it was restricted to specific projects when it was created\n(or edited afterwards). A restricted key sees only those projects in every listing, and\na request naming any other project is reported as not found — the same answer as a\nproject that does not exist, so a key cannot enumerate the organization.\n\nGenerate keys from the dashboard: https://getorquesta.com/dashboard/settings\n\n## Errors\n\nNon-Batuta endpoints return `{ \"error\": \"human-readable message\" }` with status codes\n401 (missing/invalid key), 403 (scope/project mismatch), 404 (not found), 500 (internal).\n\nBatuta proxy endpoints (`/chat/completions`, `/models`) return OpenAI-compatible errors:\n`{ \"error\": { \"message\": \"...\", \"type\": \"auth_error\" | \"billing_error\" | \"routing_error\" | \"proxy_error\" } }`.\n",
+    "contact": {
+      "name": "Orquesta Support",
+      "url": "https://getorquesta.com",
+      "email": "oscar@getorquesta.com"
+    },
+    "license": {
+      "name": "Proprietary"
+    },
+    "x-jentic-source-url": "https://getorquesta.com/openapi.json"
+  },
+  "servers": [
+    {
+      "url": "https://getorquesta.com",
+      "description": "Production"
+    }
+  ],
+  "paths": {
+    "/api/v1/chat/completions": {
+      "post": {
+        "tags": [
+          "Batuta LLM"
+        ],
+        "summary": "Create a chat completion (OpenAI-compatible)",
+        "description": "OpenAI-compatible chat completions endpoint. Pass any model id from `GET /models` as the\n`model` field; pass the synthetic id `batuta-auto` to let Batuta classify the prompt and\nroute to a tier (fast / balanced / premium) automatically.\n\n### Routing headers (optional)\n\n  - `X-Batuta-Force-Tier: fast | balanced | premium` — bypass the classifier and pin a tier\n    for this call. Only meaningful when `model = batuta-auto`.\n  - `X-Batuta-Session-ID: <uuid>` — opaque session id. When provided, the proxy attributes\n    prior assistant turns in this session to the model that produced them so downstream\n    models can calibrate trust on cross-model conversations.\n\n### Routing response headers\n\n  - `X-Batuta-Routed-From: batuta-auto` (when input was routed)\n  - `X-Batuta-Routed-To: <upstream-model-id>`\n  - `X-Batuta-Tier: fast | balanced | premium`\n",
+        "operationId": "createChatCompletion",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChatCompletionRequest"
+              },
+              "examples": {
+                "simple": {
+                  "summary": "Plain GPT-4o call",
+                  "value": {
+                    "model": "gpt-4o-mini",
+                    "messages": [
+                      {
+                        "role": "user",
+                        "content": "What is the capital of France?"
+                      }
+                    ]
+                  }
+                },
+                "batuta-auto": {
+                  "summary": "Let Batuta classify and route",
+                  "value": {
+                    "model": "batuta-auto",
+                    "messages": [
+                      {
+                        "role": "user",
+                        "content": "Refactor this large codebase to use async/await."
+                      }
+                    ]
+                  }
+                },
+                "forced-tier": {
+                  "summary": "Force premium tier (use with X-Batuta-Force-Tier header)",
+                  "value": {
+                    "model": "batuta-auto",
+                    "messages": [
+                      {
+                        "role": "user",
+                        "content": "Plan a multi-service migration."
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Batuta-Force-Tier",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "fast",
+                "balanced",
+                "premium"
+              ]
+            },
+            "description": "Pin the routing tier. Only honored when `model = batuta-auto`."
+          },
+          {
+            "in": "header",
+            "name": "X-Batuta-Session-ID",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Opaque per-conversation id for cross-model attribution."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful completion (or first SSE chunk if `stream=true`).",
+            "headers": {
+              "X-Batuta-Routed-From": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Original requested model. Present only when routing happened."
+              },
+              "X-Batuta-Routed-To": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Actual upstream model that produced the completion."
+              },
+              "X-Batuta-Tier": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "fast",
+                    "balanced",
+                    "premium"
+                  ]
+                },
+                "description": "Tier chosen (or forced) for this call."
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatCompletionResponse"
+                }
+              },
+              "text/event-stream": {
+                "schema": {
+                  "type": "string",
+                  "description": "SSE stream of `data: {json}\\n\\n` chunks when `stream=true`."
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BatutaInvalidRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/BatutaAuthError"
+          },
+          "429": {
+            "description": "Token quota exceeded for this billing tier.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "message": {
+                          "type": "string"
+                        },
+                        "type": {
+                          "type": "string",
+                          "enum": [
+                            "billing_error"
+                          ]
+                        },
+                        "usage": {
+                          "type": "object",
+                          "properties": {
+                            "tokens_used": {
+                              "type": "integer"
+                            },
+                            "token_limit": {
+                              "type": "integer"
+                            },
+                            "tokens_remaining": {
+                              "type": "integer"
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/components/responses/BatutaProxyError"
+          }
+        }
+      }
+    },
+    "/api/v1/models": {
+      "get": {
+        "tags": [
+          "Batuta LLM"
+        ],
+        "summary": "List models available through the Batuta proxy (OpenAI-compatible)",
+        "operationId": "listModels",
+        "responses": {
+          "200": {
+            "description": "Model catalog.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "object": {
+                      "type": "string",
+                      "enum": [
+                        "list"
+                      ]
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/ModelInfo"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/BatutaAuthError"
+          },
+          "403": {
+            "$ref": "#/components/responses/BatutaBillingError"
+          }
+        }
+      }
+    },
+    "/api/v1/prompts": {
+      "get": {
+        "tags": [
+          "Prompts"
+        ],
+        "summary": "List prompts in your organization",
+        "operationId": "listPrompts",
+        "description": "Returns prompts ordered by `createdAt` descending. Agent-token (`oat_`) calls are\nautomatically restricted to the token's project; passing a different `projectId` returns 403.\n",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "projectId",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "query",
+            "name": "createdBy",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "User id of the prompt author"
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Single status, or comma-separated list (e.g. \"running,pending\")"
+          },
+          {
+            "in": "query",
+            "name": "from",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "in": "query",
+            "name": "to",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sessionId",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{1,128}$"
+            },
+            "description": "Only prompts reported by this interactive session (turns an orquesta-cli session self-reports)"
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 500,
+              "default": 50
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Paginated prompt list.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "prompts",
+                    "pagination"
+                  ],
+                  "properties": {
+                    "prompts": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/PromptListItem"
+                      }
+                    },
+                    "pagination": {
+                      "$ref": "#/components/schemas/Pagination"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Prompts"
+        ],
+        "summary": "Submit a prompt for execution",
+        "operationId": "createPrompt",
+        "description": "Queues a prompt on a project's agent. The prompt is created with status `pending`;\nthe agent picks it up on its next heartbeat (every 15 seconds) and transitions it to\n`running` — there is no separate execute call. Poll `GET /api/v1/prompts/{id}` or\n`GET /api/v1/logs?promptId=...` for progress.\n\nRequires a token that can be attributed to a user: a CLI token (`oclt_`), or an org\nAPI key (`oak_`) with the `prompts:write` scope. Agent tokens (`oat_`) are rejected —\na token that lives on the machine which would run the prompt cannot enqueue its own work.\n\nA project you cannot reach returns 404, not 403, so ids cannot be probed.\n",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "projectId",
+                  "content"
+                ],
+                "properties": {
+                  "projectId": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "content": {
+                    "type": "string",
+                    "maxLength": 50000,
+                    "description": "The prompt text."
+                  },
+                  "context": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "description": "Arbitrary JSON passed through to the agent."
+                  },
+                  "tags": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "source": {
+                    "type": "string",
+                    "enum": [
+                      "api",
+                      "dashboard"
+                    ],
+                    "default": "api"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Prompt created and queued.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "prompt"
+                  ],
+                  "properties": {
+                    "prompt": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "projectId": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "content": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "string",
+                          "example": "pending"
+                        },
+                        "source": {
+                          "type": "string"
+                        },
+                        "createdBy": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "createdAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid body, or the project has no agent configured.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/api/v1/prompts/{id}": {
+      "get": {
+        "tags": [
+          "Prompts"
+        ],
+        "summary": "Get a single prompt by id (with context)",
+        "operationId": "getPrompt",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Prompt detail.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "prompt"
+                  ],
+                  "properties": {
+                    "prompt": {
+                      "$ref": "#/components/schemas/PromptDetail"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "Prompts"
+        ],
+        "summary": "Update a prompt's collaboration fields",
+        "operationId": "updatePrompt",
+        "description": "Star, tag, assign or re-rate an existing prompt. Requires a CLI token (`oclt_`) or an\norg API key (`oak_`) with `prompts:write`; agent tokens are read-only. `assigned_to`\nmust be a member of the same organization.\n",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "is_starred": {
+                    "type": "boolean"
+                  },
+                  "tags": {
+                    "type": [
+                      "array",
+                      "null"
+                    ],
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "assigned_to": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "format": "uuid"
+                  },
+                  "complexity": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The updated fields.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "prompt"
+                  ],
+                  "properties": {
+                    "prompt": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "is_starred": {
+                          "type": "boolean"
+                        },
+                        "tags": {
+                          "type": [
+                            "array",
+                            "null"
+                          ],
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "assigned_to": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "format": "uuid"
+                        },
+                        "complexity": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "No valid fields, a wrong field type, or an assignee outside the organization.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/api/v1/prompts/{id}/cancel": {
+      "post": {
+        "tags": [
+          "Prompts"
+        ],
+        "summary": "Cancel a pending or running prompt",
+        "operationId": "cancelPrompt",
+        "description": "Tells the project's agent to stop the prompt and marks it `failed` with error\n`Cancelled by user`. A prompt that already finished keeps its outcome and the call\nreturns `cancelled: false` with its current status. Requires a CLI token (`oclt_`) or an\norg API key with `prompts:write`; agent tokens are rejected.\n",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Cancellation result.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "cancelled",
+                    "status"
+                  ],
+                  "properties": {
+                    "cancelled": {
+                      "type": "boolean"
+                    },
+                    "status": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/api/v1/logs": {
+      "get": {
+        "tags": [
+          "Logs"
+        ],
+        "summary": "List execution logs by prompt or project",
+        "operationId": "listLogs",
+        "description": "Either `promptId` or `projectId` is required. When `promptId` is set the logs are ordered\nascending by `sequence`; when `projectId` is set they are ordered descending by `timestamp`.\n",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "promptId",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "query",
+            "name": "projectId",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 500,
+              "default": 100
+            }
+          },
+          {
+            "in": "query",
+            "name": "afterSequence",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "With `promptId` only: return logs whose `sequence` is greater than this, for incremental polling."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Log list.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "logs"
+                  ],
+                  "properties": {
+                    "logs": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/LogEntry"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Neither `promptId` nor `projectId` provided.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/api/v1/projects": {
+      "get": {
+        "tags": [
+          "Projects"
+        ],
+        "summary": "List projects in your organization",
+        "operationId": "listProjects",
+        "description": "For agent tokens (`oat_`), returns only the token's project.",
+        "responses": {
+          "200": {
+            "description": "Project list.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "projects"
+                  ],
+                  "properties": {
+                    "projects": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Project"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      }
+    },
+    "/api/v1/agents": {
+      "get": {
+        "tags": [
+          "Agents"
+        ],
+        "summary": "List registered agents and their online status",
+        "operationId": "listAgents",
+        "responses": {
+          "200": {
+            "description": "Agent list.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "agents"
+                  ],
+                  "properties": {
+                    "agents": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Agent"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      }
+    },
+    "/api/v1/users": {
+      "get": {
+        "tags": [
+          "Users"
+        ],
+        "summary": "List users in scope",
+        "operationId": "listUsers",
+        "description": "Org-scoped tokens (`oak_`, `oclt_`) return organization members. Agent tokens (`oat_`)\nreturn members of the token's project. Useful for resolving `createdBy` ids to email/name.\n",
+        "responses": {
+          "200": {
+            "description": "User list.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "users"
+                  ],
+                  "properties": {
+                    "users": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/User"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "BearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "orquesta-token (oak_|oclt_|oat_)"
+      },
+      "ApiKeyAuth": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-API-Key"
+      }
+    },
+    "responses": {
+      "Unauthorized": {
+        "description": "Missing or invalid API key.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorEnvelope"
+            }
+          }
+        }
+      },
+      "Forbidden": {
+        "description": "Insufficient scope, revoked token, or project-scope mismatch.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorEnvelope"
+            }
+          }
+        }
+      },
+      "NotFound": {
+        "description": "Resource not found (or invisible to your scope).",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorEnvelope"
+            }
+          }
+        }
+      },
+      "InternalError": {
+        "description": "Internal server error.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorEnvelope"
+            }
+          }
+        }
+      },
+      "BatutaAuthError": {
+        "description": "Missing or invalid Batuta proxy token.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/BatutaErrorEnvelope"
+            }
+          }
+        }
+      },
+      "BatutaBillingError": {
+        "description": "Batuta LLM access denied (no subscription, suspended, etc.).",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/BatutaErrorEnvelope"
+            }
+          }
+        }
+      },
+      "BatutaInvalidRequest": {
+        "description": "Malformed request body (missing model, messages, etc.).",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/BatutaErrorEnvelope"
+            }
+          }
+        }
+      },
+      "BatutaProxyError": {
+        "description": "Internal proxy error or upstream failure.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/BatutaErrorEnvelope"
+            }
+          }
+        }
+      }
+    },
+    "schemas": {
+      "ErrorEnvelope": {
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "type": "string",
+            "description": "Human-readable error message"
+          }
+        }
+      },
+      "BatutaErrorEnvelope": {
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "type": "object",
+            "required": [
+              "message",
+              "type"
+            ],
+            "properties": {
+              "message": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "auth_error",
+                  "billing_error",
+                  "invalid_request",
+                  "routing_error",
+                  "proxy_error",
+                  "server_error"
+                ]
+              }
+            }
+          }
+        }
+      },
+      "Pagination": {
+        "type": "object",
+        "required": [
+          "offset",
+          "limit",
+          "total",
+          "hasMore"
+        ],
+        "properties": {
+          "offset": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "total": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "hasMore": {
+            "type": "boolean"
+          }
+        }
+      },
+      "ChatMessage": {
+        "type": "object",
+        "required": [
+          "role",
+          "content"
+        ],
+        "properties": {
+          "role": {
+            "type": "string",
+            "enum": [
+              "system",
+              "user",
+              "assistant",
+              "tool"
+            ]
+          },
+          "content": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "tool_calls": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "function"
+                  ]
+                },
+                "function": {
+                  "type": "object",
+                  "properties": {
+                    "name": {
+                      "type": "string"
+                    },
+                    "arguments": {
+                      "type": "string",
+                      "description": "JSON-encoded arguments"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "tool_call_id": {
+            "type": "string"
+          }
+        }
+      },
+      "ChatCompletionRequest": {
+        "type": "object",
+        "required": [
+          "model",
+          "messages"
+        ],
+        "properties": {
+          "model": {
+            "type": "string",
+            "description": "Any id returned by `GET /models`, or the synthetic `batuta-auto` to enable\nclassifier-driven routing.\n",
+            "examples": [
+              "batuta-auto",
+              "gpt-4o-mini",
+              "claude-sonnet-4-6",
+              "claude-opus-4-7"
+            ]
+          },
+          "messages": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "$ref": "#/components/schemas/ChatMessage"
+            }
+          },
+          "stream": {
+            "type": "boolean",
+            "default": false
+          },
+          "temperature": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 2
+          },
+          "max_tokens": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "tools": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "function"
+                  ]
+                },
+                "function": {
+                  "type": "object",
+                  "properties": {
+                    "name": {
+                      "type": "string"
+                    },
+                    "description": {
+                      "type": "string"
+                    },
+                    "parameters": {
+                      "type": "object",
+                      "description": "JSON Schema for the function arguments"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "tool_choice": {
+            "oneOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "auto",
+                  "none",
+                  "required"
+                ]
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "function"
+                    ]
+                  },
+                  "function": {
+                    "type": "object",
+                    "properties": {
+                      "name": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        }
+      },
+      "ChatCompletionResponse": {
+        "type": "object",
+        "required": [
+          "id",
+          "object",
+          "created",
+          "model",
+          "choices"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "object": {
+            "type": "string",
+            "enum": [
+              "chat.completion"
+            ]
+          },
+          "created": {
+            "type": "integer",
+            "description": "Unix epoch seconds"
+          },
+          "model": {
+            "type": "string",
+            "description": "The upstream model that actually generated the completion"
+          },
+          "choices": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "index": {
+                  "type": "integer"
+                },
+                "message": {
+                  "$ref": "#/components/schemas/ChatMessage"
+                },
+                "finish_reason": {
+                  "type": "string",
+                  "nullable": true,
+                  "enum": [
+                    "stop",
+                    "length",
+                    "tool_calls",
+                    "content_filter",
+                    null
+                  ]
+                }
+              }
+            }
+          },
+          "usage": {
+            "type": "object",
+            "properties": {
+              "prompt_tokens": {
+                "type": "integer"
+              },
+              "completion_tokens": {
+                "type": "integer"
+              },
+              "total_tokens": {
+                "type": "integer"
+              }
+            }
+          }
+        }
+      },
+      "ModelInfo": {
+        "type": "object",
+        "required": [
+          "id",
+          "object",
+          "owned_by"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "object": {
+            "type": "string",
+            "enum": [
+              "model"
+            ]
+          },
+          "created": {
+            "type": "integer"
+          },
+          "owned_by": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "max_tokens": {
+            "type": "integer"
+          }
+        }
+      },
+      "PromptListItem": {
+        "type": "object",
+        "required": [
+          "id",
+          "content",
+          "status",
+          "source",
+          "projectId",
+          "createdAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "content": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "running",
+              "completed",
+              "failed",
+              "cancelled"
+            ]
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "api",
+              "auto",
+              "auto-brain",
+              "batuta",
+              "dashboard"
+            ]
+          },
+          "projectId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "projectName": {
+            "type": "string"
+          },
+          "createdBy": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "createdByEmail": {
+            "type": "string",
+            "format": "email",
+            "nullable": true
+          },
+          "createdByName": {
+            "type": "string",
+            "nullable": true
+          },
+          "parentPromptId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "complexity": {
+            "type": "string",
+            "nullable": true
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "isStarred": {
+            "type": "boolean"
+          },
+          "tokensUsed": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "costCents": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "cliType": {
+            "type": "string",
+            "nullable": true
+          },
+          "model": {
+            "type": "string",
+            "nullable": true,
+            "description": "Extracted from llm_config.model"
+          },
+          "gitBranch": {
+            "type": "string",
+            "nullable": true
+          },
+          "gitCommitSha": {
+            "type": "string",
+            "nullable": true
+          },
+          "gitCommitUrl": {
+            "type": "string",
+            "format": "uri",
+            "nullable": true
+          },
+          "linearIssueIdentifier": {
+            "type": "string",
+            "nullable": true
+          },
+          "linearIssueUrl": {
+            "type": "string",
+            "format": "uri",
+            "nullable": true
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "startedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "completedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "error": {
+            "type": "string",
+            "nullable": true
+          },
+          "sessionId": {
+            "type": "string",
+            "nullable": true,
+            "description": "Interactive session that reported this prompt (context.sessionId)"
+          }
+        }
+      },
+      "PromptDetail": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/PromptListItem"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "context": {
+                "type": "object",
+                "nullable": true,
+                "description": "Arbitrary context attached at creation time"
+              },
+              "result": {
+                "nullable": true,
+                "description": "The agent's final deliverable (JSON: usually a summary/text); null until the prompt completes"
+              }
+            }
+          }
+        ]
+      },
+      "LogEntry": {
+        "type": "object",
+        "required": [
+          "id",
+          "promptId",
+          "level",
+          "category",
+          "timestamp"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "promptId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "level": {
+            "type": "string",
+            "enum": [
+              "debug",
+              "info",
+              "warn",
+              "error"
+            ]
+          },
+          "category": {
+            "type": "string",
+            "description": "e.g. tool, system, chat, summary"
+          },
+          "message": {
+            "type": "string",
+            "nullable": true,
+            "description": "Truncated at 10K chars. Full content is in `details`."
+          },
+          "details": {
+            "type": "object",
+            "nullable": true,
+            "description": "Structured payload (tool_result, command output, etc.)"
+          },
+          "durationMs": {
+            "type": "integer",
+            "nullable": true
+          },
+          "sequence": {
+            "type": "integer",
+            "description": "Monotonically increasing within a prompt"
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "Project": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "createdAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string",
+            "nullable": true
+          },
+          "agentOnline": {
+            "type": "boolean"
+          },
+          "agentLastSeen": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "productionUrl": {
+            "type": "string",
+            "format": "uri",
+            "nullable": true
+          },
+          "iconUrl": {
+            "type": "string",
+            "format": "uri",
+            "nullable": true,
+            "description": "Project icon: the published site's favicon, else the GitHub repo owner's avatar. Null when the project has neither."
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "Agent": {
+        "type": "object",
+        "required": [
+          "id",
+          "status",
+          "createdAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string",
+            "nullable": true
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "online",
+              "offline",
+              "idle"
+            ]
+          },
+          "lastSeen": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "agentInfo": {
+            "type": "object",
+            "nullable": true,
+            "description": "Hostname, version, platform reported by the agent"
+          },
+          "project": {
+            "type": "object",
+            "nullable": true,
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "name": {
+                "type": "string"
+              },
+              "agentOnline": {
+                "type": "boolean"
+              },
+              "productionUrl": {
+                "type": "string",
+                "nullable": true
+              },
+              "githubRepo": {
+                "type": "string",
+                "nullable": true
+              }
+            }
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "User": {
+        "type": "object",
+        "required": [
+          "id",
+          "email"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "email": {
+            "type": "string",
+            "format": "email",
+            "nullable": true
+          },
+          "fullName": {
+            "type": "string",
+            "nullable": true
+          },
+          "avatarUrl": {
+            "type": "string",
+            "format": "uri",
+            "nullable": true
+          },
+          "role": {
+            "type": "string",
+            "nullable": true,
+            "description": "Org role for org-scoped tokens, project role for agent tokens"
+          }
+        }
+      }
+    }
+  },
+  "security": [
+    {
+      "BearerAuth": []
+    },
+    {
+      "ApiKeyAuth": []
+    }
+  ],
+  "tags": [
+    {
+      "name": "Batuta LLM",
+      "description": "OpenAI-compatible chat completions proxy with smart per-prompt model routing."
+    },
+    {
+      "name": "Prompts",
+      "description": "Prompt execution records (one per CLI/agent/dashboard run)."
+    },
+    {
+      "name": "Logs",
+      "description": "Execution logs emitted by agents during a prompt run."
+    },
+    {
+      "name": "Projects",
+      "description": "Projects in your organization."
+    },
+    {
+      "name": "Agents",
+      "description": "Registered agent installations and their online status."
+    },
+    {
+      "name": "Users",
+      "description": "Members of the organization (or of the token's project, for agent tokens)."
+    }
+  ]
+}
