@@ -1,6 +1,6 @@
 # APIs — S
 
-Browsing 779 APIs starting with **S**.
+Browsing 780 APIs starting with **S**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · **S** · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -342,6 +342,7 @@ Browsing 779 APIs starting with **S**.
 | [socialannex.net](../../../../apis/openapi/socialannex.net) | [main](../../../../apis/openapi/socialannex.net/main) |
 | [socialbee.io](../../../../apis/openapi/socialbee.io) | [socialbee-api](../../../../apis/openapi/socialbee.io/socialbee-api) |
 | [socialcrawl.dev](../../../../apis/openapi/socialcrawl.dev) | [main](../../../../apis/openapi/socialcrawl.dev/main) |
+| [socialkit.dev](../../../../apis/openapi/socialkit.dev) | [main](../../../../apis/openapi/socialkit.dev/main) |
 | [soda.io](../../../../apis/openapi/soda.io) | [main](../../../../apis/openapi/soda.io/main) |
 | [softbankrobotics.com](../../../../apis/openapi/softbankrobotics.com) | [softbankrobotics](../../../../apis/openapi/softbankrobotics.com/softbankrobotics) |
 | [softledger.com](../../../../apis/openapi/softledger.com) | [main](../../../../apis/openapi/softledger.com/main) |
