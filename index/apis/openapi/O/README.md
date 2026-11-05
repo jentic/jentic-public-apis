@@ -1,6 +1,6 @@
 # APIs — O
 
-Browsing 214 APIs starting with **O**.
+Browsing 215 APIs starting with **O**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · **O** · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -144,6 +144,7 @@ Browsing 214 APIs starting with **O**.
 | [openstreetmap.org](../../../../apis/openapi/openstreetmap.org) | [main](../../../../apis/openapi/openstreetmap.org/main) |
 | [opentable.com](../../../../apis/openapi/opentable.com) | [main](../../../../apis/openapi/opentable.com/main) |
 | [opentargets.io](../../../../apis/openapi/opentargets.io) | [main](../../../../apis/openapi/opentargets.io/main) · [open-targets-platform-rest-api](../../../../apis/openapi/opentargets.io/open-targets-platform-rest-api) |
+| [opentaxrate.com](../../../../apis/openapi/opentaxrate.com) | [main](../../../../apis/openapi/opentaxrate.com/main) |
 | [opentdb.com](../../../../apis/openapi/opentdb.com) | [main](../../../../apis/openapi/opentdb.com/main) |
 | [opentrials.local](../../../../apis/openapi/opentrials.local) | [main](../../../../apis/openapi/opentrials.local/main) |
 | [opentripmap.com](../../../../apis/openapi/opentripmap.com) | [main](../../../../apis/openapi/opentripmap.com/main) |
