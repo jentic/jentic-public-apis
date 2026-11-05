@@ -1,6 +1,6 @@
 # APIs — S
 
-Browsing 801 APIs starting with **S**.
+Browsing 802 APIs starting with **S**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · **S** · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -362,6 +362,7 @@ Browsing 801 APIs starting with **S**.
 | [softledger.com](../../../../apis/openapi/softledger.com) | [main](../../../../apis/openapi/softledger.com/main) |
 | [softr.io](../../../../apis/openapi/softr.io) | [main](../../../../apis/openapi/softr.io/main) |
 | [sofy.fr](../../../../apis/openapi/sofy.fr) | [sofy-api](../../../../apis/openapi/sofy.fr/sofy-api) |
+| [soilpoint.dev](../../../../apis/openapi/soilpoint.dev) | [main](../../../../apis/openapi/soilpoint.dev/main) |
 | [sokosumi.com](../../../../apis/openapi/sokosumi.com) | [main](../../../../apis/openapi/sokosumi.com/main) |
 | [solas.id](../../../../apis/openapi/solas.id) | [main](../../../../apis/openapi/solas.id/main) |
 | [solcast.com.au](../../../../apis/openapi/solcast.com.au) | [main](../../../../apis/openapi/solcast.com.au/main) |
