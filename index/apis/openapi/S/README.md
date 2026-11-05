@@ -1,6 +1,6 @@
 # APIs — S
 
-Browsing 800 APIs starting with **S**.
+Browsing 801 APIs starting with **S**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · **S** · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -231,6 +231,7 @@ Browsing 800 APIs starting with **S**.
 | [shorten.rest](../../../../apis/openapi/shorten.rest) | [main](../../../../apis/openapi/shorten.rest/main) |
 | [shortmenu.com](../../../../apis/openapi/shortmenu.com) | [short-menu-api](../../../../apis/openapi/shortmenu.com/short-menu-api) |
 | [shortpixel.com](../../../../apis/openapi/shortpixel.com) | [main](../../../../apis/openapi/shortpixel.com/main) |
+| [shotkiln.com](../../../../apis/openapi/shotkiln.com) | [main](../../../../apis/openapi/shotkiln.com/main) |
 | [shotstack](../../../../apis/openapi/shotstack) | [main](../../../../apis/openapi/shotstack/main) |
 | [shotstack.io](../../../../apis/openapi/shotstack.io) | [main](../../../../apis/openapi/shotstack.io/main) · [shotstack](../../../../apis/openapi/shotstack.io/shotstack) · [shotstack-api](../../../../apis/openapi/shotstack.io/shotstack-api) |
 | [shovels.ai](../../../../apis/openapi/shovels.ai) | [main](../../../../apis/openapi/shovels.ai/main) |
