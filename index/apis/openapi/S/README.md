@@ -1,6 +1,6 @@
 # APIs — S
 
-Browsing 799 APIs starting with **S**.
+Browsing 800 APIs starting with **S**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · **S** · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -367,6 +367,7 @@ Browsing 799 APIs starting with **S**.
 | [soldo.com](../../../../apis/openapi/soldo.com) | [main](../../../../apis/openapi/soldo.com/main) |
 | [solidtime.io](../../../../apis/openapi/solidtime.io) | [main](../../../../apis/openapi/solidtime.io/main) |
 | [solutiontech.tech](../../../../apis/openapi/solutiontech.tech) | [main](../../../../apis/openapi/solutiontech.tech/main) |
+| [solvecha.com](../../../../apis/openapi/solvecha.com) | [main](../../../../apis/openapi/solvecha.com/main) |
 | [sonar.trading](../../../../apis/openapi/sonar.trading) | [main](../../../../apis/openapi/sonar.trading/main) · [sonar-trading](../../../../apis/openapi/sonar.trading/sonar-trading) · [sonar-trading-api](../../../../apis/openapi/sonar.trading/sonar-trading-api) |
 | [sonarcloud.io](../../../../apis/openapi/sonarcloud.io) | [main](../../../../apis/openapi/sonarcloud.io/main) |
 | [sonarqube.org](../../../../apis/openapi/sonarqube.org) | [main](../../../../apis/openapi/sonarqube.org/main) |
