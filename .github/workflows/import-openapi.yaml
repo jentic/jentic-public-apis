@@ -247,13 +247,116 @@ jobs:
       - name: Install jentic-apitools-cli
         run: pip install --quiet jentic-apitools-cli
 
+      - name: Fetch import spec
+        id: fetch_spec
+        env:
+          # Untrusted: originates from the issue body. Quote it; never interpolate into run:.
+          IMPORT_URL: ${{ steps.extract_info.outputs.import_oas_url }}
+          # Read-only use only. The jentic staging repo is private and is NOT served by
+          # raw.githubusercontent.com, so the CLI's anonymous fetch 404s against it. We
+          # download the spec here with a token and hand the CLI a local file instead.
+          STAGING_TOKEN: ${{ secrets.STAGING_REPO_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          # Any fetch failure must surface through the same reporting steps as the other
+          # import failures, so wrap the work and emit fetch_failed/error_response on exit
+          # rather than letting a bare `exit 1` escape silently.
+          fail() {
+            echo "::error::$1"
+            echo "fetch_failed=true" >> "$GITHUB_OUTPUT"
+            # Random delimiter: the message may contain arbitrary text (e.g. a URL from
+            # the issue body); a fixed heredoc delimiter could be spoofed to inject output.
+            DELIM="EOF_$(openssl rand -hex 16)"
+            echo "error_response<<$DELIM" >> "$GITHUB_OUTPUT"
+            echo "$1" >> "$GITHUB_OUTPUT"
+            echo "$DELIM" >> "$GITHUB_OUTPUT"
+            exit 1
+          }
+
+          # The ONLY private source permitted is the jentic staging repo. The token is
+          # sent exclusively to api.github.com for that repo and to no other host; every
+          # other source must be a public GitHub repo or a public host and is fetched
+          # anonymously so the token can never leak to a third party.
+          STAGING_OWNER="jentic"
+          STAGING_REPO="jentic-public-apis-staging"
+
+          LOCAL_SPEC="$RUNNER_TEMP/import-spec"
+
+          # Bound every download so a slow or oversized endpoint (the URL is attacker-
+          # controlled — it comes from the issue body) cannot hang the runner until the
+          # job timeout or exhaust its disk. 20s to connect, 120s total, 50 MB cap.
+          CURL_LIMITS=(--connect-timeout 20 --max-time 120 --max-filesize 52428800)
+
+          if [[ "$IMPORT_URL" =~ ^https://raw\.githubusercontent\.com/([^/]+)/([^/]+)/(.+)$ ]]; then
+            OWNER="${BASH_REMATCH[1]}"; REPO="${BASH_REMATCH[2]}"; REF_AND_PATH="${BASH_REMATCH[3]}"
+
+            if [ "$OWNER" = "$STAGING_OWNER" ] && [ "$REPO" = "$STAGING_REPO" ]; then
+              # Private staging repo: authenticated API fetch; token stays with api.github.com.
+              # The raw URL tail is "<ref>/<path>", but <ref> may itself contain slashes
+              # (e.g. refs/heads/feature/foo or a branch named import/vendor), so it cannot
+              # be split syntactically. Resolve it by listing the repo's refs and matching
+              # the longest ref that prefixes the tail; the remainder is the file path.
+              echo "Resolving ref/path for private staging repo via authenticated GitHub API."
+              # Strip a leading refs/heads/ or refs/tags/ if the URL carries one.
+              TAIL="$REF_AND_PATH"
+              case "$TAIL" in
+                refs/heads/*) TAIL="${TAIL#refs/heads/}" ;;
+                refs/tags/*)  TAIL="${TAIL#refs/tags/}"  ;;
+              esac
+              REFS_JSON=$(curl --fail-with-body -sS "${CURL_LIMITS[@]}" \
+                -H "Authorization: Bearer ${STAGING_TOKEN}" \
+                -H "Accept: application/vnd.github+json" \
+                -H "X-GitHub-Api-Version: 2022-11-28" \
+                "https://api.github.com/repos/${OWNER}/${REPO}/git/refs" ) \
+                || fail "Could not list refs for ${OWNER}/${REPO}; the STAGING_REPO_TOKEN may lack contents:read."
+              # Longest branch/tag name that is a path-segment prefix of TAIL wins.
+              REF=$(printf '%s' "$REFS_JSON" \
+                | jq -r '.[].ref | sub("^refs/(heads|tags)/"; "")' \
+                | awk -v t="$TAIL" '{ if (t==$0 || index(t, $0"/")==1) if (length($0)>length(best)) best=$0 } END { print best }')
+              [ -n "$REF" ] || fail "Could not resolve a branch/tag for URL $IMPORT_URL in ${OWNER}/${REPO}."
+              FPATH="${TAIL#${REF}/}"
+
+              echo "Fetching private staging spec: ref='${REF}' path='${FPATH}'."
+              HTTP_CODE=$(curl -sS "${CURL_LIMITS[@]}" -w '%{http_code}' -o "$LOCAL_SPEC" \
+                -H "Authorization: Bearer ${STAGING_TOKEN}" \
+                -H "Accept: application/vnd.github.raw+json" \
+                -H "X-GitHub-Api-Version: 2022-11-28" \
+                "https://api.github.com/repos/${OWNER}/${REPO}/contents/${FPATH}?ref=${REF}") \
+                || fail "Download failed for private staging spec $IMPORT_URL."
+            else
+              # Any other GitHub repo must be public: fetch WITHOUT the token.
+              echo "Fetching from public GitHub repo (no token)."
+              HTTP_CODE=$(curl -sSL "${CURL_LIMITS[@]}" -w '%{http_code}' -o "$LOCAL_SPEC" "$IMPORT_URL") \
+                || fail "Download failed (timeout or size limit exceeded) for $IMPORT_URL."
+            fi
+          else
+            # Non-GitHub host: must be a public URL. Never send the token.
+            echo "Fetching from public host (no token)."
+            HTTP_CODE=$(curl -sSL "${CURL_LIMITS[@]}" -w '%{http_code}' -o "$LOCAL_SPEC" "$IMPORT_URL") \
+              || fail "Download failed (timeout or size limit exceeded) for $IMPORT_URL."
+          fi
+
+          if [ "$HTTP_CODE" != "200" ]; then
+            fail "Failed to fetch import spec (HTTP $HTTP_CODE). The URL may be invalid, inaccessible, or (for the staging repo) the STAGING_REPO_TOKEN may lack contents:read."
+          fi
+          if [ ! -s "$LOCAL_SPEC" ]; then
+            fail "Fetched import spec is empty."
+          fi
+
+          echo "Fetched spec ($(stat -c%s "$LOCAL_SPEC") bytes) to $LOCAL_SPEC"
+          echo "local_spec_path=$LOCAL_SPEC" >> "$GITHUB_OUTPUT"
+
       - name: Run Apitools Import CLI and Produce ZIP
         id: call_apitools
         env:
           # Untrusted inputs (label/URL originate from the issue body) are passed
           # via env and quoted in the script — never interpolated into run: directly.
           LABEL: ${{ steps.extract_info.outputs.apitools_label }}
+          # IMPORT_URL is kept for provenance (--canonical-source-url) and logging only;
+          # the spec itself is imported from the local file fetched in the previous step.
           IMPORT_URL: ${{ steps.extract_info.outputs.import_oas_url }}
+          LOCAL_SPEC_PATH: ${{ steps.fetch_spec.outputs.local_spec_path }}
           REJECT_INVALID_SERVER_URLS: ${{ steps.extract_info.outputs.reject_invalid_server_urls }}
           REJECT_INVALID_SECURITY: ${{ steps.extract_info.outputs.reject_invalid_security }}
           GITHUB_REPOSITORY_SLUG: ${{ github.repository }}
@@ -296,7 +399,7 @@ jobs:
           set +e
           CLI_STDOUT_FILE=$(mktemp)
           CLI_STDERR_FILE=$(mktemp)
-          jentic-apitools import "$IMPORT_URL" \
+          jentic-apitools import "$LOCAL_SPEC_PATH" \
             --archive "$OUTPUT_ZIP" \
             --label "$LABEL" \
             --skip-bundle \
@@ -634,12 +737,14 @@ jobs:
             });
 
       - name: Comment on Issue if Import Failed
-        if: failure() && steps.extract_info.outputs.has_issue == 'true' && (steps.extract_info.outputs.extract_failed == 'true' || steps.call_apitools.outputs.api_failed == 'true' || steps.check_duplicate_version.outputs.duplicate_detected == 'true')
+        if: failure() && steps.extract_info.outputs.has_issue == 'true' && (steps.extract_info.outputs.extract_failed == 'true' || steps.fetch_spec.outputs.fetch_failed == 'true' || steps.call_apitools.outputs.api_failed == 'true' || steps.check_duplicate_version.outputs.duplicate_detected == 'true')
         uses: actions/github-script@v7
         env:
           API_ERROR_RESPONSE: ${{ steps.call_apitools.outputs.error_response }}
           EXTRACT_FAILED: ${{ steps.extract_info.outputs.extract_failed }}
           EXTRACT_ERROR_MESSAGE: ${{ steps.extract_info.outputs.error_message }}
+          FETCH_FAILED: ${{ steps.fetch_spec.outputs.fetch_failed }}
+          FETCH_ERROR_RESPONSE: ${{ steps.fetch_spec.outputs.error_response }}
           API_FAILED: ${{ steps.call_apitools.outputs.api_failed }}
           DUPLICATE_DETECTED: ${{ steps.check_duplicate_version.outputs.duplicate_detected }}
           DUPLICATE_VERSIONS: ${{ steps.check_duplicate_version.outputs.duplicate_versions }}
@@ -655,6 +760,10 @@ jobs:
               errorMessage += "Please check your issue format and ensure it contains the required fields:\n";
               errorMessage += "- \`import_oas_url: <your-openapi-url>\`\n";
               errorMessage += "- \`vendor_name: <your-vendor-name>\`\n\n";
+            } else if (process.env.FETCH_FAILED === 'true') {
+              errorMessage += `**Error:** Could not download the OpenAPI specification\n\n`;
+              errorMessage += `**Details:** ${process.env.FETCH_ERROR_RESPONSE || 'The spec URL could not be fetched.'}\n\n`;
+              errorMessage += "Please check that \`import_oas_url\` points to a publicly accessible OpenAPI document (or a file in the jentic staging repository), and that it responds within the time and size limits.\n\n";
             } else if (process.env.API_FAILED === 'true') {
               const errorResponse = process.env.API_ERROR_RESPONSE || '';
               errorMessage += `**Error:** Import service failed\n\n`;
@@ -694,12 +803,14 @@ jobs:
             });
 
       - name: Write Error to Workflow Summary
-        if: failure() && (steps.extract_info.outputs.extract_failed == 'true' || steps.call_apitools.outputs.api_failed == 'true' || steps.check_duplicate_version.outputs.duplicate_detected == 'true')
+        if: failure() && (steps.extract_info.outputs.extract_failed == 'true' || steps.fetch_spec.outputs.fetch_failed == 'true' || steps.call_apitools.outputs.api_failed == 'true' || steps.check_duplicate_version.outputs.duplicate_detected == 'true')
         env:
           API_ERROR_RESPONSE: ${{ steps.call_apitools.outputs.error_response }}
           EXTRACT_ERROR: ${{ steps.extract_info.outputs.error_message }}
+          FETCH_ERROR: ${{ steps.fetch_spec.outputs.error_response }}
           DUPLICATE_VERSIONS: ${{ steps.check_duplicate_version.outputs.duplicate_versions }}
           EXTRACT_FAILED: ${{ steps.extract_info.outputs.extract_failed }}
+          FETCH_FAILED: ${{ steps.fetch_spec.outputs.fetch_failed }}
           API_FAILED: ${{ steps.call_apitools.outputs.api_failed }}
           DUPLICATE_DETECTED: ${{ steps.check_duplicate_version.outputs.duplicate_detected }}
         run: |
@@ -708,6 +819,10 @@ jobs:
 
           if [ "$EXTRACT_FAILED" = "true" ]; then
             echo "**Error:** $EXTRACT_ERROR" >> $GITHUB_STEP_SUMMARY
+          elif [ "$FETCH_FAILED" = "true" ]; then
+            echo "**Error:** Could not download the OpenAPI specification." >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "$FETCH_ERROR" >> $GITHUB_STEP_SUMMARY
           elif [ "$API_FAILED" = "true" ]; then
             echo "**Error:** Import service returned an error." >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
