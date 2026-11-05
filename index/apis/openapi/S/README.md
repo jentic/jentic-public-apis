@@ -1,6 +1,6 @@
 # APIs — S
 
-Browsing 798 APIs starting with **S**.
+Browsing 799 APIs starting with **S**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · **S** · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -302,6 +302,7 @@ Browsing 798 APIs starting with **S**.
 | [skyvia.com](../../../../apis/openapi/skyvia.com) | [main](../../../../apis/openapi/skyvia.com/main) |
 | [slack.com](../../../../apis/openapi/slack.com) | [main](../../../../apis/openapi/slack.com/main) · [openai](../../../../apis/openapi/slack.com/openai) |
 | [slapfive.com](../../../../apis/openapi/slapfive.com) | [main](../../../../apis/openapi/slapfive.com/main) |
+| [slashyear.com](../../../../apis/openapi/slashyear.com) | [main](../../../../apis/openapi/slashyear.com/main) |
 | [slazzer.com](../../../../apis/openapi/slazzer.com) | [main](../../../../apis/openapi/slazzer.com/main) |
 | [sleekflow.io](../../../../apis/openapi/sleekflow.io) | [sleekflow-api](../../../../apis/openapi/sleekflow.io/sleekflow-api) |
 | [slicebox.local](../../../../apis/openapi/slicebox.local) | [main](../../../../apis/openapi/slicebox.local/main) |
