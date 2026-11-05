@@ -1,6 +1,6 @@
 # APIs — D
 
-Browsing 234 APIs starting with **D**.
+Browsing 235 APIs starting with **D**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · **D** · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -48,6 +48,7 @@ Browsing 234 APIs starting with **D**.
 | [datasense.media](../../../../apis/openapi/datasense.media) | [main](../../../../apis/openapi/datasense.media/main) |
 | [datasette.local](../../../../apis/openapi/datasette.local) | [main](../../../../apis/openapi/datasette.local/main) |
 | [datavidence.ai](../../../../apis/openapi/datavidence.ai) | [financials](../../../../apis/openapi/datavidence.ai/financials) |
+| [datawebot.com](../../../../apis/openapi/datawebot.com) | [main](../../../../apis/openapi/datawebot.com/main) |
 | [datev-business.de](../../../../apis/openapi/datev-business.de) | [main](../../../../apis/openapi/datev-business.de/main) |
 | [dati.gov.it](../../../../apis/openapi/dati.gov.it) | [main](../../../../apis/openapi/dati.gov.it/main) |
 | [datocapital.com](../../../../apis/openapi/datocapital.com) | [main](../../../../apis/openapi/datocapital.com/main) |
