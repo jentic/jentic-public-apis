@@ -1,6 +1,6 @@
 # APIs — B
 
-Browsing 276 APIs starting with **B**.
+Browsing 277 APIs starting with **B**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · **B** · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -25,6 +25,7 @@ Browsing 276 APIs starting with **B**.
 | [bamf.ai](../../../../apis/openapi/bamf.ai) | [main](../../../../apis/openapi/bamf.ai/main) |
 | [bancocredicoop.coop](../../../../apis/openapi/bancocredicoop.coop) | [main](../../../../apis/openapi/bancocredicoop.coop/main) |
 | [bandsintown.com](../../../../apis/openapi/bandsintown.com) | [main](../../../../apis/openapi/bandsintown.com/main) |
+| [bankday.dev](../../../../apis/openapi/bankday.dev) | [main](../../../../apis/openapi/bankday.dev/main) |
 | [bankid.no](../../../../apis/openapi/bankid.no) | [main](../../../../apis/openapi/bankid.no/main) |
 | [bankofamerica.com](../../../../apis/openapi/bankofamerica.com) | [main](../../../../apis/openapi/bankofamerica.com/main) |
 | [bankofcanada.ca](../../../../apis/openapi/bankofcanada.ca) | [main](../../../../apis/openapi/bankofcanada.ca/main) |
