@@ -1,6 +1,6 @@
 # APIs — A
 
-Browsing 517 APIs starting with **A**.
+Browsing 518 APIs starting with **A**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · **A** · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -171,6 +171,7 @@ Browsing 517 APIs starting with **A**.
 | [aislabs.ai](../../../../apis/openapi/aislabs.ai) | [main](../../../../apis/openapi/aislabs.ai/main) |
 | [aista.ai](../../../../apis/openapi/aista.ai) | [aista-api](../../../../apis/openapi/aista.ai/aista-api) |
 | [aistoryhub.co](../../../../apis/openapi/aistoryhub.co) | [main](../../../../apis/openapi/aistoryhub.co/main) |
+| [aistupidlevel.info](../../../../apis/openapi/aistupidlevel.info) | [main](../../../../apis/openapi/aistupidlevel.info/main) |
 | [aitable.ai](../../../../apis/openapi/aitable.ai) | [main](../../../../apis/openapi/aitable.ai/main) |
 | [aitwire.com](../../../../apis/openapi/aitwire.com) | [main](../../../../apis/openapi/aitwire.com/main) |
 | [akadadance.com](../../../../apis/openapi/akadadance.com) | [main](../../../../apis/openapi/akadadance.com/main) |
