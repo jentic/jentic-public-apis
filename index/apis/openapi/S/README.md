@@ -1,6 +1,6 @@
 # APIs — S
 
-Browsing 802 APIs starting with **S**.
+Browsing 803 APIs starting with **S**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · **S** · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -401,6 +401,7 @@ Browsing 802 APIs starting with **S**.
 | [sparrowdesk.com](../../../../apis/openapi/sparrowdesk.com) | [main](../../../../apis/openapi/sparrowdesk.com/main) |
 | [speakai.co](../../../../apis/openapi/speakai.co) | [main](../../../../apis/openapi/speakai.co/main) |
 | [speca.io](../../../../apis/openapi/speca.io) | [main](../../../../apis/openapi/speca.io/main) |
+| [specstory.com](../../../../apis/openapi/specstory.com) | [main](../../../../apis/openapi/specstory.com/main) |
 | [spectra.fm](../../../../apis/openapi/spectra.fm) | [main](../../../../apis/openapi/spectra.fm/main) |
 | [spectrocoin.com](../../../../apis/openapi/spectrocoin.com) | [main](../../../../apis/openapi/spectrocoin.com/main) · [spectrocoin-merchant](../../../../apis/openapi/spectrocoin.com/spectrocoin-merchant) |
 | [spectrumemp.com](../../../../apis/openapi/spectrumemp.com) | [main](../../../../apis/openapi/spectrumemp.com/main) |
