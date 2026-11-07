@@ -1,0 +1,959 @@
+openapi: 3.1.0
+
+info:
+  title: Zung Member API
+  version: 0.1.0
+  summary: Read a SACCO/MFI member's own loans, savings and wallets, and submit loan applications.
+  description: |
+    The Zung Member API is the API behind the Zung mobile app. It lets you build
+    **member-facing** channels on top of a Zung-powered SACCO or MFI: a branded
+    mobile app, a WhatsApp/USSD bot, a member portal.
+
+    ## Who a token belongs to
+
+    Every token is issued to **one member** (a client with portal access) and
+    can only ever see that member's own data. It is not a back-office API: it
+    cannot list other members, post transactions, or read the institution's
+    books.
+
+    ## Authentication
+
+    1. `POST /login` with the institution's Zung subdomain (`business`), the
+       member's username or email (`login`) and password.
+    2. Send the returned `token` on every other request as
+       `Authorization: Bearer <token>`.
+    3. `POST /logout` revokes it. Tokens do not expire on their own, so revoke
+       them when the member signs out.
+
+    Always send `Accept: application/json`; without it, authentication errors
+    may come back as redirects instead of JSON.
+
+    ## Prerequisites on the institution's side
+
+    Login only succeeds if the institution has the client portal (CRM module)
+    in its Zung subscription, and the member has a portal login that is
+    active, allowed to log in, and linked to their client profile.
+
+    ## Errors
+
+    Every error body has the same shape: `{"message": "..."}`. Validation
+    errors (`422`) report the first failing field only.
+
+    ## Rate limits
+
+    Limits are counted per client IP address:
+
+    - `POST /login`: 10 requests per minute.
+    - Everything else: 60 requests per minute.
+
+    Exceeding a limit returns `429` with a `Retry-After` header (seconds).
+    Call the API from the member's own device where you can; a server that
+    proxies many members' traffic shares one IP's allowance.
+
+    ## Lists
+
+    List endpoints return the member's **50 most recent** records, newest
+    first. There is no pagination.
+
+    ## Numbers and dates
+
+    Money amounts are JSON numbers (not strings). Dates are `YYYY-MM-DD`
+    strings in the institution's local calendar; `submitted_at` on loan
+    applications is a full ISO 8601 timestamp.
+  contact:
+    name: Zung.ai
+    url: https://zung.ai
+  license:
+    name: MIT
+    identifier: MIT
+
+servers:
+  - url: https://app.zung.ai/api/mobile
+    description: Production
+
+security:
+  - memberToken: []
+
+tags:
+  - name: Authentication
+    description: Issue and revoke member tokens.
+  - name: Profile
+    description: The member's profile and balance summary.
+  - name: Loans
+    description: Loans, repayment schedules, loan products and loan applications.
+  - name: Savings
+    description: Savings accounts and their transactions.
+  - name: Wallets
+    description: Wallet balances.
+
+paths:
+  /login:
+    post:
+      operationId: login
+      tags: [Authentication]
+      summary: Log a member in and issue a bearer token
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Logged in.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+        '401':
+          description: Wrong login or password.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                message: Invalid credentials.
+        '403':
+          description: |
+            The institution or member account is inactive, the member is not
+            allowed to log in, the institution does not have the client portal
+            enabled, or no client profile is linked to this login.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                message: This business does not have the client portal enabled.
+        '404':
+          description: No institution with that subdomain, or the linked client profile no longer exists.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                message: Business not found.
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  /logout:
+    post:
+      operationId: logout
+      tags: [Authentication]
+      summary: Revoke the current token
+      responses:
+        '200':
+          description: Token revoked.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Message'
+              example:
+                message: Logged out.
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  /me:
+    get:
+      operationId: me
+      tags: [Profile]
+      summary: The logged-in member's profile
+      responses:
+        '200':
+          description: The member's profile.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [contact]
+                properties:
+                  contact:
+                    $ref: '#/components/schemas/Contact'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/ContactNotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  /dashboard:
+    get:
+      operationId: dashboard
+      tags: [Profile]
+      summary: Balance summary across loans, savings and wallets
+      responses:
+        '200':
+          description: Totals for the member.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Dashboard'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/ContactNotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  /loans:
+    get:
+      operationId: listLoans
+      tags: [Loans]
+      summary: The member's loans (50 most recent)
+      responses:
+        '200':
+          description: Loans, newest first.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [loans]
+                properties:
+                  loans:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Loan'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/ContactNotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  /loans/products:
+    get:
+      operationId: listLoanProducts
+      tags: [Loans]
+      summary: Loan products the member can apply for
+      description: Active loan products of the member's institution, sorted by name.
+      responses:
+        '200':
+          description: Active loan products.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [products]
+                properties:
+                  products:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/LoanProduct'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/ContactNotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  /loans/applications:
+    get:
+      operationId: listLoanApplications
+      tags: [Loans]
+      summary: The member's loan applications (50 most recent)
+      responses:
+        '200':
+          description: Applications, newest first.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [applications]
+                properties:
+                  applications:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/LoanApplication'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/ContactNotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  /loans/apply:
+    post:
+      operationId: applyForLoan
+      tags: [Loans]
+      summary: Submit a loan application
+      description: |
+        Creates a loan application with status `pending` for the institution's
+        staff to review. It does not create or disburse a loan by itself; once
+        approved and converted, the application's `loan_id` is set.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoanApplyRequest'
+      responses:
+        '201':
+          description: Application submitted.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoanApplyResponse'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/ContactNotFound'
+        '422':
+          description: A field failed validation, or `loan_product_id` is not an active product of the member's institution.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                message: Invalid loan product.
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  /loans/{id}:
+    get:
+      operationId: getLoan
+      tags: [Loans]
+      summary: One loan, with its full repayment schedule
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200':
+          description: The loan.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [loan]
+                properties:
+                  loan:
+                    $ref: '#/components/schemas/LoanDetail'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: No such loan belongs to this member.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                message: Loan not found.
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  /savings:
+    get:
+      operationId: listSavingsAccounts
+      tags: [Savings]
+      summary: The member's savings accounts (50 most recent)
+      responses:
+        '200':
+          description: Savings accounts, newest first.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [savings]
+                properties:
+                  savings:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/SavingsAccount'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/ContactNotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  /savings/{id}:
+    get:
+      operationId: getSavingsAccount
+      tags: [Savings]
+      summary: One savings account, with its 50 most recent transactions
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200':
+          description: The savings account.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [savings]
+                properties:
+                  savings:
+                    $ref: '#/components/schemas/SavingsAccountDetail'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: No such savings account belongs to this member.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                message: Savings account not found.
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  /wallets:
+    get:
+      operationId: listWallets
+      tags: [Wallets]
+      summary: The member's wallets (50 most recent)
+      responses:
+        '200':
+          description: Wallets, newest first.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [wallets]
+                properties:
+                  wallets:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Wallet'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/ContactNotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+components:
+  securitySchemes:
+    memberToken:
+      type: http
+      scheme: bearer
+      description: The `token` returned by `POST /login`.
+
+  parameters:
+    Id:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: integer
+        minimum: 1
+
+  responses:
+    Unauthenticated:
+      description: Missing, invalid or revoked token.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            message: Unauthenticated.
+    Forbidden:
+      description: |
+        The token is valid but the member can no longer use the API: the
+        institution or account was deactivated, login was disallowed, or the
+        client portal was removed from the institution's subscription.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            message: This account is not allowed to log in.
+    ContactNotFound:
+      description: The member's linked client profile no longer exists.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            message: Linked contact not found.
+    ValidationError:
+      description: A field failed validation. Only the first error is reported.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            message: The business field is required.
+    TooManyRequests:
+      description: Rate limit exceeded.
+      headers:
+        Retry-After:
+          description: Seconds to wait before retrying.
+          schema:
+            type: integer
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            message: Too Many Attempts.
+
+  schemas:
+    Error:
+      type: object
+      required: [message]
+      properties:
+        message:
+          type: string
+
+    Message:
+      type: object
+      required: [message]
+      properties:
+        message:
+          type: string
+
+    Money:
+      type: number
+      description: An amount in the institution's currency.
+
+    Date:
+      type: string
+      format: date
+      examples: ['2026-09-28']
+
+    LoginRequest:
+      type: object
+      required: [business, login, password]
+      properties:
+        business:
+          type: string
+          description: The institution's Zung subdomain, e.g. `acme` for `acme.zung.ai`.
+          examples: [acme]
+        login:
+          type: string
+          description: The member's portal username, or their email address.
+        password:
+          type: string
+          format: password
+
+    LoginResponse:
+      type: object
+      required: [token, contact, business]
+      properties:
+        token:
+          type: string
+          description: Bearer token. Store it securely; it grants access until revoked with `POST /logout`.
+          examples: ['123|Kq3v...']
+        contact:
+          $ref: '#/components/schemas/Contact'
+        business:
+          $ref: '#/components/schemas/Business'
+
+    Business:
+      type: object
+      required: [id, name, currency_symbol]
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        currency_symbol:
+          type: [string, 'null']
+          examples: [KSh]
+
+    Contact:
+      type: object
+      description: The member's client profile.
+      required: [id, name, email, mobile, account_number, photo]
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        email:
+          type: [string, 'null']
+        mobile:
+          type: [string, 'null']
+        account_number:
+          type: [string, 'null']
+        photo:
+          type: [string, 'null']
+          format: uri
+          description: Absolute URL of the member's photo.
+
+    Dashboard:
+      type: object
+      required: [wallet_balance, loans, savings]
+      properties:
+        wallet_balance:
+          $ref: '#/components/schemas/Money'
+        loans:
+          type: object
+          required: [balance, arrears, total_disbursed, count]
+          properties:
+            balance:
+              $ref: '#/components/schemas/Money'
+            arrears:
+              $ref: '#/components/schemas/Money'
+            total_disbursed:
+              $ref: '#/components/schemas/Money'
+            count:
+              type: integer
+        savings:
+          type: object
+          required: [total_deposit, balance, count]
+          properties:
+            total_deposit:
+              $ref: '#/components/schemas/Money'
+            balance:
+              $ref: '#/components/schemas/Money'
+            count:
+              type: integer
+
+    RepaymentFrequencyType:
+      type: string
+      enum: [days, weeks, months, years]
+      description: Unit of `repayment_frequency` (and of `loan_term`).
+
+    InterestRateType:
+      type: string
+      enum: [day, week, month, year]
+      description: The period `interest_rate` applies to, e.g. `month` for "2% per month".
+
+    LoanStatus:
+      type: string
+      description: |
+        Known values: `submitted`, `pending`, `approved`, `active`,
+        `fully_paid`, `closed`, `rescheduled`, `written_off`, `overpaid`,
+        `withdrawn`, `rejected`. Treat unknown values gracefully; new statuses
+        may be added.
+
+    Loan:
+      type: object
+      required:
+        - id
+        - account_number
+        - status
+        - product_name
+        - loan_officer
+        - principal
+        - applied_amount
+        - current_balance
+        - arrears_amount
+        - interest_rate
+        - interest_rate_type
+        - loan_term
+        - repayment_frequency
+        - repayment_frequency_type
+        - disbursed_on_date
+        - expected_maturity_date
+        - next_payment_due_date
+        - next_payment_amount
+      properties:
+        id:
+          type: integer
+        account_number:
+          type: [string, 'null']
+        status:
+          $ref: '#/components/schemas/LoanStatus'
+        product_name:
+          type: [string, 'null']
+        loan_officer:
+          type: [string, 'null']
+          description: Full name of the assigned loan officer.
+        principal:
+          $ref: '#/components/schemas/Money'
+        applied_amount:
+          $ref: '#/components/schemas/Money'
+        current_balance:
+          $ref: '#/components/schemas/Money'
+        arrears_amount:
+          $ref: '#/components/schemas/Money'
+        interest_rate:
+          type: number
+          description: Percentage, per `interest_rate_type` period.
+        interest_rate_type:
+          $ref: '#/components/schemas/InterestRateType'
+        loan_term:
+          type: integer
+        repayment_frequency:
+          type: integer
+        repayment_frequency_type:
+          $ref: '#/components/schemas/RepaymentFrequencyType'
+        disbursed_on_date:
+          oneOf:
+            - $ref: '#/components/schemas/Date'
+            - type: 'null'
+          description: Null until the loan is disbursed.
+        expected_maturity_date:
+          oneOf:
+            - $ref: '#/components/schemas/Date'
+            - type: 'null'
+        next_payment_due_date:
+          oneOf:
+            - $ref: '#/components/schemas/Date'
+            - type: 'null'
+          description: Due date of the earliest unpaid installment; null when nothing is outstanding.
+        next_payment_amount:
+          oneOf:
+            - $ref: '#/components/schemas/Money'
+            - type: 'null'
+          description: Total due on that installment.
+
+    LoanDetail:
+      allOf:
+        - $ref: '#/components/schemas/Loan'
+        - type: object
+          required: [location, schedule]
+          properties:
+            location:
+              type: [string, 'null']
+              description: The branch the loan belongs to.
+            schedule:
+              type: array
+              description: Every installment, earliest first.
+              items:
+                $ref: '#/components/schemas/RepaymentInstallment'
+
+    RepaymentInstallment:
+      type: object
+      required: [due_date, installment, principal, interest, total_due, paid_by_date]
+      properties:
+        due_date:
+          $ref: '#/components/schemas/Date'
+        installment:
+          type: integer
+          description: Installment number.
+        principal:
+          $ref: '#/components/schemas/Money'
+        interest:
+          $ref: '#/components/schemas/Money'
+        total_due:
+          $ref: '#/components/schemas/Money'
+        paid_by_date:
+          oneOf:
+            - $ref: '#/components/schemas/Date'
+            - type: 'null'
+          description: When the installment was fully paid; null while unpaid.
+
+    LoanProduct:
+      type: object
+      required:
+        - id
+        - name
+        - description
+        - minimum_principal
+        - default_principal
+        - maximum_principal
+        - minimum_loan_term
+        - default_loan_term
+        - maximum_loan_term
+        - repayment_frequency
+        - repayment_frequency_type
+        - default_interest_rate
+        - interest_rate_type
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        description:
+          type: [string, 'null']
+        minimum_principal:
+          $ref: '#/components/schemas/Money'
+        default_principal:
+          $ref: '#/components/schemas/Money'
+        maximum_principal:
+          $ref: '#/components/schemas/Money'
+        minimum_loan_term:
+          type: integer
+        default_loan_term:
+          type: integer
+        maximum_loan_term:
+          type: integer
+        repayment_frequency:
+          type: integer
+        repayment_frequency_type:
+          $ref: '#/components/schemas/RepaymentFrequencyType'
+        default_interest_rate:
+          type: number
+        interest_rate_type:
+          $ref: '#/components/schemas/InterestRateType'
+
+    LoanApplication:
+      type: object
+      required:
+        - id
+        - status
+        - product_name
+        - amount
+        - loan_term
+        - repayment_frequency
+        - repayment_frequency_type
+        - loan_id
+        - submitted_at
+      properties:
+        id:
+          type: integer
+        status:
+          type: string
+          enum: [pending, approved, rejected]
+        product_name:
+          type: [string, 'null']
+        amount:
+          $ref: '#/components/schemas/Money'
+        loan_term:
+          type: integer
+        repayment_frequency:
+          type: integer
+        repayment_frequency_type:
+          type: [string, 'null']
+        loan_id:
+          type: [integer, 'null']
+          description: The resulting loan, once the application has been converted.
+        submitted_at:
+          type: [string, 'null']
+          format: date-time
+
+    LoanApplyRequest:
+      type: object
+      required:
+        - loan_product_id
+        - amount
+        - loan_term
+        - repayment_frequency
+        - repayment_frequency_type
+        - agree_to_term_and_conditions
+      properties:
+        loan_product_id:
+          type: integer
+          description: An `id` from `GET /loans/products`.
+        amount:
+          type: number
+          exclusiveMinimum: 0
+          description: |
+            Requested principal. Use the product's `minimum_principal` /
+            `maximum_principal` to guide the member; the institution's staff
+            review the amount when they process the application.
+        loan_term:
+          type: integer
+          minimum: 1
+          description: Number of `repayment_frequency_type` units.
+        repayment_frequency:
+          type: integer
+          minimum: 1
+        repayment_frequency_type:
+          $ref: '#/components/schemas/RepaymentFrequencyType'
+        agree_to_term_and_conditions:
+          type: boolean
+          const: true
+          description: Must be `true`; record the member's explicit consent before sending.
+        notes:
+          type: [string, 'null']
+
+    LoanApplyResponse:
+      type: object
+      required: [message, application_id]
+      properties:
+        message:
+          type: string
+          examples: ['Loan application submitted.']
+        application_id:
+          type: integer
+
+    SavingsStatus:
+      type: string
+      description: |
+        Known values: `submitted`, `pending`, `approved`, `active`, `inactive`,
+        `dormant`, `closed`, `withdrawn`, `rejected`.
+
+    SavingsAccount:
+      type: object
+      required: [id, account_number, status, product_name, location, interest_rate, total_deposit, current_balance]
+      properties:
+        id:
+          type: integer
+        account_number:
+          type: [string, 'null']
+        status:
+          $ref: '#/components/schemas/SavingsStatus'
+        product_name:
+          type: [string, 'null']
+        location:
+          type: [string, 'null']
+        interest_rate:
+          type: number
+        total_deposit:
+          $ref: '#/components/schemas/Money'
+        current_balance:
+          $ref: '#/components/schemas/Money'
+
+    SavingsAccountDetail:
+      allOf:
+        - $ref: '#/components/schemas/SavingsAccount'
+        - type: object
+          required: [transactions]
+          properties:
+            transactions:
+              type: array
+              description: The 50 most recent transactions, newest first.
+              items:
+                $ref: '#/components/schemas/SavingsTransaction'
+
+    SavingsTransaction:
+      type: object
+      required: [id, type, credit, debit, balance, date]
+      properties:
+        id:
+          type: integer
+        type:
+          type: [string, 'null']
+          description: Human-readable transaction name, e.g. "Deposit".
+        credit:
+          $ref: '#/components/schemas/Money'
+        debit:
+          $ref: '#/components/schemas/Money'
+        balance:
+          $ref: '#/components/schemas/Money'
+          description: Running balance after this transaction.
+        date:
+          oneOf:
+            - $ref: '#/components/schemas/Date'
+            - type: 'null'
+
+    Wallet:
+      type: object
+      required: [id, status, balance, currency, location, description]
+      properties:
+        id:
+          type: integer
+        status:
+          type: [string, 'null']
+          description: |
+            Known values: `pending`, `approved`, `active`, `inactive`,
+            `suspended`, `closed`, `rejected`.
+        balance:
+          $ref: '#/components/schemas/Money'
+        currency:
+          type: [string, 'null']
+          description: ISO 4217 currency code.
+          examples: [KES]
+        location:
+          type: [string, 'null']
+        description:
+          type: [string, 'null']
