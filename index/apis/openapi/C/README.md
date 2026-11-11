@@ -1,6 +1,6 @@
 # APIs — C
 
-Browsing 540 APIs starting with **C**.
+Browsing 541 APIs starting with **C**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · **C** · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -120,6 +120,7 @@ Browsing 540 APIs starting with **C**.
 | [chartbrew.com](../../../../apis/openapi/chartbrew.com) | [main](../../../../apis/openapi/chartbrew.com/main) |
 | [charthop.com](../../../../apis/openapi/charthop.com) | [main](../../../../apis/openapi/charthop.com/main) |
 | [chartmogul.com](../../../../apis/openapi/chartmogul.com) | [chartmogul-api](../../../../apis/openapi/chartmogul.com/chartmogul-api) · [main](../../../../apis/openapi/chartmogul.com/main) |
+| [chartquery.com](../../../../apis/openapi/chartquery.com) | [main](../../../../apis/openapi/chartquery.com/main) |
 | [chat-data.com](../../../../apis/openapi/chat-data.com) | [main](../../../../apis/openapi/chat-data.com/main) |
 | [chatbase.co](../../../../apis/openapi/chatbase.co) | [chatbase-api](../../../../apis/openapi/chatbase.co/chatbase-api) |
 | [chatbot.com](../../../../apis/openapi/chatbot.com) | [chatbot-api](../../../../apis/openapi/chatbot.com/chatbot-api) |
