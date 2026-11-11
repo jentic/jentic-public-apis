@@ -1,6 +1,6 @@
 # APIs — H
 
-Browsing 157 APIs starting with **H**.
+Browsing 158 APIs starting with **H**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · **H** · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -151,6 +151,7 @@ Browsing 157 APIs starting with **H**.
 | [humorapi.com](../../../../apis/openapi/humorapi.com) | [humor](../../../../apis/openapi/humorapi.com/humor) · [main](../../../../apis/openapi/humorapi.com/main) |
 | [hunchsheet.app](../../../../apis/openapi/hunchsheet.app) | [main](../../../../apis/openapi/hunchsheet.app/main) |
 | [hund.io](../../../../apis/openapi/hund.io) | [main](../../../../apis/openapi/hund.io/main) |
+| [huntapi.com](../../../../apis/openapi/huntapi.com) | [main](../../../../apis/openapi/huntapi.com/main) |
 | [hunter.io](../../../../apis/openapi/hunter.io) | [hunter-api](../../../../apis/openapi/hunter.io/hunter-api) |
 | [hurma.work](../../../../apis/openapi/hurma.work) | [main](../../../../apis/openapi/hurma.work/main) |
 | [hydracept.com](../../../../apis/openapi/hydracept.com) | [main](../../../../apis/openapi/hydracept.com/main) |
