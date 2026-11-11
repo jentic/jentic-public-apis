@@ -1,6 +1,6 @@
 # APIs — O
 
-Browsing 218 APIs starting with **O**.
+Browsing 216 APIs starting with **O**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · **O** · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -56,7 +56,6 @@ Browsing 218 APIs starting with **O**.
 | [omnisend.com](../../../../apis/openapi/omnisend.com) | [main](../../../../apis/openapi/omnisend.com/main) |
 | [omnivery.com](../../../../apis/openapi/omnivery.com) | [main](../../../../apis/openapi/omnivery.com/main) |
 | [omophub.com](../../../../apis/openapi/omophub.com) | [main](../../../../apis/openapi/omophub.com/main) |
-| [on.aws](../../../../apis/openapi/on.aws) | [main](../../../../apis/openapi/on.aws/main) |
 | [on24.com](../../../../apis/openapi/on24.com) | [main](../../../../apis/openapi/on24.com/main) |
 | [onboard.io](../../../../apis/openapi/onboard.io) | [main](../../../../apis/openapi/onboard.io/main) |
 | [once.app](../../../../apis/openapi/once.app) | [main](../../../../apis/openapi/once.app/main) |
@@ -168,7 +167,6 @@ Browsing 218 APIs starting with **O**.
 | [opto22.com](../../../../apis/openapi/opto22.com) | [groov](../../../../apis/openapi/opto22.com/groov) · [pac](../../../../apis/openapi/opto22.com/pac) |
 | [oracle.com](../../../../apis/openapi/oracle.com) | [bpm-suite-api](../../../../apis/openapi/oracle.com/bpm-suite-api) · [eloqua-api](../../../../apis/openapi/oracle.com/eloqua-api) · [oracle-rest-data-services-api](../../../../apis/openapi/oracle.com/oracle-rest-data-services-api) |
 | [oraclecloud.com](../../../../apis/openapi/oraclecloud.com) | [main](../../../../apis/openapi/oraclecloud.com/main) |
-| [oraclecloudapps.com](../../../../apis/openapi/oraclecloudapps.com) | [main](../../../../apis/openapi/oraclecloudapps.com/main) |
 | [orbisearch.com](../../../../apis/openapi/orbisearch.com) | [main](../../../../apis/openapi/orbisearch.com/main) |
 | [orbit.love](../../../../apis/openapi/orbit.love) | [main](../../../../apis/openapi/orbit.love/main) · [orbit-api](../../../../apis/openapi/orbit.love/orbit-api) |
 | [orbitalwiki.com](../../../../apis/openapi/orbitalwiki.com) | [main](../../../../apis/openapi/orbitalwiki.com/main) |
