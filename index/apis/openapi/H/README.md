@@ -1,6 +1,6 @@
 # APIs — H
 
-Browsing 158 APIs starting with **H**.
+Browsing 157 APIs starting with **H**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · **H** · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -66,7 +66,6 @@ Browsing 158 APIs starting with **H**.
 | [helpthemove.co.uk](../../../../apis/openapi/helpthemove.co.uk) | [main](../../../../apis/openapi/helpthemove.co.uk/main) |
 | [here.com](../../../../apis/openapi/here.com) |  |
 | [hermoso.ai](../../../../apis/openapi/hermoso.ai) | [main](../../../../apis/openapi/hermoso.ai/main) |
-| [herokuapp.com](../../../../apis/openapi/herokuapp.com) | [main](../../../../apis/openapi/herokuapp.com/main) |
 | [hetras-certification.net](../../../../apis/openapi/hetras-certification.net) | [hetras-booking-api-version-0](../../../../apis/openapi/hetras-certification.net/hetras-booking-api-version-0) · [hetras-hotel-api-version-0](../../../../apis/openapi/hetras-certification.net/hetras-hotel-api-version-0) |
 | [hetzner.cloud](../../../../apis/openapi/hetzner.cloud) | [main](../../../../apis/openapi/hetzner.cloud/main) |
 | [hevodata.com](../../../../apis/openapi/hevodata.com) | [main](../../../../apis/openapi/hevodata.com/main) |
