@@ -52,7 +52,7 @@ Browsing 803 APIs starting with **S**.
 | [sandbox.volt.io](../../../../apis/openapi/sandbox.volt.io) | [main](../../../../apis/openapi/sandbox.volt.io/main) |
 | [sandbox.withterminal.com](../../../../apis/openapi/sandbox.withterminal.com) | [main](../../../../apis/openapi/sandbox.withterminal.com/main) |
 | [sandboxreportingapi.connexpay.com](../../../../apis/openapi/sandboxreportingapi.connexpay.com) | [connexpay](../../../../apis/openapi/sandboxreportingapi.connexpay.com/connexpay) |
-| [sanity.io](../../../../apis/openapi/sanity.io) | [main](../../../../apis/openapi/sanity.io/main) · [query](../../../../apis/openapi/sanity.io/query) |
+| [sanity.io](../../../../apis/openapi/sanity.io) | [main](../../../../apis/openapi/sanity.io/main) · [query](../../../../apis/openapi/sanity.io/query) · [usage-api](../../../../apis/openapi/sanity.io/usage-api) |
 | [santanderconsumer.se](../../../../apis/openapi/santanderconsumer.se) | [main](../../../../apis/openapi/santanderconsumer.se/main) |
 | [saperly.com](../../../../apis/openapi/saperly.com) | [main](../../../../apis/openapi/saperly.com/main) |
 | [sarbacane-engage](../../../../apis/openapi/sarbacane-engage) | [main](../../../../apis/openapi/sarbacane-engage/main) |
