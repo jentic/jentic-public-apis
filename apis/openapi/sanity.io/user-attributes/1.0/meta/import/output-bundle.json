@@ -1,0 +1,881 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "User Attributes API",
+    "version": "1.0",
+    "description": "**Disclaimer**: This is available on API version ```v2026-04-27``` and onwards.\n\nManage user attributes and attribute definitions to enable parameterized role-based access control.\n\nUser attributes are key-value pairs (e.g., location=\"UK\", department=[\"hr\", \"sales\"]) that can be referenced\nin role definitions and access filters, enabling dynamic permissions without creating hundreds of static roles.\n\n## Attribute Sources\n\nAttributes can come from two sources:\n\n- **SAML**: Automatically synced from SSO providers (e.g., Okta, Azure AD) when users authenticate.\n  These are managed by your identity provider. SAML definitions and values are **not** accessible through this API\n  and can only be created/updated by SAML sync.\n- **Sanity (API-managed)**: Definitions and values are created and updated through this API by organization administrators\n  using attribute keys.\n\nWhen the same attribute key exists in both sources, API-managed values take precedence. Both values remain visible\nin the `values` object, with `activeSource` indicating which value is in effect.\n\n## Automatic Cleanup Behavior\n\nAttribute definitions are automatically cleaned up in specific scenarios:\n\n- **SAML-only definitions** (`sources: ['saml']`): Automatically deleted during SAML sync when the SSO provider\n  stops sending that attribute AND no users have values for it.\n- **SAML + Sanity definitions** (`sources: ['saml', 'sanity']`): When all Sanity values are deleted\n  AND no users have Sanity values, the Sanity definition is automatically removed, reverting to SAML-only (`sources: ['saml']`).\n- **Sanity-only definitions** (`sources: ['sanity']`): Never automatically cleaned up. These must be manually\n  deleted via the API (only allowed when no users have values).\n\n## Key Features\n- Define attribute schemas with support for string, integer, number, boolean, and array types\n- Manually set and manage attribute values through this API using attribute keys\n- API-managed values shadow SAML-provided values when both exist, but both remain visible\n- View all values from all sources in a single response (transparent shadowing)\n- Attribute definitions are automatically grouped by key, showing all sources (SAML and/or API-managed)\n- Power parameterized roles and filters (e.g., hotel-editor with location-based filtering)\n- Use attributes in access control queries via user::attributes() functions\n",
+    "x-jentic-source-url": "https://www.sanity.io/docs/api/openapi/user-attributes?format=json"
+  },
+  "servers": [
+    {
+      "url": "https://api.sanity.io"
+    }
+  ],
+  "paths": {
+    "/v2026-04-27/organizations/{organizationId}/attribute-definitions": {
+      "get": {
+        "summary": "List Attribute Definitions",
+        "description": "Retrieve a paginated list of attribute definitions for an organization.\n\nDefinitions are grouped by key and show all sources where that key is defined.\n\n### Permissions\nRequires `sanity.organization.manage` permission.\n",
+        "operationId": "listAttributeDefinitions",
+        "tags": [
+          "Attribute Definitions"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/organizationIdPath"
+          },
+          {
+            "$ref": "#/components/parameters/cursorParam"
+          },
+          {
+            "$ref": "#/components/parameters/limitParam"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successfully retrieved attribute definitions",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/attributeDefinitionListResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "404": {
+            "description": "Organization not found"
+          },
+          "500": {
+            "description": "Server error"
+          }
+        }
+      },
+      "post": {
+        "summary": "Create Attribute Definition",
+        "description": "Create a new Sanity (API-managed) attribute definition for an organization.\n\nThis endpoint **only creates Sanity definitions**. SAML definitions are automatically created during SSO authentication\nand cannot be created through this API.\n\n**Important restrictions:**\n\n- **Cannot create Sanity definition when SAML definition exists**: If a SAML definition already exists for the key,\n  this endpoint returns 403 Forbidden. Sanity definitions for SAML attributes are automatically created\n  when you set the first Sanity value for that attribute.\n- **Existing Sanity definitions**: If a Sanity definition with the same key already exists,\n  it returns the existing definition with `alreadyExists: true`.\n- **Type validation**: If a definition exists with a different type, returns 409 Conflict.\n\n### Permissions\nRequires `sanity.organization.manage` permission.\n",
+        "operationId": "createAttributeDefinition",
+        "tags": [
+          "Attribute Definitions"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/organizationIdPath"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "key",
+                  "type"
+                ],
+                "properties": {
+                  "key": {
+                    "type": "string",
+                    "description": "Textual name of the attribute",
+                    "example": "year_started"
+                  },
+                  "type": {
+                    "$ref": "#/components/schemas/attributeType"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Attribute definition already exists (returned existing definition with alreadyExists flag)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/attributeDefinitionResponse"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "Attribute definition created successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/attributeDefinitionResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden - Cannot create API-managed definition because a SAML definition already exists for this key, or insufficient permissions"
+          },
+          "404": {
+            "description": "Organization not found"
+          },
+          "409": {
+            "description": "Conflict - attribute definition exists with different type"
+          },
+          "500": {
+            "description": "Server error"
+          }
+        }
+      }
+    },
+    "/v2026-04-27/organizations/{organizationId}/attribute-definitions/{key}": {
+      "delete": {
+        "summary": "Delete Attribute Definition",
+        "description": "Delete an attribute definition by key. Important restrictions:\n\n- **Cannot delete if SAML source exists**: If the attribute has a SAML definition (sources includes 'saml'),\n  deletion is forbidden (403). This applies even if you want to delete only the API-managed part.\n- **Cannot delete if in use**: If any user has values for this attribute (API-managed or SAML), deletion fails (409).\n- **API-managed only**: Only attributes with `sources: ['sanity']` can be deleted, and only when no users have values.\n\nNote: API-managed definitions are often automatically cleaned up when you delete user attribute values\n(if a SAML definition exists for the same key). Use this endpoint only for cleaning up unused API-managed-only definitions.\n\n### Permissions\nRequires `sanity.organization.manage` permission.\n",
+        "operationId": "deleteAttributeDefinition",
+        "tags": [
+          "Attribute Definitions"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/organizationIdPath"
+          },
+          {
+            "$ref": "#/components/parameters/keyPath"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Attribute definition deleted successfully"
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden - attribute has SAML source or other restriction"
+          },
+          "404": {
+            "description": "Attribute definition not found"
+          },
+          "409": {
+            "description": "Conflict - attribute definition is in use by one or more users"
+          },
+          "500": {
+            "description": "Server error"
+          }
+        }
+      }
+    },
+    "/v2026-04-27/organizations/{organizationId}/users/me/attributes": {
+      "get": {
+        "summary": "Get My Attributes",
+        "description": "Retrieve your own attributes within an organization.\n\nThis endpoint returns all attributes for the current authenticated user, including both SAML and Sanity values.\nEach attribute includes:\n- **values**: Object showing values from all sources (e.g., `{saml: \"US\", sanity: \"UK\"}`)\n- **activeSource**: Which source is currently in effect ('saml' or 'sanity')\n- **activeValue**: The actual value being used in access control\n\nWhen an attribute exists in both SAML and Sanity sources, the `values` object will contain both,\nand `activeSource` will be 'sanity' since Sanity values take precedence.\n\n### Permissions\nNo special permission required - users can always read their own attributes.\n",
+        "operationId": "getMyAttributes",
+        "tags": [
+          "User Attributes"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/organizationIdPath"
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 500,
+              "default": 50
+            },
+            "description": "Maximum number of attributes to return"
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "schema": {
+              "type": "string"
+            },
+            "description": "The last attribute key from the previous page (used for pagination)"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successfully retrieved your attributes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/userAttributesGetResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "404": {
+            "description": "Organization not found"
+          },
+          "500": {
+            "description": "Server error"
+          }
+        }
+      }
+    },
+    "/v2026-04-27/organizations/{organizationId}/users/{sanityUserId}/attributes": {
+      "get": {
+        "summary": "Get User Attributes",
+        "description": "Retrieve attributes for a user within an organization.\n\nThis endpoint returns all attributes for a user, including both SAML and Sanity values.\nEach attribute includes:\n- **values**: Object showing values from all sources (e.g., `{saml: \"US\", sanity: \"UK\"}`)\n- **activeSource**: Which source is currently in effect ('saml' or 'sanity')\n- **activeValue**: The actual value being used in access control\n\nWhen an attribute exists in both SAML and Sanity sources, the `values` object will contain both,\nand `activeSource` will be 'sanity' since Sanity values take precedence.\n\n### Permissions\n- To read your own attributes: No special permission required\n- To read other users' attributes: Requires `sanity.organization.manage` permission\n- This only applies for organizations you have permissions for.\n",
+        "operationId": "listUserAttributes",
+        "tags": [
+          "User Attributes"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/organizationIdPath"
+          },
+          {
+            "$ref": "#/components/parameters/sanityUserIdPath"
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 500,
+              "default": 50
+            },
+            "description": "Maximum number of attributes to return"
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "schema": {
+              "type": "string"
+            },
+            "description": "The last attribute key from the previous page (used for pagination)"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successfully retrieved user attributes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/userAttributesGetResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "404": {
+            "description": "User or organization not found"
+          },
+          "500": {
+            "description": "Server error"
+          }
+        }
+      },
+      "post": {
+        "summary": "Update User Attributes",
+        "description": "Set or update attribute values for a user using attribute keys.\n\nWhen you set a value for an attribute key that also exists in SAML, your Sanity value will take precedence\nand shadow the SAML value. The SAML value remains in the system and is visible in the `values` object.\n\nIf the attribute key doesn't have a Sanity definition yet, one will be created automatically.\n\nThis endpoint returns at most the first 50 attributes after the update, prioritizing attributes with values.\n\n### Permissions\nRequires `sanity.organization.manage` permission.\n",
+        "operationId": "updateUserAttributes",
+        "tags": [
+          "User Attributes"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/organizationIdPath"
+          },
+          {
+            "$ref": "#/components/parameters/sanityUserIdPath"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "attributes"
+                ],
+                "properties": {
+                  "attributes": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "required": [
+                        "key",
+                        "value"
+                      ],
+                      "properties": {
+                        "key": {
+                          "type": "string",
+                          "description": "Textual name of the attribute (e.g., 'location', 'department')"
+                        },
+                        "value": {
+                          "oneOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "integer"
+                            },
+                            {
+                              "type": "number"
+                            },
+                            {
+                              "type": "boolean"
+                            },
+                            {
+                              "type": "array",
+                              "items": {
+                                "oneOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "integer"
+                                  },
+                                  {
+                                    "type": "number"
+                                  }
+                                ]
+                              }
+                            }
+                          ],
+                          "description": "Value to set for the attribute"
+                        }
+                      }
+                    },
+                    "description": "Array of attributes to set with their keys and values"
+                  }
+                },
+                "example": {
+                  "attributes": [
+                    {
+                      "key": "location",
+                      "value": "UK"
+                    },
+                    {
+                      "key": "year_started",
+                      "value": 2020
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Attributes updated successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/userAttributesResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "404": {
+            "description": "User or organization not found"
+          },
+          "500": {
+            "description": "Server error"
+          }
+        }
+      },
+      "delete": {
+        "summary": "Delete User Attributes",
+        "description": "Delete attribute values for a user using attribute keys.\n\nThis removes Sanity (API-managed) attribute values. If a SAML value exists for the same attribute key,\nit will become the active value and will be visible in the response (with `activeSource: 'saml'`).\n\n**Automatic Definition Cleanup:**\nWhen you delete Sanity attribute values, the system automatically cleans up Sanity definitions if:\n1. No users have Sanity values for that attribute anymore, AND\n2. A SAML definition exists for the same key\n\nIn this case, the sources will automatically revert from `['saml', 'sanity']` to `['saml']`.\n\nSanity-only definitions (`sources: ['sanity']`) are never automatically cleaned up when values are deleted.\nThey must be manually deleted via the DELETE /attribute-definitions/{key} endpoint.\n\n### Permissions\nRequires `sanity.organization.manage` permission.\n",
+        "operationId": "deleteUserAttributes",
+        "tags": [
+          "User Attributes"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/organizationIdPath"
+          },
+          {
+            "$ref": "#/components/parameters/sanityUserIdPath"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "attributes"
+                ],
+                "properties": {
+                  "attributes": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "required": [
+                        "key"
+                      ],
+                      "properties": {
+                        "key": {
+                          "type": "string",
+                          "description": "Textual name of the attribute to delete (e.g., 'location', 'department')"
+                        }
+                      }
+                    },
+                    "description": "Array of attribute keys to delete"
+                  }
+                },
+                "example": {
+                  "attributes": [
+                    {
+                      "key": "location"
+                    },
+                    {
+                      "key": "year_started"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Attributes deleted successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/userAttributesResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "404": {
+            "description": "User or organization not found"
+          },
+          "500": {
+            "description": "Server error"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "attributeType": {
+        "type": "string",
+        "enum": [
+          "string",
+          "string-array",
+          "integer",
+          "integer-array",
+          "number",
+          "number-array",
+          "boolean"
+        ],
+        "description": "Type of the attribute"
+      },
+      "attributeSource": {
+        "type": "string",
+        "enum": [
+          "saml",
+          "sanity"
+        ],
+        "description": "Source of the attribute:\n- `saml`: Automatically synced from SSO providers (cannot be created or managed via this API)\n- `sanity`: Created and managed through this API by organization administrators\n"
+      },
+      "attributeDefinitionResponse": {
+        "type": "object",
+        "required": [
+          "key",
+          "type",
+          "sources",
+          "createdAt"
+        ],
+        "properties": {
+          "key": {
+            "type": "string",
+            "description": "Textual name of the attribute",
+            "example": "year_started"
+          },
+          "type": {
+            "$ref": "#/components/schemas/attributeType"
+          },
+          "sources": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/attributeSource"
+            },
+            "description": "All sources where this attribute key is defined. Can contain 'saml', 'sanity', or both.\nWhen both sources exist, it indicates the same attribute key is defined in both SAML and API-managed contexts.\n",
+            "example": [
+              "saml",
+              "sanity"
+            ]
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Timestamp when the definition was first created (uses earliest created definition when multiple sources exist)",
+            "example": "2026-01-08T12:00:00Z"
+          },
+          "alreadyExists": {
+            "type": "boolean",
+            "description": "Only present in POST responses. When true, indicates the definition already existed and was returned instead of being created.",
+            "example": true
+          }
+        }
+      },
+      "attributeDefinitionListResponse": {
+        "type": "object",
+        "required": [
+          "definitions",
+          "hasMore"
+        ],
+        "properties": {
+          "definitions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/attributeDefinitionResponse"
+            },
+            "description": "List of attribute definitions grouped by key"
+          },
+          "nextCursor": {
+            "type": "string",
+            "nullable": true,
+            "description": "Cursor for the next page of results (the last key from this page)"
+          },
+          "hasMore": {
+            "type": "boolean",
+            "description": "Indicates if there are more results available"
+          }
+        }
+      },
+      "userAttributeResponse": {
+        "type": "object",
+        "required": [
+          "type",
+          "key",
+          "values",
+          "activeSource",
+          "activeValue"
+        ],
+        "properties": {
+          "type": {
+            "$ref": "#/components/schemas/attributeType"
+          },
+          "key": {
+            "type": "string",
+            "description": "Textual name of the attribute",
+            "example": "location"
+          },
+          "values": {
+            "type": "object",
+            "description": "Values from all available sources. Contains 'saml' and/or 'sanity' keys with their respective values.\nShows all values regardless of precedence, making it clear which values are being shadowed.\n",
+            "properties": {
+              "saml": {
+                "oneOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "array",
+                    "items": {
+                      "oneOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "integer"
+                        },
+                        {
+                          "type": "number"
+                        }
+                      ]
+                    }
+                  }
+                ],
+                "description": "Value from SAML source (if exists)"
+              },
+              "sanity": {
+                "oneOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "array",
+                    "items": {
+                      "oneOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "integer"
+                        },
+                        {
+                          "type": "number"
+                        }
+                      ]
+                    }
+                  }
+                ],
+                "description": "Value from Sanity source (if exists)"
+              }
+            },
+            "example": {
+              "saml": "US",
+              "sanity": "UK"
+            }
+          },
+          "activeSource": {
+            "$ref": "#/components/schemas/attributeSource",
+            "description": "The source of the value currently in effect. Sanity values always take precedence over SAML values\nwhen both exist for the same attribute key.\n",
+            "example": "sanity"
+          },
+          "activeValue": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "oneOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "integer"
+                    },
+                    {
+                      "type": "number"
+                    }
+                  ]
+                }
+              }
+            ],
+            "description": "The value currently in effect, taken from the activeSource. This is the value that will be used\nin access control evaluations and role filters.\n",
+            "example": "UK"
+          }
+        }
+      },
+      "userAttributeListResponse": {
+        "type": "object",
+        "required": [
+          "attributes",
+          "hasMore"
+        ],
+        "properties": {
+          "attributes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/userAttributeResponse"
+            }
+          },
+          "nextCursor": {
+            "type": "string",
+            "nullable": true,
+            "description": "Cursor for the next page of results"
+          },
+          "hasMore": {
+            "type": "boolean",
+            "description": "Indicates if there are more results available"
+          }
+        }
+      },
+      "userAttributesGetResponse": {
+        "type": "object",
+        "required": [
+          "sanityUserId",
+          "organizationId",
+          "attributes"
+        ],
+        "properties": {
+          "sanityUserId": {
+            "type": "string",
+            "description": "ID of the user",
+            "example": "user-xyz"
+          },
+          "organizationId": {
+            "type": "string",
+            "description": "ID of the organization",
+            "example": "org-123"
+          },
+          "attributes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/userAttributeResponse"
+            }
+          }
+        }
+      },
+      "userAttributesResponse": {
+        "type": "object",
+        "required": [
+          "sanityUserId",
+          "organizationId",
+          "attributes",
+          "updatedAt"
+        ],
+        "properties": {
+          "sanityUserId": {
+            "type": "string",
+            "description": "ID of the user",
+            "example": "user-xyz"
+          },
+          "organizationId": {
+            "type": "string",
+            "description": "ID of the organization",
+            "example": "org-123"
+          },
+          "attributes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/userAttributeResponse"
+            }
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Timestamp when attributes were last updated (only returned by mutation endpoints)",
+            "example": "2025-11-26T19:30:00.000Z"
+          }
+        }
+      }
+    },
+    "parameters": {
+      "organizationIdPath": {
+        "in": "path",
+        "name": "organizationId",
+        "required": true,
+        "schema": {
+          "type": "string"
+        },
+        "description": "Unique identifier of the organization",
+        "example": "o123"
+      },
+      "sanityUserIdPath": {
+        "in": "path",
+        "name": "sanityUserId",
+        "required": true,
+        "schema": {
+          "type": "string"
+        },
+        "description": "Unique identifier of the Sanity user",
+        "example": "u1"
+      },
+      "keyPath": {
+        "in": "path",
+        "name": "key",
+        "required": true,
+        "schema": {
+          "type": "string"
+        },
+        "description": "Textual name of the attribute",
+        "example": "year_started"
+      },
+      "cursorParam": {
+        "in": "query",
+        "name": "cursor",
+        "schema": {
+          "type": "string"
+        },
+        "description": "Cursor for pagination"
+      },
+      "limitParam": {
+        "in": "query",
+        "name": "limit",
+        "schema": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 500,
+          "default": 100
+        },
+        "description": "The number of items to return per page."
+      }
+    },
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "Sanity API token (personal or robot token)."
+      }
+    }
+  },
+  "security": [
+    {
+      "bearerAuth": []
+    }
+  ],
+  "tags": [
+    {
+      "name": "Attribute Definitions",
+      "description": "Manage organization-level attribute definitions that define the schema and type of user attributes.\n\nAttribute definitions specify the attribute key (name) and type (string, integer, number, boolean, with optional array variants).\nDefinitions are grouped by key and show all sources (sources) where that key is defined:\n- SAML definitions are automatically created when users authenticate via SSO providers like Okta or Azure AD\n- Sanity definitions are created through this API by organization administrators\n\nWhen an attribute key exists in both SAML and Sanity sources, the `sources` array will contain both `['saml', 'sanity']`.\n\n**Important Restrictions:**\n- You **cannot** create SAML definitions through the API - they are only created automatically during SAML sync.\n- You **cannot** create Sanity definitions when a SAML definition already exists for that key. Sanity definitions\n  for SAML attributes are auto-created when the first Sanity value is set.\n- You **cannot** delete definitions (via API) if they have SAML sources or are currently in use by any users.\n\n**Automatic Cleanup:**\n- SAML-only definitions are auto-deleted during SAML sync when no longer provided by SSO and no users have values.\n- Sanity definitions are auto-deleted when deleting user values IF a SAML definition exists for the same key AND no users have Sanity values.\n- Sanity-only definitions are never auto-deleted (must be manually deleted when not in use).\n\nThese definitions serve as the foundation for creating roles with parameterized filters, enabling dynamic access control\nbased on user attributes such as location, department, or region.\n"
+    },
+    {
+      "name": "User Attributes",
+      "description": "Manage user-specific attribute values within an organization.\n\nUser attributes contain the actual values assigned to users (e.g., location=\"UK\", department=[\"hr\", \"sales\"]).\nEach attribute can originate from different sources:\n- **SAML**: Automatically set/updated when users authenticate via SSO (not managed through this API)\n- **Sanity**: Manually set by organization administrators through this API using attribute keys\n\nWhen reading attributes, you'll see:\n- **values**: All available values from each source (e.g., `{saml: \"US\", sanity: \"UK\"}`)\n- **activeSource**: Which source is currently in effect (Sanity values always take precedence)\n- **activeValue**: The actual value being used in access control\n\nWhen you set a Sanity value for an attribute key that also has a SAML value, the Sanity value becomes active\nbut the SAML value remains visible in the `values` object. Deleting the Sanity value makes the SAML value active again.\n\nThese attributes enable parameterized role-based access control and filtering.\n"
+    }
+  ]
+}
