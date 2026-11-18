@@ -1,6 +1,6 @@
 # APIs — S
 
-Browsing 803 APIs starting with **S**.
+Browsing 804 APIs starting with **S**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · **S** · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -342,6 +342,7 @@ Browsing 803 APIs starting with **S**.
 | [snap-render.com](../../../../apis/openapi/snap-render.com) | [main](../../../../apis/openapi/snap-render.com/main) |
 | [snapapi.pics](../../../../apis/openapi/snapapi.pics) | [main](../../../../apis/openapi/snapapi.pics/main) |
 | [snapengage.com](../../../../apis/openapi/snapengage.com) | [main](../../../../apis/openapi/snapengage.com/main) |
+| [snaplii.com](../../../../apis/openapi/snaplii.com) | [main](../../../../apis/openapi/snaplii.com/main) |
 | [snappacrestapi](../../../../apis/openapi/snappacrestapi) | [main](../../../../apis/openapi/snappacrestapi/main) |
 | [snappify.com](../../../../apis/openapi/snappify.com) | [main](../../../../apis/openapi/snappify.com/main) |
 | [snapshooter.com](../../../../apis/openapi/snapshooter.com) | [main](../../../../apis/openapi/snapshooter.com/main) |
