@@ -1,6 +1,6 @@
 # APIs — B
 
-Browsing 279 APIs starting with **B**.
+Browsing 280 APIs starting with **B**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · **B** · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -67,6 +67,7 @@ Browsing 279 APIs starting with **B**.
 | [beeminder.com](../../../../apis/openapi/beeminder.com) | [main](../../../../apis/openapi/beeminder.com/main) |
 | [beetribe.io](../../../../apis/openapi/beetribe.io) | [main](../../../../apis/openapi/beetribe.io/main) |
 | [beezup.com](../../../../apis/openapi/beezup.com) | [main](../../../../apis/openapi/beezup.com/main) |
+| [beliefstate.ai](../../../../apis/openapi/beliefstate.ai) | [main](../../../../apis/openapi/beliefstate.ai/main) |
 | [benetics.io](../../../../apis/openapi/benetics.io) | [main](../../../../apis/openapi/benetics.io/main) |
 | [bentoml.com](../../../../apis/openapi/bentoml.com) | [main](../../../../apis/openapi/bentoml.com/main) |
 | [bergsystem.pl](../../../../apis/openapi/bergsystem.pl) | [main](../../../../apis/openapi/bergsystem.pl/main) |
