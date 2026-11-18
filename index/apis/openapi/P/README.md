@@ -1,6 +1,6 @@
 # APIs — P
 
-Browsing 387 APIs starting with **P**.
+Browsing 388 APIs starting with **P**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · **P** · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -327,6 +327,7 @@ Browsing 387 APIs starting with **P**.
 | [prismic.io](../../../../apis/openapi/prismic.io) | [main](../../../../apis/openapi/prismic.io/main) |
 | [prisminference.com](../../../../apis/openapi/prisminference.com) | [main](../../../../apis/openapi/prisminference.com/main) |
 | [privatusanalytics.com](../../../../apis/openapi/privatusanalytics.com) | [main](../../../../apis/openapi/privatusanalytics.com/main) |
+| [prizepicksapi.com](../../../../apis/openapi/prizepicksapi.com) | [main](../../../../apis/openapi/prizepicksapi.com/main) |
 | [pro.coinmarketcap.com](../../../../apis/openapi/pro.coinmarketcap.com) | [coinmarketcap-api](../../../../apis/openapi/pro.coinmarketcap.com/coinmarketcap-api) |
 | [probely.com](../../../../apis/openapi/probely.com) | [main](../../../../apis/openapi/probely.com/main) |
 | [process.st](../../../../apis/openapi/process.st) | [main](../../../../apis/openapi/process.st/main) |
