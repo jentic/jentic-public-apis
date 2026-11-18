@@ -1,0 +1,1885 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Postio API",
+    "description": "Postio is the UK validation API for **addresses**, **emails** and **phone numbers**, running on Cloudflare's edge so requests are answered close to wherever your users are.\n\n> **First time?** [Sign up free](https://postio.co.uk) — first 100 lookups on us, no card needed.\n\nEvery endpoint is a `GET` returning JSON, served over HTTPS at `https://api.postio.co.uk/v1`. If you can speak HTTP and parse JSON, you can integrate in under five minutes — copy your `pk_*` key from the dashboard and you're away.\n\n## Authentication\n\nSend your key in the `x-api-key` header on every request:\n\n```bash\ncurl https://api.postio.co.uk/v1/address/search?q=57+wimpole+street \\\n  -H \"x-api-key: YOUR_API_KEY\"\n```\n\nKeys are scoped per service (address / email / phone) and can be locked to specific origins or IP ranges in the dashboard. Treat them as secrets — don't ship them in client-side code unless the key is locked to your domains.\n\nMissing or invalid key → `401`. Key out of credit → `402`.\n\n## Rate limiting\n\nEach key is limited to **30 requests per second**. Bursts past that return `429` — back off and retry. Sustained abuse can result in the key being suspended. If you legitimately expect higher throughput, [get in touch](https://postio.co.uk/contact) and we'll raise the limit.\n\n\n## Versioning\n\nThe API is versioned by URL prefix — currently `/v1/`. Backwards-compatible changes (new endpoints, new optional parameters, new response fields) ship under the same version. Anything breaking gets a new prefix.\n\n## Response shape\n\nEvery response follows the same envelope:\n\n```json\n{\n  \"success\": true,\n  \"results\": [ /* one or more result objects */ ],\n  \"meta\": {\n    \"countResults\": 1,\n    \"requestId\": \"dd273343-4597-4fa4-bcb6-c74a608c10dc\",\n    \"performance\": { \"workerMs\": 15, \"lookupMs\": 12 }\n  }\n}\n```\n\nOn error, `success` is `false`, `results` is empty, and a top-level `error` field carries a stable machine-readable code (`details` adds context for humans).\n\n`requestId` is worth logging — it's how we trace any request you raise with us.\n\n### Performance\n\nTwo numbers, both in milliseconds, both measured by the Worker itself:\n\n- **`workerMs`** — wall-clock at the edge, from the moment the\n  request arrives at our Cloudflare Worker to the moment we hand the\n  response back. This is the latency *we* control end-to-end.\n- **`lookupMs`** — the slice of `workerMs` spent in the upstream\n  lookup (PAF index for address, MX resolution for email, HLR query\n  for phone). Subtract `lookupMs` from `workerMs` and you've got the\n  Worker's own compute — auth, rate-limiting, parsing, shaping the\n  response.\n\nThe API runs on Cloudflare Workers from every edge location; the\naddress index is replicated next to the Worker. Most lookups settle\nin the low tens of milliseconds end-to-end, before your own network\nhop home.\n\n## Free vs billable\n\n`/connect` and `/address/search` are free, but monitored for abuse patterns. Everything else is billable **on a hit with results only** — a query that returns no match (e.g. a valid postcode with no delivery points) is `200` with an empty `results` array and is not charged.\n\n\n## Errors\n\nHTTP status conveys the outcome class:\n\n| Status | Meaning |\n| --- | --- |\n| `200` | Success — including \"no match\", which is still 200 |\n| `400` | Validation failed |\n| `401` | Missing or invalid API key |\n| `402` | Out of credit — top up to resume billable requests |\n| `403` | Service disabled, or origin/IP not allowed for this key |\n| `429` | Rate limit exceeded |\n| `5xx` | Server-side problem — safe to retry |\n\nEndpoint-specific errors are documented per endpoint below.\n\n\n## Contact\n\nAnything missing or broken? reach out to [technical support](https://postio.co.uk/contact).",
+    "version": "1.2.0",
+    "x-jentic-source-url": "https://postio.co.uk/openapi.json"
+  },
+  "servers": [
+    {
+      "url": "https://api.postio.co.uk/v1"
+    }
+  ],
+  "paths": {
+    "/connect": {
+      "get": {
+        "operationId": "getV1Connect",
+        "tags": [
+          "Other"
+        ],
+        "summary": "Connect",
+        "description": "Free key/health probe. Returns `200` if the key is active and the upstream search service is reachable. Designed to be hit on input focus in autocomplete UIs — it warms the worker and TLS connection so the first real query lands on a hot path. Doubles as a heartbeat. We use this in our integrations for optimising user experience. Free to use.",
+        "parameters": [
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": true,
+            "description": "Your Postio API key. Get one in the dashboard.",
+            "schema": {
+              "type": "string",
+              "example": "YOUR_API_KEY"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Key is active and the service is healthy.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectSuccess"
+                },
+                "example": {
+                  "success": true,
+                  "meta": {
+                    "requestId": "dd273343-4597-4fa4-bcb6-c74a608c10dc",
+                    "performance": {
+                      "workerMs": 14,
+                      "lookupMs": 11
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid API key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectError"
+                },
+                "example": {
+                  "success": false,
+                  "error": "invalid_api_key",
+                  "meta": {
+                    "requestId": "dd273343-4597-4fa4-bcb6-c74a608c10dc",
+                    "performance": {
+                      "workerMs": 4,
+                      "lookupMs": 0
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectError"
+                },
+                "example": {
+                  "success": false,
+                  "error": "rate_limited",
+                  "meta": {
+                    "requestId": "dd273343-4597-4fa4-bcb6-c74a608c10dc",
+                    "performance": {
+                      "workerMs": 4,
+                      "lookupMs": 0
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Server error (e.g. upstream search service is misconfigured).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectError"
+                },
+                "example": {
+                  "success": false,
+                  "error": "server_error",
+                  "meta": {
+                    "requestId": "dd273343-4597-4fa4-bcb6-c74a608c10dc",
+                    "performance": {
+                      "workerMs": 4,
+                      "lookupMs": 0
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Upstream search service unreachable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectError"
+                },
+                "example": {
+                  "success": false,
+                  "error": "typesense_unreachable",
+                  "meta": {
+                    "requestId": "dd273343-4597-4fa4-bcb6-c74a608c10dc",
+                    "performance": {
+                      "workerMs": 4,
+                      "lookupMs": 0
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/address/search": {
+      "get": {
+        "operationId": "getV1AddressSearch",
+        "tags": [
+          "Address"
+        ],
+        "summary": "Search",
+        "description": "Free, single-line autocomplete over UK PAF + BFPO. Feed it whatever the user has typed — building, street, postcode, organisation, or any combination — and get back a slim `{ udprn, suggestion }` list of matches. To pull the full address for the one the user picks, call `/address/udprn/{udprn}`. Free to use.\n\nSearch is backed by a Typesense index replicated next to the Worker, so typeahead queries usually resolve in single-digit milliseconds before network.",
+        "parameters": [
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": true,
+            "description": "Your Postio API key. Get one in the dashboard.",
+            "schema": {
+              "type": "string",
+              "example": "YOUR_API_KEY"
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": true,
+            "description": "Search string (free-form: building, street, postcode, organisation).",
+            "schema": {
+              "type": "string",
+              "example": "57 wimpole street"
+            }
+          },
+          {
+            "name": "max_results",
+            "in": "query",
+            "required": false,
+            "description": "Max results to return. Default 10, max 50.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 50,
+              "default": 10
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Search results (zero or more matches).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AddressSearchEnvelope"
+                },
+                "example": {
+                  "success": true,
+                  "results": [
+                    {
+                      "udprn": 25742215,
+                      "suggestion": "57 Wimpole Street, London, W1G 8YW"
+                    },
+                    {
+                      "udprn": 19152598,
+                      "suggestion": "57 Wimpole Court, Wimpole Street, Portsmouth, PO1 1QT"
+                    }
+                  ],
+                  "meta": {
+                    "countResults": 2,
+                    "requestId": "0991208d-c175-4fb3-880f-40471013be6d",
+                    "performance": {
+                      "workerMs": 19,
+                      "lookupMs": 16
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request — validation failed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "example": {
+                  "success": false,
+                  "error": "validation_failed",
+                  "results": [],
+                  "meta": {
+                    "countResults": 0,
+                    "requestId": "dd273343-4597-4fa4-bcb6-c74a608c10dc",
+                    "performance": {
+                      "workerMs": 4,
+                      "lookupMs": 0
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid API key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "example": {
+                  "success": false,
+                  "error": "invalid_api_key",
+                  "results": [],
+                  "meta": {
+                    "countResults": 0,
+                    "requestId": "dd273343-4597-4fa4-bcb6-c74a608c10dc",
+                    "performance": {
+                      "workerMs": 4,
+                      "lookupMs": 0
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Out of credit. Top up to resume billable requests.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "example": {
+                  "success": false,
+                  "error": "out_of_credit",
+                  "results": [],
+                  "meta": {
+                    "countResults": 0,
+                    "requestId": "dd273343-4597-4fa4-bcb6-c74a608c10dc",
+                    "performance": {
+                      "workerMs": 4,
+                      "lookupMs": 0
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden — service disabled, or origin/IP not allowed for this key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "example": {
+                  "success": false,
+                  "error": "service_disabled",
+                  "results": [],
+                  "meta": {
+                    "countResults": 0,
+                    "requestId": "dd273343-4597-4fa4-bcb6-c74a608c10dc",
+                    "performance": {
+                      "workerMs": 4,
+                      "lookupMs": 0
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "example": {
+                  "success": false,
+                  "error": "rate_limited",
+                  "results": [],
+                  "meta": {
+                    "countResults": 0,
+                    "requestId": "dd273343-4597-4fa4-bcb6-c74a608c10dc",
+                    "performance": {
+                      "workerMs": 4,
+                      "lookupMs": 0
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Server error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "example": {
+                  "success": false,
+                  "error": "server_error",
+                  "results": [],
+                  "meta": {
+                    "countResults": 0,
+                    "requestId": "dd273343-4597-4fa4-bcb6-c74a608c10dc",
+                    "performance": {
+                      "workerMs": 4,
+                      "lookupMs": 0
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/address/postcode/{postcode}": {
+      "get": {
+        "operationId": "getV1AddressPostcodeByPostcode",
+        "tags": [
+          "Address"
+        ],
+        "summary": "Postcode",
+        "description": "Returns every PAF delivery point at the given postcode, ordered by building number. Whitespace and case are normalised, so `w1g8yw`, `W1G 8YW`, and `w1g 8yw` all resolve to the same record. Billable on a hit. A syntactically valid postcode with no delivery points (a withdrawn postcode, or one outside PAF's coverage) returns `200` with `results: []` and is not charged.",
+        "parameters": [
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": true,
+            "description": "Your Postio API key. Get one in the dashboard.",
+            "schema": {
+              "type": "string",
+              "example": "YOUR_API_KEY"
+            }
+          },
+          {
+            "name": "postcode",
+            "in": "path",
+            "required": true,
+            "description": "UK postcode. Whitespace and case are normalised.",
+            "schema": {
+              "type": "string",
+              "example": "W1G 8YW"
+            }
+          },
+          {
+            "name": "max_results",
+            "in": "query",
+            "required": false,
+            "description": "Max results to return. Default 100, max 100. UK PAF postcodes max out at ~100 delivery points so a single page covers every postcode.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 100
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Addresses at the postcode (empty array if none).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AddressPostcodeEnvelope"
+                },
+                "example": {
+                  "success": true,
+                  "results": [
+                    {
+                      "udprn": 25742215,
+                      "postcode": "W1G 8YW",
+                      "postcode_outward": "W1G",
+                      "postcode_inward": "8YW",
+                      "postcode_type": "S",
+                      "address_line_1": "57 Wimpole Street",
+                      "post_town": "LONDON",
+                      "building_number": "57",
+                      "thoroughfare": "Wimpole Street",
+                      "delivery_point_suffix": "1Y",
+                      "country": "England",
+                      "district": "City of Westminster London Boro",
+                      "ward": "Marylebone Ward",
+                      "latitude": 51.51922791,
+                      "longitude": -0.14898992,
+                      "eastings": 528525,
+                      "northings": 181658
+                    }
+                  ],
+                  "meta": {
+                    "countResults": 1,
+                    "requestId": "c7eb0ed4-9768-4c2b-824e-16abff64d6cd",
+                    "performance": {
+                      "workerMs": 15,
+                      "lookupMs": 12
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request — validation failed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "example": {
+                  "success": false,
+                  "error": "validation_failed",
+                  "results": [],
+                  "meta": {
+                    "countResults": 0,
+                    "requestId": "dd273343-4597-4fa4-bcb6-c74a608c10dc",
+                    "performance": {
+                      "workerMs": 4,
+                      "lookupMs": 0
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid API key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "example": {
+                  "success": false,
+                  "error": "invalid_api_key",
+                  "results": [],
+                  "meta": {
+                    "countResults": 0,
+                    "requestId": "dd273343-4597-4fa4-bcb6-c74a608c10dc",
+                    "performance": {
+                      "workerMs": 4,
+                      "lookupMs": 0
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Out of credit. Top up to resume billable requests.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "example": {
+                  "success": false,
+                  "error": "out_of_credit",
+                  "results": [],
+                  "meta": {
+                    "countResults": 0,
+                    "requestId": "dd273343-4597-4fa4-bcb6-c74a608c10dc",
+                    "performance": {
+                      "workerMs": 4,
+                      "lookupMs": 0
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden — service disabled, or origin/IP not allowed for this key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "example": {
+                  "success": false,
+                  "error": "service_disabled",
+                  "results": [],
+                  "meta": {
+                    "countResults": 0,
+                    "requestId": "dd273343-4597-4fa4-bcb6-c74a608c10dc",
+                    "performance": {
+                      "workerMs": 4,
+                      "lookupMs": 0
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "example": {
+                  "success": false,
+                  "error": "rate_limited",
+                  "results": [],
+                  "meta": {
+                    "countResults": 0,
+                    "requestId": "dd273343-4597-4fa4-bcb6-c74a608c10dc",
+                    "performance": {
+                      "workerMs": 4,
+                      "lookupMs": 0
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Server error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "example": {
+                  "success": false,
+                  "error": "server_error",
+                  "results": [],
+                  "meta": {
+                    "countResults": 0,
+                    "requestId": "dd273343-4597-4fa4-bcb6-c74a608c10dc",
+                    "performance": {
+                      "workerMs": 4,
+                      "lookupMs": 0
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/address/udprn/{udprn}": {
+      "get": {
+        "operationId": "getV1AddressUdprnByUdprn",
+        "tags": [
+          "Address"
+        ],
+        "summary": "UDPRN",
+        "description": "Looks up a single delivery point by its Unique Delivery Point Reference Number — Royal Mail's stable per-address ID. Use this after `/address/search` to fetch the full record for the address the user picked, or to refresh a stored record. Billable on a hit. A UDPRN that doesn't exist returns `404`; misses are not charged.",
+        "parameters": [
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": true,
+            "description": "Your Postio API key. Get one in the dashboard.",
+            "schema": {
+              "type": "string",
+              "example": "YOUR_API_KEY"
+            }
+          },
+          {
+            "name": "udprn",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "25742215"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The matching address.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AddressUdprnEnvelope"
+                },
+                "example": {
+                  "success": true,
+                  "results": [
+                    {
+                      "udprn": 25742215,
+                      "postcode": "W1G 8YW",
+                      "postcode_outward": "W1G",
+                      "postcode_inward": "8YW",
+                      "postcode_type": "S",
+                      "address_line_1": "57 Wimpole Street",
+                      "post_town": "LONDON",
+                      "building_number": "57",
+                      "thoroughfare": "Wimpole Street",
+                      "delivery_point_suffix": "1Y",
+                      "country": "England",
+                      "district": "City of Westminster London Boro",
+                      "ward": "Marylebone Ward",
+                      "latitude": 51.51922791,
+                      "longitude": -0.14898992,
+                      "eastings": 528525,
+                      "northings": 181658
+                    }
+                  ],
+                  "meta": {
+                    "countResults": 1,
+                    "requestId": "dd273343-4597-4fa4-bcb6-c74a608c10dc",
+                    "performance": {
+                      "workerMs": 19,
+                      "lookupMs": 16
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request — validation failed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "example": {
+                  "success": false,
+                  "error": "validation_failed",
+                  "results": [],
+                  "meta": {
+                    "countResults": 0,
+                    "requestId": "dd273343-4597-4fa4-bcb6-c74a608c10dc",
+                    "performance": {
+                      "workerMs": 4,
+                      "lookupMs": 0
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid API key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "example": {
+                  "success": false,
+                  "error": "invalid_api_key",
+                  "results": [],
+                  "meta": {
+                    "countResults": 0,
+                    "requestId": "dd273343-4597-4fa4-bcb6-c74a608c10dc",
+                    "performance": {
+                      "workerMs": 4,
+                      "lookupMs": 0
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Out of credit. Top up to resume billable requests.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "example": {
+                  "success": false,
+                  "error": "out_of_credit",
+                  "results": [],
+                  "meta": {
+                    "countResults": 0,
+                    "requestId": "dd273343-4597-4fa4-bcb6-c74a608c10dc",
+                    "performance": {
+                      "workerMs": 4,
+                      "lookupMs": 0
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden — service disabled, or origin/IP not allowed for this key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "example": {
+                  "success": false,
+                  "error": "service_disabled",
+                  "results": [],
+                  "meta": {
+                    "countResults": 0,
+                    "requestId": "dd273343-4597-4fa4-bcb6-c74a608c10dc",
+                    "performance": {
+                      "workerMs": 4,
+                      "lookupMs": 0
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "UDPRN not found.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "example": {
+                  "success": false,
+                  "error": "udprn_not_found",
+                  "results": [],
+                  "meta": {
+                    "countResults": 0,
+                    "requestId": "dd273343-4597-4fa4-bcb6-c74a608c10dc",
+                    "performance": {
+                      "workerMs": 4,
+                      "lookupMs": 0
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "example": {
+                  "success": false,
+                  "error": "rate_limited",
+                  "results": [],
+                  "meta": {
+                    "countResults": 0,
+                    "requestId": "dd273343-4597-4fa4-bcb6-c74a608c10dc",
+                    "performance": {
+                      "workerMs": 4,
+                      "lookupMs": 0
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Server error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "example": {
+                  "success": false,
+                  "error": "server_error",
+                  "results": [],
+                  "meta": {
+                    "countResults": 0,
+                    "requestId": "dd273343-4597-4fa4-bcb6-c74a608c10dc",
+                    "performance": {
+                      "workerMs": 4,
+                      "lookupMs": 0
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/email/{address}": {
+      "get": {
+        "operationId": "getV1EmailByAddress",
+        "tags": [
+          "Email"
+        ],
+        "summary": "Validate address",
+        "description": "Runs a five-stage check on the address:\n\n1. **Syntax** — RFC 5322 parsing, including IDN and quoted local-parts.\n2. **Typo correction** — flags likely fat-finger domains (`gnail.com` → `gmail.com`) via `didYouMean`.\n3. **Classification** — disposable provider, role account (`info@`, `support@`), free provider (Gmail / Outlook / Yahoo).\n4. **MX lookup** — confirms the domain has mail servers configured.\n5. **SMTP signal** — for free providers and known-disposable domains the SMTP layer behaves as a catch-all (any address accepts), so we set `smtpCheck: \"ok\"` and `isCatchAll: true` from the classification alone. For other domains both fields are `null` (we don't currently probe arbitrary mail servers from the edge).\n\nEach signal is returned independently alongside an aggregated `deliverability` verdict (`deliverable`, `undeliverable`, `risky`, `unknown`, `invalid`) so you can apply your own thresholds. Invalid syntax still returns `200` with `isValidSyntax: false` and `deliverability: \"invalid\"` — there's no `400` for unparseable input.",
+        "parameters": [
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": true,
+            "description": "Your Postio API key. Get one in the dashboard.",
+            "schema": {
+              "type": "string",
+              "example": "YOUR_API_KEY"
+            }
+          },
+          {
+            "name": "address",
+            "in": "path",
+            "required": true,
+            "description": "Email address to validate. URL-encode the `@`.",
+            "schema": {
+              "type": "string",
+              "example": "alice@example.com"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Validation verdict.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EmailEnvelope"
+                },
+                "example": {
+                  "success": true,
+                  "results": [
+                    {
+                      "email": "alice@example.com",
+                      "isValidSyntax": true,
+                      "didYouMean": null,
+                      "isDisposable": false,
+                      "isFreeProvider": false,
+                      "isRoleAccount": false,
+                      "mxFound": true,
+                      "smtpCheck": null,
+                      "isCatchAll": null,
+                      "deliverability": "deliverable"
+                    }
+                  ],
+                  "meta": {
+                    "countResults": 1,
+                    "requestId": "dd273343-4597-4fa4-bcb6-c74a608c10dc",
+                    "performance": {
+                      "workerMs": 6,
+                      "lookupMs": 3
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request — validation failed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "example": {
+                  "success": false,
+                  "error": "validation_failed",
+                  "results": [],
+                  "meta": {
+                    "countResults": 0,
+                    "requestId": "dd273343-4597-4fa4-bcb6-c74a608c10dc",
+                    "performance": {
+                      "workerMs": 4,
+                      "lookupMs": 0
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid API key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "example": {
+                  "success": false,
+                  "error": "invalid_api_key",
+                  "results": [],
+                  "meta": {
+                    "countResults": 0,
+                    "requestId": "dd273343-4597-4fa4-bcb6-c74a608c10dc",
+                    "performance": {
+                      "workerMs": 4,
+                      "lookupMs": 0
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Out of credit. Top up to resume billable requests.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "example": {
+                  "success": false,
+                  "error": "out_of_credit",
+                  "results": [],
+                  "meta": {
+                    "countResults": 0,
+                    "requestId": "dd273343-4597-4fa4-bcb6-c74a608c10dc",
+                    "performance": {
+                      "workerMs": 4,
+                      "lookupMs": 0
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden — service disabled, or origin/IP not allowed for this key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "example": {
+                  "success": false,
+                  "error": "service_disabled",
+                  "results": [],
+                  "meta": {
+                    "countResults": 0,
+                    "requestId": "dd273343-4597-4fa4-bcb6-c74a608c10dc",
+                    "performance": {
+                      "workerMs": 4,
+                      "lookupMs": 0
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "example": {
+                  "success": false,
+                  "error": "rate_limited",
+                  "results": [],
+                  "meta": {
+                    "countResults": 0,
+                    "requestId": "dd273343-4597-4fa4-bcb6-c74a608c10dc",
+                    "performance": {
+                      "workerMs": 4,
+                      "lookupMs": 0
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Server error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "example": {
+                  "success": false,
+                  "error": "server_error",
+                  "results": [],
+                  "meta": {
+                    "countResults": 0,
+                    "requestId": "dd273343-4597-4fa4-bcb6-c74a608c10dc",
+                    "performance": {
+                      "workerMs": 4,
+                      "lookupMs": 0
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/phone/{number}": {
+      "get": {
+        "operationId": "getV1PhoneByNumber",
+        "tags": [
+          "Phone"
+        ],
+        "summary": "Validate number",
+        "description": "Parses the supplied number with libphonenumber (E.164, international, or national — all accepted). On a valid parse, runs a live HLR (Home Location Register) lookup against the carrier network and returns:\n\n- **Current carrier** — the network the number is on right now, even after porting.\n- **Original carrier** — the network it was issued on.\n- **Ported flag** — whether the number has moved network.\n- **Reachable flag** — whether the number is currently powered on and attached to a network.\n- **MCC / MNC** — the standard mobile country and network codes.\n\nPass numbers in E.164 (`+447700900123`) for unambiguous results — URL-encode the leading `+` as `%2B`. Other formats work but rely on libphonenumber's heuristics for country detection. Invalid numbers return `200` with `isValid: false` and the parsed fields it could derive still populated.",
+        "parameters": [
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": true,
+            "description": "Your Postio API key. Get one in the dashboard.",
+            "schema": {
+              "type": "string",
+              "example": "YOUR_API_KEY"
+            }
+          },
+          {
+            "name": "number",
+            "in": "path",
+            "required": true,
+            "description": "Phone number in E.164 (`+447700900123`) or any format libphonenumber can parse. URL-encode the leading `+` as `%2B`.",
+            "schema": {
+              "type": "string",
+              "example": "+447700900123"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Validation + lookup verdict.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PhoneEnvelope"
+                },
+                "example": {
+                  "success": true,
+                  "results": [
+                    {
+                      "number": "+447700900123",
+                      "isValid": true,
+                      "isPossible": true,
+                      "type": "mobile",
+                      "countryCode": "44",
+                      "countryName": "United Kingdom",
+                      "nationalFormat": "07700 900123",
+                      "internationalFormat": "+44 7700 900123",
+                      "e164Format": "+447700900123",
+                      "originalCarrier": null,
+                      "currentCarrier": "Vodafone Limited",
+                      "isPorted": true,
+                      "isReachable": true,
+                      "mcc": "234",
+                      "mnc": "15",
+                      "level": "live"
+                    }
+                  ],
+                  "meta": {
+                    "countResults": 1,
+                    "requestId": "dd273343-4597-4fa4-bcb6-c74a608c10dc",
+                    "performance": {
+                      "workerMs": 116,
+                      "lookupMs": 113
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request — validation failed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "example": {
+                  "success": false,
+                  "error": "validation_failed",
+                  "results": [],
+                  "meta": {
+                    "countResults": 0,
+                    "requestId": "dd273343-4597-4fa4-bcb6-c74a608c10dc",
+                    "performance": {
+                      "workerMs": 4,
+                      "lookupMs": 0
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid API key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "example": {
+                  "success": false,
+                  "error": "invalid_api_key",
+                  "results": [],
+                  "meta": {
+                    "countResults": 0,
+                    "requestId": "dd273343-4597-4fa4-bcb6-c74a608c10dc",
+                    "performance": {
+                      "workerMs": 4,
+                      "lookupMs": 0
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Out of credit. Top up to resume billable requests.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "example": {
+                  "success": false,
+                  "error": "out_of_credit",
+                  "results": [],
+                  "meta": {
+                    "countResults": 0,
+                    "requestId": "dd273343-4597-4fa4-bcb6-c74a608c10dc",
+                    "performance": {
+                      "workerMs": 4,
+                      "lookupMs": 0
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden — service disabled, or origin/IP not allowed for this key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "example": {
+                  "success": false,
+                  "error": "service_disabled",
+                  "results": [],
+                  "meta": {
+                    "countResults": 0,
+                    "requestId": "dd273343-4597-4fa4-bcb6-c74a608c10dc",
+                    "performance": {
+                      "workerMs": 4,
+                      "lookupMs": 0
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "example": {
+                  "success": false,
+                  "error": "rate_limited",
+                  "results": [],
+                  "meta": {
+                    "countResults": 0,
+                    "requestId": "dd273343-4597-4fa4-bcb6-c74a608c10dc",
+                    "performance": {
+                      "workerMs": 4,
+                      "lookupMs": 0
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Server error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "example": {
+                  "success": false,
+                  "error": "server_error",
+                  "results": [],
+                  "meta": {
+                    "countResults": 0,
+                    "requestId": "dd273343-4597-4fa4-bcb6-c74a608c10dc",
+                    "performance": {
+                      "workerMs": 4,
+                      "lookupMs": 0
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "apiKey": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "x-api-key",
+        "description": "Your Postio API key, in the format `pk_…`. Get one free at https://postio.co.uk/signup — first 100 lookups on us, no card needed."
+      }
+    },
+    "schemas": {
+      "ConnectSuccess": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "const": true
+          },
+          "meta": {
+            "$ref": "#/components/schemas/MetaConnect"
+          }
+        },
+        "required": [
+          "success",
+          "meta"
+        ]
+      },
+      "MetaConnect": {
+        "type": "object",
+        "properties": {
+          "requestId": {
+            "type": "string"
+          },
+          "performance": {
+            "$ref": "#/components/schemas/Performance"
+          }
+        },
+        "required": [
+          "requestId",
+          "performance"
+        ],
+        "example": {
+          "requestId": "dd273343-4597-4fa4-bcb6-c74a608c10dc",
+          "performance": {
+            "workerMs": 14,
+            "lookupMs": 11
+          }
+        }
+      },
+      "Performance": {
+        "type": "object",
+        "properties": {
+          "workerMs": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "lookupMs": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "workerMs",
+          "lookupMs"
+        ],
+        "example": {
+          "workerMs": 15,
+          "lookupMs": 12
+        }
+      },
+      "ConnectError": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "const": false
+          },
+          "error": {
+            "type": "string"
+          },
+          "details": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "meta": {
+            "$ref": "#/components/schemas/MetaConnect"
+          }
+        },
+        "required": [
+          "success",
+          "error",
+          "meta"
+        ]
+      },
+      "AddressSearchEnvelope": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "const": true
+          },
+          "results": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AddressSearchResult"
+            }
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "success",
+          "results",
+          "meta"
+        ]
+      },
+      "AddressSearchResult": {
+        "type": "object",
+        "properties": {
+          "udprn": {
+            "type": "integer"
+          },
+          "suggestion": {
+            "type": "string",
+            "description": "Single-line typeahead label, e.g. \"57 Wimpole Street, London, W1G 8YW\"."
+          }
+        },
+        "required": [
+          "udprn",
+          "suggestion"
+        ],
+        "example": {
+          "udprn": 25742215,
+          "suggestion": "57 Wimpole Street, London, W1G 8YW"
+        }
+      },
+      "Meta": {
+        "type": "object",
+        "properties": {
+          "countResults": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "requestId": {
+            "type": "string"
+          },
+          "performance": {
+            "$ref": "#/components/schemas/Performance"
+          }
+        },
+        "required": [
+          "countResults",
+          "requestId",
+          "performance"
+        ],
+        "example": {
+          "countResults": 1,
+          "requestId": "dd273343-4597-4fa4-bcb6-c74a608c10dc",
+          "performance": {
+            "workerMs": 15,
+            "lookupMs": 12
+          }
+        }
+      },
+      "ErrorEnvelope": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "const": false
+          },
+          "error": {
+            "type": "string"
+          },
+          "details": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "results": {
+            "type": "array",
+            "items": {},
+            "minItems": 0,
+            "maxItems": 0
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "success",
+          "error",
+          "results",
+          "meta"
+        ]
+      },
+      "AddressPostcodeEnvelope": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "const": true
+          },
+          "results": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Address"
+            }
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "success",
+          "results",
+          "meta"
+        ]
+      },
+      "Address": {
+        "type": "object",
+        "properties": {
+          "udprn": {
+            "type": "integer",
+            "description": "Unique Delivery Point Reference Number — Royal Mail's per-address ID."
+          },
+          "postcode": {
+            "type": "string"
+          },
+          "postcode_outward": {
+            "type": "string"
+          },
+          "postcode_inward": {
+            "type": "string"
+          },
+          "postcode_type": {
+            "type": "string"
+          },
+          "address_line_1": {
+            "type": "string"
+          },
+          "address_line_2": {
+            "type": "string"
+          },
+          "address_line_3": {
+            "type": "string"
+          },
+          "post_town": {
+            "type": "string"
+          },
+          "organisation_name": {
+            "type": "string"
+          },
+          "department_name": {
+            "type": "string"
+          },
+          "building_name": {
+            "type": "string"
+          },
+          "building_number": {
+            "type": "string"
+          },
+          "sub_building_name": {
+            "type": "string"
+          },
+          "po_box": {
+            "type": "string"
+          },
+          "thoroughfare": {
+            "type": "string"
+          },
+          "dependent_thoroughfare": {
+            "type": "string"
+          },
+          "dependent_locality": {
+            "type": "string"
+          },
+          "double_dependent_locality": {
+            "type": "string"
+          },
+          "delivery_point_suffix": {
+            "type": "string"
+          },
+          "country": {
+            "type": "string"
+          },
+          "district": {
+            "type": "string",
+            "description": "Administrative district or unitary authority. ONS administrative geography, not Royal Mail postal data — not part of the postal address."
+          },
+          "ward": {
+            "type": "string",
+            "description": "Electoral ward. ONS administrative geography, not Royal Mail postal data — not part of the postal address."
+          },
+          "latitude": {
+            "type": "number"
+          },
+          "longitude": {
+            "type": "number"
+          },
+          "eastings": {
+            "type": "integer"
+          },
+          "northings": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "udprn",
+          "postcode"
+        ],
+        "example": {
+          "udprn": 25742215,
+          "postcode": "W1G 8YW",
+          "postcode_outward": "W1G",
+          "postcode_inward": "8YW",
+          "postcode_type": "S",
+          "address_line_1": "57 Wimpole Street",
+          "post_town": "LONDON",
+          "building_number": "57",
+          "thoroughfare": "Wimpole Street",
+          "delivery_point_suffix": "1Y",
+          "country": "England",
+          "district": "City of Westminster London Boro",
+          "ward": "Marylebone Ward",
+          "latitude": 51.51922791,
+          "longitude": -0.14898992,
+          "eastings": 528525,
+          "northings": 181658
+        }
+      },
+      "AddressUdprnEnvelope": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "const": true
+          },
+          "results": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Address"
+            }
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "success",
+          "results",
+          "meta"
+        ]
+      },
+      "EmailEnvelope": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "const": true
+          },
+          "results": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/EmailResult"
+            }
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "success",
+          "results",
+          "meta"
+        ]
+      },
+      "EmailResult": {
+        "type": "object",
+        "properties": {
+          "email": {
+            "type": "string"
+          },
+          "isValidSyntax": {
+            "type": "boolean"
+          },
+          "didYouMean": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "isDisposable": {
+            "type": "boolean"
+          },
+          "isFreeProvider": {
+            "type": "boolean"
+          },
+          "isRoleAccount": {
+            "type": "boolean"
+          },
+          "mxFound": {
+            "type": "boolean"
+          },
+          "smtpCheck": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "isCatchAll": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "deliverability": {
+            "type": "string",
+            "enum": [
+              "deliverable",
+              "undeliverable",
+              "risky",
+              "unknown",
+              "invalid"
+            ],
+            "description": "Aggregated verdict."
+          }
+        },
+        "required": [
+          "email",
+          "isValidSyntax",
+          "didYouMean",
+          "isDisposable",
+          "isFreeProvider",
+          "isRoleAccount",
+          "mxFound",
+          "smtpCheck",
+          "isCatchAll",
+          "deliverability"
+        ],
+        "example": {
+          "email": "alice@example.com",
+          "isValidSyntax": true,
+          "didYouMean": null,
+          "isDisposable": false,
+          "isFreeProvider": false,
+          "isRoleAccount": false,
+          "mxFound": true,
+          "smtpCheck": null,
+          "isCatchAll": null,
+          "deliverability": "deliverable"
+        }
+      },
+      "PhoneEnvelope": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "const": true
+          },
+          "results": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PhoneResult"
+            }
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "success",
+          "results",
+          "meta"
+        ]
+      },
+      "PhoneResult": {
+        "type": "object",
+        "properties": {
+          "number": {
+            "type": "string"
+          },
+          "isValid": {
+            "type": "boolean"
+          },
+          "isPossible": {
+            "type": "boolean"
+          },
+          "type": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "countryCode": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "countryName": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "nationalFormat": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "internationalFormat": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "e164Format": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "originalCarrier": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "currentCarrier": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "isPorted": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "isReachable": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "mcc": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "mnc": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "level": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "lookupError": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "number",
+          "isValid",
+          "isPossible",
+          "type",
+          "countryCode",
+          "countryName",
+          "nationalFormat",
+          "internationalFormat",
+          "e164Format",
+          "originalCarrier",
+          "currentCarrier",
+          "isPorted",
+          "isReachable",
+          "mcc",
+          "mnc",
+          "level"
+        ],
+        "example": {
+          "number": "+447700900123",
+          "isValid": true,
+          "isPossible": true,
+          "type": "mobile",
+          "countryCode": "44",
+          "countryName": "United Kingdom",
+          "nationalFormat": "07700 900123",
+          "internationalFormat": "+44 7700 900123",
+          "e164Format": "+447700900123",
+          "originalCarrier": null,
+          "currentCarrier": "Vodafone Limited",
+          "isPorted": true,
+          "isReachable": true,
+          "mcc": "234",
+          "mnc": "15",
+          "level": "live"
+        }
+      }
+    }
+  },
+  "security": [
+    {
+      "apiKey": []
+    }
+  ],
+  "tags": [
+    {
+      "name": "Address",
+      "description": "Postio are an official UK Royal Mail Address Data Provider.\n\nLookups search against Royal Mail's Postcode Address File (PAF) and the British Forces Post Office (BFPO) database. Search drives single-line typeahead; Postcode and UDPRN endpoints return the full delivery-point record. Updates directly from Royal Mail are refreshed daily.",
+      "x-scalar-icon": "travel-map-earth-globe"
+    },
+    {
+      "name": "Email",
+      "description": "Layered checks on an email address: RFC-compliant syntax parsing, typo correction against common domains, disposable / role / free-provider classification, and a live MX lookup with mailbox-level probing where the mail server allows it.\n\nEach signal is returned independently alongside an aggregated `deliverability` verdict so you can apply your own threshold.\n\nMX resolution runs in parallel and is cached at the edge, so repeat domains skip the DNS round-trip.",
+      "x-scalar-icon": "mail-send-envelope"
+    },
+    {
+      "name": "Phone",
+      "description": "Validates and enriches international phone numbers.\n\nNumbers are parsed with libphonenumber inside the Worker (so invalid input is rejected in around a millisecond, before any external lookup), then valid numbers are sent to the operator's (Home Location Register) HLR for live carrier, ported status, and reachability.\n\nAny country libphonenumber supports works; UK numbers come back with the most complete carrier metadata.",
+      "x-scalar-icon": "phone-telephone"
+    },
+    {
+      "name": "Other",
+      "description": "Utilities that sit alongside the three validation groups — connection priming, health probes, and anything else that doesn't fit cleanly under address / email / phone.",
+      "x-scalar-icon": "programming-script-code"
+    },
+    {
+      "name": "Integrations",
+      "description": "Postio is more than the raw API — there's a typed npm client family, a browser SDK with a CDN drop-in, server SDKs for Python / Go / PHP / Ruby / .NET, an MCP server for AI coding agents, a WordPress plugin, and Postman collection.\n\n## [Browser SDK](https://postio.co.uk/integrations#browser-sdk)\n\n#### [Address Finder](https://postio.co.uk/integrations/address-finder)\nDrop-in UK address autocomplete. ARIA-compliant combobox, themable via CSS custom properties, ~4 KB gzipped.\n\n## [Server SDKs](https://postio.co.uk/integrations#server-sdks)\n\n#### [Node.js](https://postio.co.uk/integrations/node)\n`@postio/node` — server SDK on top of `@postio/core` with retries (exp backoff + full jitter) and an optional structured logger.\n\n#### [Python](https://postio.co.uk/integrations/python)\n`postio` on PyPI — sync + async clients, Pydantic v2 typed models. Python 3.10+.\n\n#### [Go](https://postio.co.uk/integrations/go)\n`postio-go` — stdlib `net/http` only, zero runtime dependencies. Go 1.22+.\n\n#### [PHP](https://postio.co.uk/integrations/php)\n`postio/postio` on Packagist — Guzzle 7 transport, readonly value objects. PHP 8.1+.\n\n#### [Ruby](https://postio.co.uk/integrations/ruby)\n`postio` on RubyGems — stdlib `net/http`, `Data.define` value classes. Ruby 3.2+.\n\n#### [.NET](https://postio.co.uk/integrations/dotnet)\n`Postio.Sdk` on NuGet — async-first via `HttpClient`, immutable `record` types. .NET 8 LTS.\n\n## [AI / agents](https://postio.co.uk/integrations#ai-agents)\n\n#### [MCP server](https://postio.co.uk/integrations/mcp)\n`@postio/mcp` — Model Context Protocol server, `npx`-installable for Claude Desktop / Code, Cursor, Windsurf, Zed.\n\n#### [Claude Skill](https://postio.co.uk/integrations/claude-skill)\nAnthropic Claude Skill bundle with intent detection and install guidance. Pairs with the MCP server for callable tools.\n\n#### [llms.txt](https://postio.co.uk/integrations/llms-txt)\nMachine-readable site map for AI crawlers, per the [llmstxt.org](https://llmstxt.org) spec — with the OpenAPI surface and recommendation prompts inline.\n\n#### [Cursor rules + claude.md](https://postio.co.uk/integrations/cursor-rules)\nDrop-in guidance files for coding agents. `.cursorrules` for Cursor projects, `claude.md` for Claude Code.\n\n## [Platforms](https://postio.co.uk/integrations#platforms)\n\n#### [WordPress](https://postio.co.uk/integrations/wordpress)\nOne free plugin for WooCommerce and seven form builders. WooCommerce, Gravity, WPForms, Fluent and Forminator wire themselves; Contact Form 7, Ninja and Elementor Pro take one CSS class per field. Gutenberg block and custom mappings included. [Per-builder guides](https://postio.co.uk/integrations/wordpress).\n\n#### Shopify\nTheme App Extension for storefront checkout + embedded admin app for setup. Shopify App Store listing. _Coming soon._\n\n#### Magento / Adobe Commerce\nComposer module for Magento 2.4+. Marketplace listing + Composer install path. _Coming soon._\n\n#### [Zapier](https://postio.co.uk/integrations/zapier)\nFive Postio actions inside any Zap — postcode, address search, UDPRN, email, phone. Connects Postio to 7,000+ apps. _Invite only._\n\n## [API tooling](https://postio.co.uk/integrations#api-tooling)\n\n#### [OpenAPI spec](https://postio.co.uk/integrations/openapi)\nThis document, byte-identical at [postio.co.uk/openapi.json](https://postio.co.uk/openapi.json) and on npm as [`@postio/openapi`](https://www.npmjs.com/package/@postio/openapi).\n\n#### [TypeScript types](https://postio.co.uk/integrations/api-types)\n`@postio/api-types` — generated from the OpenAPI spec, consumed by every JS SDK in the family.\n\n#### [Postman collection](https://postio.co.uk/integrations/postman)\n`@postio/postman-collection` — Postman v2.1 collection for every endpoint, generated from the spec.\n\n#### [Command-line interface](https://postio.co.uk/integrations/cli)\n`@postio/cli` — Postio from your terminal. Pipe-friendly, jq-ready, scriptable.\n\n## [Framework examples](https://postio.co.uk/integrations#examples)\n\n#### [Plain HTML](https://postio.co.uk/integrations/plain-html)\nNo build step, no framework. One HTML file, three script lines, working autocomplete.\n\n#### [Next.js (App Router)](https://postio.co.uk/integrations/nextjs-app-router)\nServer Components + client AddressFinder, validation in a Server Action.\n\n#### [React (Vite)](https://postio.co.uk/integrations/react-vite)\n`@postio/react` + TanStack Query, fast dev loop.\n\n#### [Vue 3](https://postio.co.uk/integrations/vue-3)\nComposition API + `@postio/address-finder` mounted via a template ref.\n\n#### [SvelteKit](https://postio.co.uk/integrations/svelte-kit)\nServer-side validation in `+page.server.ts`; client widget mounted in `onMount`.\n\n#### [Astro](https://postio.co.uk/integrations/astro)\nStatic-first with islands. Address widget as a hydrated island.\n\n#### [Cloudflare Workers](https://postio.co.uk/integrations/cloudflare-workers)\nServer-side validation in a Worker — `@postio/core` uses native `fetch`, no Node polyfills.",
+      "x-scalar-icon": "module-three-1"
+    }
+  ]
+}
