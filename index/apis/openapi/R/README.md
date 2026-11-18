@@ -1,6 +1,6 @@
 # APIs — R
 
-Browsing 294 APIs starting with **R**.
+Browsing 293 APIs starting with **R**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · **R** · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -152,7 +152,6 @@ Browsing 294 APIs starting with **R**.
 | [repsly.com](../../../../apis/openapi/repsly.com) | [main](../../../../apis/openapi/repsly.com/main) |
 | [repuso.com](../../../../apis/openapi/repuso.com) | [public-api](../../../../apis/openapi/repuso.com/public-api) |
 | [reqbeat.com](../../../../apis/openapi/reqbeat.com) | [main](../../../../apis/openapi/reqbeat.com/main) |
-| [reqres.in](../../../../apis/openapi/reqres.in) | [decom](../../../../apis/openapi/reqres.in/decom) · [dems](../../../../apis/openapi/reqres.in/dems) · [wewewe](../../../../apis/openapi/reqres.in/wewewe) |
 | [rescuetime.com](../../../../apis/openapi/rescuetime.com) | [rescuetime](../../../../apis/openapi/rescuetime.com/rescuetime) · [rescuetime-api](../../../../apis/openapi/rescuetime.com/rescuetime-api) |
 | [resemble.ai](../../../../apis/openapi/resemble.ai) | [main](../../../../apis/openapi/resemble.ai/main) |
 | [resend.com](../../../../apis/openapi/resend.com) | [main](../../../../apis/openapi/resend.com/main) |
