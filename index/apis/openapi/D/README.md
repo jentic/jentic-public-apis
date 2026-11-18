@@ -237,7 +237,7 @@ Browsing 236 APIs starting with **D**.
 | [dweet.io](../../../../apis/openapi/dweet.io) | [dweet.io](../../../../apis/openapi/dweet.io/dweet.io) |
 | [dydx.exchange](../../../../apis/openapi/dydx.exchange) | [main](../../../../apis/openapi/dydx.exchange/main) |
 | [dynamicmockups.com](../../../../apis/openapi/dynamicmockups.com) | [main](../../../../apis/openapi/dynamicmockups.com/main) |
-| [dynamics.com](../../../../apis/openapi/dynamics.com) | [bcgw-export](../../../../apis/openapi/dynamics.com/bcgw-export) · [dynamics-365-business-central](../../../../apis/openapi/dynamics.com/dynamics-365-business-central) · [pac](../../../../apis/openapi/dynamics.com/pac) |
+| [dynamics.com](../../../../apis/openapi/dynamics.com) | [bcgw-export](../../../../apis/openapi/dynamics.com/bcgw-export) · [dynamics-365-business-central](../../../../apis/openapi/dynamics.com/dynamics-365-business-central) |
 | [dynapictures.com](../../../../apis/openapi/dynapictures.com) | [main](../../../../apis/openapi/dynapictures.com/main) |
 | [dynosend.com](../../../../apis/openapi/dynosend.com) | [dynosend-api](../../../../apis/openapi/dynosend.com/dynosend-api) |
 | [dyntube.com](../../../../apis/openapi/dyntube.com) | [main](../../../../apis/openapi/dyntube.com/main) |

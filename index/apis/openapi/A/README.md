@@ -1,6 +1,6 @@
 # APIs — A
 
-Browsing 521 APIs starting with **A**.
+Browsing 520 APIs starting with **A**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · **A** · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -459,7 +459,6 @@ Browsing 521 APIs starting with **A**.
 | [athenahealth.com](../../../../apis/openapi/athenahealth.com) | [main](../../../../apis/openapi/athenahealth.com/main) |
 | [atlasfetch.xyz](../../../../apis/openapi/atlasfetch.xyz) | [main](../../../../apis/openapi/atlasfetch.xyz/main) |
 | [atlassian.com](../../../../apis/openapi/atlassian.com) | [jira](../../../../apis/openapi/atlassian.com/jira) |
-| [atlassian.net](../../../../apis/openapi/atlassian.net) | [main](../../../../apis/openapi/atlassian.net/main) |
 | [atlasyield.club](../../../../apis/openapi/atlasyield.club) | [main](../../../../apis/openapi/atlasyield.club/main) |
 | [att.com](../../../../apis/openapi/att.com) | [main](../../../../apis/openapi/att.com/main) |
 | [attentivemobile.com](../../../../apis/openapi/attentivemobile.com) | [main](../../../../apis/openapi/attentivemobile.com/main) |
