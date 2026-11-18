@@ -1,6 +1,6 @@
 # APIs — B
 
-Browsing 278 APIs starting with **B**.
+Browsing 279 APIs starting with **B**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · **B** · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -236,6 +236,7 @@ Browsing 278 APIs starting with **B**.
 | [browserbase.com](../../../../apis/openapi/browserbase.com) | [main](../../../../apis/openapi/browserbase.com/main) |
 | [browsercat.com](../../../../apis/openapi/browsercat.com) | [main](../../../../apis/openapi/browsercat.com/main) |
 | [browserless.io](../../../../apis/openapi/browserless.io) | [main](../../../../apis/openapi/browserless.io/main) |
+| [browsersolver.com](../../../../apis/openapi/browsersolver.com) | [main](../../../../apis/openapi/browsersolver.com/main) |
 | [browserstack.com](../../../../apis/openapi/browserstack.com) | [main](../../../../apis/openapi/browserstack.com/main) |
 | [browshot.com](../../../../apis/openapi/browshot.com) | [main](../../../../apis/openapi/browshot.com/main) |
 | [bruzu.com](../../../../apis/openapi/bruzu.com) | [main](../../../../apis/openapi/bruzu.com/main) |
