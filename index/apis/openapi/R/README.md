@@ -187,7 +187,7 @@ Browsing 293 APIs starting with **R**.
 | [reveldigital.com](../../../../apis/openapi/reveldigital.com) | [main](../../../../apis/openapi/reveldigital.com/main) |
 | [revenium.io](../../../../apis/openapi/revenium.io) | [main](../../../../apis/openapi/revenium.io/main) |
 | [revenuecat.com](../../../../apis/openapi/revenuecat.com) | [main](../../../../apis/openapi/revenuecat.com/main) |
-| [reverb.com](../../../../apis/openapi/reverb.com) | [main](../../../../apis/openapi/reverb.com/main) · [reverb](../../../../apis/openapi/reverb.com/reverb) · [reverb-api](../../../../apis/openapi/reverb.com/reverb-api) |
+| [reverb.com](../../../../apis/openapi/reverb.com) | [reverb-api](../../../../apis/openapi/reverb.com/reverb-api) |
 | [reversecontact.com](../../../../apis/openapi/reversecontact.com) | [main](../../../../apis/openapi/reversecontact.com/main) |
 | [reveula.com](../../../../apis/openapi/reveula.com) | [main](../../../../apis/openapi/reveula.com/main) |
 | [revi.io](../../../../apis/openapi/revi.io) | [main](../../../../apis/openapi/revi.io/main) |
