@@ -1,6 +1,6 @@
 # APIs — S
 
-Browsing 802 APIs starting with **S**.
+Browsing 801 APIs starting with **S**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · **S** · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · [Y](../Y) · [Z](../Z) · [~rest](../~rest)
 
@@ -531,7 +531,6 @@ Browsing 802 APIs starting with **S**.
 | [sumoquote.com](../../../../apis/openapi/sumoquote.com) | [main](../../../../apis/openapi/sumoquote.com/main) |
 | [sumsub.com](../../../../apis/openapi/sumsub.com) | [sumsub](../../../../apis/openapi/sumsub.com/sumsub) |
 | [sumup.com](../../../../apis/openapi/sumup.com) | [main](../../../../apis/openapi/sumup.com/main) |
-| [supabase.co](../../../../apis/openapi/supabase.co) | [main](../../../../apis/openapi/supabase.co/main) |
 | [supabase.com](../../../../apis/openapi/supabase.com) | [main](../../../../apis/openapi/supabase.com/main) |
 | [supabugs.io](../../../../apis/openapi/supabugs.io) | [main](../../../../apis/openapi/supabugs.io/main) |
 | [supadata.ai](../../../../apis/openapi/supadata.ai) | [main](../../../../apis/openapi/supadata.ai/main) |
