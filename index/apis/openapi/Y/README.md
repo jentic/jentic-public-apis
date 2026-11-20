@@ -1,6 +1,6 @@
 # APIs — Y
 
-Browsing 24 APIs starting with **Y**.
+Browsing 25 APIs starting with **Y**.
 
 [0](../0) · [1](../1) · [2](../2) · [3](../3) · [4](../4) · [5](../5) · [6](../6) · [7](../7) · [8](../8) · [9](../9) · [A](../A) · [B](../B) · [C](../C) · [D](../D) · [E](../E) · [F](../F) · [G](../G) · [H](../H) · [I](../I) · [J](../J) · [K](../K) · [L](../L) · [M](../M) · [N](../N) · [O](../O) · [P](../P) · [Q](../Q) · [R](../R) · [S](../S) · [T](../T) · [U](../U) · [V](../V) · [W](../W) · [X](../X) · **Y** · [Z](../Z) · [~rest](../~rest)
 
@@ -29,5 +29,6 @@ Browsing 24 APIs starting with **Y**.
 | [yourang.ai](../../../../apis/openapi/yourang.ai) | [main](../../../../apis/openapi/yourang.ai/main) |
 | [youratlas.com](../../../../apis/openapi/youratlas.com) | [main](../../../../apis/openapi/youratlas.com/main) |
 | [yoursite.com](../../../../apis/openapi/yoursite.com) | [main](../../../../apis/openapi/yoursite.com/main) |
+| [youtubetranscriptapi.com](../../../../apis/openapi/youtubetranscriptapi.com) | [main](../../../../apis/openapi/youtubetranscriptapi.com/main) |
 | [yummyyummy.site](../../../../apis/openapi/yummyyummy.site) | [main](../../../../apis/openapi/yummyyummy.site/main) |
 
